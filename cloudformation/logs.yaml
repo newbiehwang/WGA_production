@@ -62,7 +62,7 @@ Resources:
       LayerName: !Sub 'athena-utility-layer-${Environment}'
       Description: Common Python dependencies
       Content:
-        S3Bucket: !Sub 'wga-deployment-${Environment}'
+        S3Bucket: !Sub 'wga-deployment-${AWS::AccountId}-${Environment}'
         S3Key: !Sub 'layers/common-layer-${Environment}.zip'
       CompatibleRuntimes:
         - python3.12
@@ -84,7 +84,7 @@ Resources:
           S3_QUERY_OUTPUT: !Sub "s3://${AthenaOutputBucketName}/results/"
           ENV: !Ref Environment
       Code:
-        S3Bucket: !Sub 'wga-deployment-${Environment}'
+        S3Bucket: !Sub 'wga-deployment-${AWS::AccountId}-${Environment}'
         S3Key: !Sub 'db/athena-utility-lambda-${Environment}.zip'
 
   ExecuteQueryApiResource:

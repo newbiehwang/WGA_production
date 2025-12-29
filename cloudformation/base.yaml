@@ -99,7 +99,7 @@ Resources:
     Condition: ShouldCreateBucket
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub 'wga-deployment-${Environment}'
+      BucketName: !Sub 'wga-deployment-${AWS::AccountId}-${Environment}'
       VersioningConfiguration:
         Status: Enabled
       BucketEncryption:
@@ -115,7 +115,7 @@ Resources:
     Condition: ShouldCreateAthenaOutputBucket
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub 'wga-athenaoutputbucket-${Environment}'
+      BucketName: !Sub 'wga-athenaoutputbucket-${AWS::AccountId}-${Environment}'
       VersioningConfiguration:
         !If
         - ShouldCreateAthenaOutputBucket
@@ -150,7 +150,7 @@ Resources:
     Condition: ShouldCreateOutputBucket
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub 'wga-outputbucket-${Environment}'
+      BucketName: !Sub 'wga-outputbucket-${AWS::AccountId}-${Environment}'
       VersioningConfiguration:
         !If
           - ShouldCreateOutputBucket
@@ -185,7 +185,7 @@ Resources:
     Condition: ShouldCreateGuardDutyExportBucket
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub 'wga-guarddutyexportbucket-${Environment}'
+      BucketName: !Sub 'wga-guarddutyexportbucket-${AWS::AccountId}-${Environment}'
       VersioningConfiguration:
         !If
         - ShouldCreateGuardDutyExportBucket
@@ -220,7 +220,7 @@ Resources:
     Condition: ShouldCreateDockerBuildBucket
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub 'wga-dockerbuildbucket-${Environment}'
+      BucketName: !Sub 'wga-dockerbuildbucket-${AWS::AccountId}-${Environment}'
       VersioningConfiguration:
         !If
         - ShouldCreateDockerBuildBucket
@@ -255,7 +255,7 @@ Resources:
     Condition: ShouldCreateFrontendBucket
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub 'wga-frontend-${Environment}'
+      BucketName: !Sub 'wga-frontend-${AWS::AccountId}-${Environment}'
       VersioningConfiguration:
         !If
         - ShouldCreateFrontendBucket
@@ -290,7 +290,7 @@ Resources:
     Condition: ShouldCreateDiagramBucket
     DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub 'wga-diagrambucket-${Environment}'
+      BucketName: !Sub 'wga-diagrambucket-${AWS::AccountId}-${Environment}'
       VersioningConfiguration:
         !If
         - ShouldCreateDiagramBucket
@@ -582,7 +582,7 @@ Resources:
     Properties:
       Name: !Sub '/wga/${Environment}/DeploymentBucketName'
       Type: String
-      Value: !If [ShouldCreateBucket, !Ref DeploymentBucket, !Sub 'wga-deployment-${Environment}']
+      Value: !If [ShouldCreateBucket, !Ref DeploymentBucket, !Sub 'wga-deployment-${AWS::AccountId}-${Environment}']
       Description: Name of the S3 bucket for deployment packages
 
   OutputBucketParameter:
@@ -591,7 +591,7 @@ Resources:
     Properties:
       Name: !Sub '/wga/${Environment}/OutputBucketName'
       Type: String
-      Value: !If [ShouldCreateOutputBucket, !Ref OutputBucket, !Sub 'wga-outputbucket-${Environment}']
+      Value: !If [ShouldCreateOutputBucket, !Ref OutputBucket, !Sub 'wga-outputbucket-${AWS::AccountId}-${Environment}']
       Description: Name of the S3 bucket for output files
 
   AthenaOutputBucketParameter:
@@ -600,7 +600,7 @@ Resources:
     Properties:
       Name: !Sub '/wga/${Environment}/AthenaOutputBucketName'
       Type: String
-      Value: !If [ShouldCreateAthenaOutputBucket, !Ref AthenaOutputBucket, !Sub 'wga-athenaoutputbucket-${Environment}']
+      Value: !If [ShouldCreateAthenaOutputBucket, !Ref AthenaOutputBucket, !Sub 'wga-athenaoutputbucket-${AWS::AccountId}-${Environment}']
       Description: S3 bucket for Athena query results
 
   GuardDutyExportBucketParameter:
@@ -609,7 +609,7 @@ Resources:
     Properties:
       Name: !Sub '/wga/${Environment}/GuardDutyExportBucketName'
       Type: String
-      Value: !If [ShouldCreateGuardDutyExportBucket, !Ref GuardDutyExportBucket, !Sub 'wga-guarddutyexportbucket-${Environment}']
+      Value: !If [ShouldCreateGuardDutyExportBucket, !Ref GuardDutyExportBucket, !Sub 'wga-guarddutyexportbucket-${AWS::AccountId}-${Environment}']
       Description: S3 bucket for GuardDuty Export
 
   DockerBuildBucketParameter:
@@ -618,7 +618,7 @@ Resources:
     Properties:
       Name: !Sub '/wga/${Environment}/DockerBuildBucketName'
       Type: String
-      Value: !If [ ShouldCreateDockerBuildBucket, !Ref DockerBuildBucket, !Sub 'wga-dockerbuildbucket-${Environment}' ]
+      Value: !If [ ShouldCreateDockerBuildBucket, !Ref DockerBuildBucket, !Sub 'wga-dockerbuildbucket-${AWS::AccountId}-${Environment}' ]
       Description: S3 bucket for Docker Build
 
   FrontendBucketParameter:
@@ -627,7 +627,7 @@ Resources:
     Properties:
       Name: !Sub '/wga/${Environment}/FrontendBucketName'
       Type: String
-      Value: !If [ ShouldCreateFrontendBucket, !Ref FrontendBucket, !Sub 'wga-frontend-${Environment}' ]
+      Value: !If [ ShouldCreateFrontendBucket, !Ref FrontendBucket, !Sub 'wga-frontend-${AWS::AccountId}-${Environment}' ]
       Description: S3 bucket for frontend hosting
 
   DiagramBucketParameter:
@@ -636,7 +636,7 @@ Resources:
     Properties:
       Name: !Sub '/wga/${Environment}/DiagramBucketName'
       Type: String
-      Value: !If [ ShouldCreateDiagramBucket, !Ref DiagramBucket, !Sub 'wga-diagrambucket-${Environment}' ]
+      Value: !If [ ShouldCreateDiagramBucket, !Ref DiagramBucket, !Sub 'wga-diagrambucket-${AWS::AccountId}-${Environment}' ]
       Description: S3 bucket for MCP diagram storage
 
   UserPoolIdParameter:
@@ -750,31 +750,31 @@ Resources:
 Outputs:
   DeploymentBucketName:
     Description: Name of the S3 bucket for deployment packages
-    Value: !If [ShouldCreateBucket, !Ref DeploymentBucket, !Sub 'wga-deployment-${Environment}']
+    Value: !If [ShouldCreateBucket, !Ref DeploymentBucket, !Sub 'wga-deployment-${AWS::AccountId}-${Environment}']
 
   OutputBucketName:
     Description: Name of the S3 bucket for output files
-    Value: !If [ShouldCreateOutputBucket, !Ref OutputBucket, !Sub 'wga-outputbucket-${Environment}']
+    Value: !If [ShouldCreateOutputBucket, !Ref OutputBucket, !Sub 'wga-outputbucket-${AWS::AccountId}-${Environment}']
 
   AthenaOutputBucketName:
     Description: Name of the S3 bucket for athena output files
-    Value: !If [ShouldCreateAthenaOutputBucket, !Ref AthenaOutputBucket, !Sub 'wga-athenaoutputbucket-${Environment}']
+    Value: !If [ShouldCreateAthenaOutputBucket, !Ref AthenaOutputBucket, !Sub 'wga-athenaoutputbucket-${AWS::AccountId}-${Environment}']
 
   GuardDutyExportBucketName:
     Description: Name of the S3 bucket for guardduty export files
-    Value: !If [ShouldCreateGuardDutyExportBucket, !Ref GuardDutyExportBucket, !Sub 'wga-guarddutyexportbucket-${Environment}']
+    Value: !If [ShouldCreateGuardDutyExportBucket, !Ref GuardDutyExportBucket, !Sub 'wga-guarddutyexportbucket-${AWS::AccountId}-${Environment}']
 
   DockerBuildBucketName:
     Description: Name of the S3 bucket for docker build files
-    Value: !If [ ShouldCreateDockerBuildBucket, !Ref DockerBuildBucket, !Sub 'wga-dockerbuildbucket-${Environment}' ]
+    Value: !If [ ShouldCreateDockerBuildBucket, !Ref DockerBuildBucket, !Sub 'wga-dockerbuildbucket-${AWS::AccountId}-${Environment}' ]
 
   FrontendBucketName:
     Description: Name of the S3 bucket for frontend hosting
-    Value: !If [ShouldCreateFrontendBucket, !Ref FrontendBucket, !Sub 'wga-frontend-${Environment}']
+    Value: !If [ShouldCreateFrontendBucket, !Ref FrontendBucket, !Sub 'wga-frontend-${AWS::AccountId}-${Environment}']
 
   DiagramBucketName:
     Description: Name of the S3 bucket for MCP diagram storage
-    Value: !If [ShouldCreateDiagramBucket, !Ref DiagramBucket, !Sub 'wga-diagrambucket-${Environment}']
+    Value: !If [ShouldCreateDiagramBucket, !Ref DiagramBucket, !Sub 'wga-diagrambucket-${AWS::AccountId}-${Environment}']
 
   UserPoolId:
     Description: ID of the Cognito User Pool

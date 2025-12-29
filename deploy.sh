@@ -24,13 +24,13 @@ echo "========================================"
 
 # 배포 버킷 이름
 CLOUDFORMATION_BUCKET="wga-cloudformation-$ACCOUNT_ID"
-DEPLOYMENT_BUCKET="wga-deployment-$ENV"
-FRONTEND_BUCKET="wga-frontend-$ENV"
-OUTPUT_BUCKET_NAME="wga-outputbucket-$ENV"
-ATHENA_OUTPUT_BUCKET_NAME="wga-athenaoutputbucket-$ENV"
-GUARDDUTY_EXPORT_BUCKET_NAME="wga-guarddutyexportbucket-$ENV"
-DOCKER_BUILD_BUCKET_NAME="wga-dockerbuildbucket-$ENV"
-DIAGRAM_BUCKET_NAME="wga-diagrambucket-$ENV"
+DEPLOYMENT_BUCKET="wga-deployment-$ACCOUNT_ID-$ENV"
+FRONTEND_BUCKET="wga-frontend-$ACCOUNT_ID-$ENV"
+OUTPUT_BUCKET_NAME="wga-outputbucket-$ACCOUNT_ID-$ENV"
+ATHENA_OUTPUT_BUCKET_NAME="wga-athenaoutputbucket-$ACCOUNT_ID-$ENV"
+GUARDDUTY_EXPORT_BUCKET_NAME="wga-guarddutyexportbucket-$ACCOUNT_ID-$ENV"
+DOCKER_BUILD_BUCKET_NAME="wga-dockerbuildbucket-$ACCOUNT_ID-$ENV"
+DIAGRAM_BUCKET_NAME="wga-diagrambucket-$ACCOUNT_ID-$ENV"
 
 # 스택 이름 설정
 BASE_STACK_NAME="wga-base-$ENV"
@@ -324,9 +324,22 @@ mkdir -p build/layers/python/lib/python3.12/site-packages
 cp -r layers/common/* build/layers/python/common/
 
 echo "Common 레이어 의존성 설치 중..."
-pip install -r layers/common/requirements.txt -t build/layers/python/lib/python3.12/site-packages/
 
-pip install --platform manylinux2014_x86_64 --only-binary=:all: \
+# pip 명령이 환경마다 다를 수 있으므로 동적으로 결정
+if command -v pip &> /dev/null; then
+  PIP_CMD="pip"
+elif command -v pip3 &> /dev/null; then
+  PIP_CMD="pip3"
+elif command -v python3 &> /dev/null; then
+  PIP_CMD="python3 -m pip"
+else
+  echo "❌ pip(또는 python3)가 설치되어 있지 않습니다. Python/pip 을 먼저 설치해 주세요."
+  exit 1
+fi
+
+$PIP_CMD install -r layers/common/requirements.txt -t build/layers/python/lib/python3.12/site-packages/
+
+$PIP_CMD install --platform manylinux2014_x86_64 --only-binary=:all: \
     --target build/layers/python/lib/python3.12/site-packages/ \
     --implementation cp --python-version 3.12 --abi cp312 \
     pydantic pydantic-core
@@ -625,12 +638,15 @@ if [ ! -d "$BUILD_DIR" ]; then
     exit 1
 fi
 
-echo "Amplify에 S3 업로드 중..."
-aws s3 sync dist s3://wga-frontend-$ENV --delete
+# Amplify 업로드 대상 버킷 경로 (계정 ID 포함)
+echo "Amplify에 S3 업로드 중... ($FRONTEND_BUCKET)"
+
+# dist 폴더를 프론트엔드 버킷 루트(또는 해당 prefix)와 동기화
+aws s3 sync dist s3://$FRONTEND_BUCKET --delete
   # Amplify에 S3 업로드 이후 수동 배포 트리거
   echo "Amplify 수동 배포 트리거 중..."
   TIMESTAMP=$(date +%s)
-  S3_DEPLOY_PATH="s3://wga-frontend-$ENV/amplify-upload-$TIMESTAMP/"
+  S3_DEPLOY_PATH="s3://$FRONTEND_BUCKET/amplify-upload-$TIMESTAMP/"
 
   # 업로드한 dist 디렉토리를 복사 (원본 경로를 분리된 위치로 저장)
   aws s3 cp --recursive dist "$S3_DEPLOY_PATH"

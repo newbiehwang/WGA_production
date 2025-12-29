@@ -62,7 +62,7 @@ Resources:
       LayerName: !Sub 'chat-history-layer-${Environment}'
       Description: Common Python dependencies
       Content:
-        S3Bucket: !Sub 'wga-deployment-${Environment}'
+        S3Bucket: !Sub 'wga-deployment-${AWS::AccountId}-${Environment}'
         S3Key: !Sub 'layers/common-layer-${Environment}.zip'
       CompatibleRuntimes:
         - python3.12
@@ -82,7 +82,7 @@ Resources:
         Variables:
           ENV: !Ref Environment
       Code:
-        S3Bucket: !Sub 'wga-deployment-${Environment}'
+        S3Bucket: !Sub 'wga-deployment-${AWS::AccountId}-${Environment}'
         S3Key: !Sub 'chat-history/chat-history-lambda-${Environment}.zip'
 
   # API Gateway Resources & Methods
