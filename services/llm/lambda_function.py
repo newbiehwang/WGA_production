@@ -1,6 +1,6 @@
 # llm/lambda_function.py
 import requests
-from llm_service import parse_body, handle_llm1_request, handle_llm2_request, handle_llm1_with_mcp, get_anthropic_models
+from llm_service import parse_body, handle_llm1_with_mcp, get_anthropic_models
 from common.config import get_config
 from common.utils import cors_response
 
