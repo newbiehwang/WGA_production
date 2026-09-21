@@ -3,16 +3,9 @@
 export const logEnvironmentVars = () => {
     const vars = {
         AWS_REGION: import.meta.env.AWS_REGION || '설정되지 않음',
-        AWS_ACCESS_KEY_ID: import.meta.env.AWS_ACCESS_KEY_ID ? '***설정됨***' : '설정되지 않음',
-        AWS_SECRET_ACCESS_KEY: import.meta.env.AWS_SECRET_ACCESS_KEY
-            ? '***설정됨***'
-            : '설정되지 않음',
         COGNITO_DOMAIN: import.meta.env.COGNITO_DOMAIN || '설정되지 않음',
         USER_POOL_ID: import.meta.env.USER_POOL_ID || '설정되지 않음',
         COGNITO_CLIENT_ID: maskString(import.meta.env.COGNITO_CLIENT_ID) || '설정되지 않음',
-        COGNITO_CLIENT_SECRET: import.meta.env.COGNITO_CLIENT_SECRET
-            ? '***설정됨***'
-            : '설정되지 않음',
         COGNITO_IDENTITY_POOL_ID: import.meta.env.COGNITO_IDENTITY_POOL_ID || '설정되지 않음',
         COGNITO_REDIRECT_URI: import.meta.env.COGNITO_REDIRECT_URI || '설정되지 않음',
         API_URL: import.meta.env.API_URL || '설정되지 않음',

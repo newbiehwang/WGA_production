@@ -32,9 +32,8 @@ export default defineConfig(({ mode }) => {
             'import.meta.env.COGNITO_REDIRECT_URI': JSON.stringify(env.COGNITO_REDIRECT_URI),
             'import.meta.env.COGNITO_DOMAIN': JSON.stringify(env.COGNITO_DOMAIN),
             'import.meta.env.API_URL': JSON.stringify(env.API_URL),
-            'import.meta.env.COGNITO_CLIENT_SECRET': JSON.stringify(env.COGNITO_CLIENT_SECRET),
-            'import.meta.env.AWS_ACCESS_KEY_ID': JSON.stringify(env.AWS_ACCESS_KEY_ID),
-            'import.meta.env.AWS_SECRET_ACCESS_KEY': JSON.stringify(env.AWS_SECRET_ACCESS_KEY),
+            // 비밀 값(AWS 키, Cognito client secret)은 브라우저 번들에 넣지 않는다.
+            // loadEnv(..., '')는 셸 환경 변수까지 읽으므로 배포자의 AWS 자격 증명이 포함될 수 있다.
             'import.meta.env.COGNITO_IDENTITY_POOL_ID': JSON.stringify(
                 env.COGNITO_IDENTITY_POOL_ID,
             ),

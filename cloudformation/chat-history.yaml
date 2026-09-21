@@ -18,6 +18,10 @@ Parameters:
     Type: String
     Description: The domain for frontend redirection
 
+  CognitoAuthorizerId:
+    Type: String
+    Description: API Gateway Cognito User Pool Authorizer ID
+
 Resources:
   ChatHistoryLambdaRole:
     Type: AWS::IAM::Role
@@ -108,7 +112,8 @@ Resources:
       RestApiId: !Ref ApiGatewayId
       ResourceId: !Ref SessionsResource
       HttpMethod: POST
-      AuthorizationType: NONE
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -121,7 +126,8 @@ Resources:
       RestApiId: !Ref ApiGatewayId
       ResourceId: !Ref SessionsResource
       HttpMethod: GET
-      AuthorizationType: NONE
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -147,7 +153,8 @@ Resources:
       RestApiId: !Ref ApiGatewayId
       ResourceId: !Ref SessionIdResource
       HttpMethod: GET
-      AuthorizationType: NONE
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -161,7 +168,8 @@ Resources:
       RestApiId: !Ref ApiGatewayId
       ResourceId: !Ref SessionIdResource
       HttpMethod: PUT
-      AuthorizationType: NONE
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -174,7 +182,8 @@ Resources:
       RestApiId: !Ref ApiGatewayId
       ResourceId: !Ref SessionIdResource
       HttpMethod: DELETE
-      AuthorizationType: NONE
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -187,7 +196,8 @@ Resources:
       RestApiId: !Ref ApiGatewayId
       ResourceId: !Ref SessionsResource
       HttpMethod: DELETE
-      AuthorizationType: NONE
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -221,7 +231,8 @@ Resources:
       RestApiId: !Ref ApiGatewayId
       ResourceId: !Ref MessagesResource
       HttpMethod: GET
-      AuthorizationType: NONE
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -234,7 +245,8 @@ Resources:
       RestApiId: !Ref ApiGatewayId
       ResourceId: !Ref MessagesResource
       HttpMethod: POST
-      AuthorizationType: NONE
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST

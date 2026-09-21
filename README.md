@@ -124,6 +124,7 @@ cd WGA_production
 
 # SSM 파라미터 설정 (필요한 경우)
 aws ssm put-parameter --name "/wga/${Environment}/SlackbotToken" --value "your-slack-token" --type "SecureString"
+aws ssm put-parameter --name "/wga/${Environment}/SlackSigningSecret" --value "your-slack-signing-secret" --type "SecureString"
 aws ssm put-parameter --name "/wga/${Environment}/ANTHROPIC_API_KEY" --value "your-anthropic-key" --type "SecureString"
 ```
 
@@ -148,7 +149,9 @@ aws ssm put-parameter --name "/wga/${Environment}/ANTHROPIC_API_KEY" --value "yo
 
 ### Slack 봇 설정
 1. Slack 앱 생성 및 봇 토큰 발급
-2. SSM Parameter Store에 토큰 저장
+2. SSM Parameter Store에 봇 토큰(`SlackbotToken`)과 Signing Secret(`SlackSigningSecret`) 저장
+   - Signing Secret은 Slack 앱의 Basic Information → App Credentials에서 확인합니다.
+   - Slack 요청은 이 값으로 서명을 검증하며, 설정되지 않으면 모든 Slack 요청을 거부합니다.
 3. Slack 앱에 다음 기능 추가:
    - Slash Commands: `/models`
    - Interactive Components

@@ -75,6 +75,16 @@ Resources:
                                 - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/SlackbotSessions-${Environment}"
                                 - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/slack_user_settings"
 
+                # /llm1을 공개 API(Cognito 인증) 대신 LLM Lambda 직접 호출로 요청
+                - PolicyName: SlackbotInvokeLlm
+                  PolicyDocument:
+                      Version: "2012-10-17"
+                      Statement:
+                          - Effect: Allow
+                            Action:
+                                - lambda:InvokeFunction
+                            Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:wga-llm-${Environment}"
+
     SlackbotLambdaLayer:
         Type: AWS::Lambda::LayerVersion
         Properties:
@@ -103,6 +113,7 @@ Resources:
             Environment:
                 Variables:
                     ENV: !Ref Environment
+                    LLM_FUNCTION_NAME: !Sub "wga-llm-${Environment}"
             Tags:
                 - Key: Environment
                   Value: !Ref Environment

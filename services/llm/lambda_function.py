@@ -29,7 +29,14 @@ def lambda_handler(event, context):
             return cors_response(200, response_data, origin)
 
         elif path == "/llm1" and http_method == "POST":
-            return handle_llm1_with_mcp(body, origin)
+            claims = (event.get("requestContext") or {}).get("authorizer", {}).get("claims") or {}
+            caller_id = claims.get("sub")
+            if caller_id:
+                # API Gateway(웹) 요청은 Slack 전용 필드를 사용할 수 없다 (임의 Slack 사용자에게 DM 전송 방지).
+                # Slack 봇은 API Gateway를 거치지 않고 Lambda를 직접 호출한다.
+                body.pop("user_id", None)
+                body.pop("previous_questions", None)
+            return handle_llm1_with_mcp(body, origin, caller_id)
 
         else:
             return cors_response(404, {"error": f"Route {http_method} {path} not found."}, origin)
