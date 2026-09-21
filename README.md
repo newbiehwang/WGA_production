@@ -13,6 +13,12 @@ WGA는 AWS 클라우드 운영 정보를 자연어로 질의응답할 수 있는
 - **비용 최적화**: AWS 비용 분석 및 최적화 제안
 - **보안 강화**: 보안 이벤트 모니터링 및 알림
 
+### 팀 구성과 담당 범위
+WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newbiehwang))은 다음 영역을 담당했습니다.
+- **인프라 / IaC**: `cloudformation/` 전체 스택 설계 및 작성
+- **배포 자동화**: `deploy.sh` 통합 배포 스크립트, CodeBuild 기반 MCP 컨테이너 이미지 빌드
+- **LLM·MCP 백엔드**: `services/llm`, `mcp/`, `layers/common`
+
 ## 아키텍처
 
 ### 전체 시스템 아키텍처
@@ -20,15 +26,39 @@ WGA는 AWS 클라우드 운영 정보를 자연어로 질의응답할 수 있는
 ![WGA 시스템 아키텍처](./images/architecture.png)
 
 ### 기술 스택
-- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS
-- **Backend**: AWS Lambda (Python 3.12), API Gateway
-- **AI/ML**: Claude Sonnet 4, AWS Bedrock, MCP (Model Context Protocol)
-- **Database**: DynamoDB
-- **Storage**: S3 (정적 파일, 로그 저장)
-- **Monitoring**: CloudWatch Log, CloudWatch Dashboard, Billing and Cost Management
-- **Authentication**: AWS Cognito
-- **Infrastructure**: CloudFormation, AWS CDK
-- **CI/CD**: CodeBuild, Amplify
+- **Frontend**: Vue 3, TypeScript, Pinia, Vue Router, Vite, Axios
+- **Backend**: AWS Lambda (Python 3.12, MCP 서버는 Lambda Container Image), API Gateway (REST)
+- **AI/ML**: Anthropic Claude (AWS Bedrock / Anthropic API), MCP (Model Context Protocol)
+- **Database**: DynamoDB, Athena
+- **Storage**: S3 (정적 파일, 로그, 다이어그램 이미지 저장)
+- **Monitoring 대상**: CloudWatch Logs, CloudWatch Dashboard, Cost Explorer
+- **Authentication**: AWS Cognito (User Pool, Identity Pool)
+- **Infrastructure**: CloudFormation (Nested Stack 포함)
+- **배포**: `deploy.sh` 배포 스크립트, CodeBuild(MCP 이미지 빌드), ECR, Amplify Hosting
+
+### CloudFormation 스택 구성
+| 스택 (템플릿) | 스택 이름 | 역할 |
+|---|---|---|
+| base (`base.yaml`) | `wga-base-{env}` | API Gateway RestApi, Cognito User/Identity Pool, DynamoDB 테이블 4개, S3 버킷 7개, SSM Parameter |
+| frontend (`frontend.yaml`) | `wga-frontend-{env}` | Amplify App/Branch, 프론트엔드 버킷 정책 |
+| mcp (`mcp.yaml`) | `wga-mcp-{env}` | MCP 이미지용 ECR 리포지토리, CodeBuild 프로젝트 |
+| main (`main.yaml`) | `wga-{env}` | 아래 4개 Nested Stack과 API Gateway 최종 Deployment |
+| └ llm (`llm.yaml`) | Nested | LLM Lambda, MCP Lambda(Container Image, Function URL), `/llm1`, `/llm2` 등 |
+| └ logs (`logs.yaml`) | Nested | Athena 유틸리티 Lambda, `/execute-query`, `/create-table` |
+| └ slackbot (`slackbot.yaml`) | Nested | Slack 봇 Lambda, `/login`, `/callback`, `/models`, `/req` 등 |
+| └ chat-history (`chat-history.yaml`) | Nested | 대화 기록 Lambda, `/sessions/*` |
+
+**의존 관계**: base가 API Gateway·Cognito·DynamoDB·S3를 만들고, 나머지 스택은 base의 RestApi ID와 루트 리소스 ID를 파라미터로 받아 리소스와 메서드를 추가합니다. llm 스택은 mcp 스택이 ECR에 올린 이미지를 사용합니다.
+
+**배포 순서** (`deploy.sh`):
+1. 템플릿을 S3에 업로드
+2. base 스택 배포
+3. frontend 스택 배포 → Amplify 도메인을 base 스택에 반영(콜백 URL 갱신)
+4. Lambda Layer·함수 코드 패키징 및 S3 업로드
+5. mcp 스택 배포 → CodeBuild로 MCP 이미지 빌드 후 ECR에 푸시
+6. main 스택 배포 (llm, logs, slackbot, chat-history + API Deployment)
+7. 프론트엔드 환경 변수 설정, 빌드, Amplify 배포
+8. MCP Function URL을 base 스택 SSM 파라미터에 반영
 
 ## 주요 기능
 
@@ -57,7 +87,7 @@ WGA는 AWS 클라우드 운영 정보를 자연어로 질의응답할 수 있는
 - **다국어 지원**: 영문 문서를 한국어로 자동 번역하여 제공
 
 ### 5. 다중 인터페이스 지원
-- **웹 인터페이스**: React 기반 반응형 웹 앱
+- **웹 인터페이스**: Vue 3 기반 웹 앱
 - **Slack 봇**: 슬랙 채널에서 직접 질의 가능
 
 ### 6. 대화 기록 관리
@@ -66,9 +96,9 @@ WGA는 AWS 클라우드 운영 정보를 자연어로 질의응답할 수 있는
 - **히스토리 검색**: 과거 질의 및 답변 검색
 
 ### 7. 간편한 배포
-- **원클릭 배포**: 단일 스크립트로 전체 인프라 배포
-- **CloudFormation 기반**: AWS 네이티브 IaC로 안정적인 인프라 관리
-- **자동화된 빌드**: CodeBuild를 통한 Docker 이미지 자동 빌드 및 배포
+- **단일 스크립트 배포**: `deploy.sh` 하나로 전체 인프라와 프론트엔드 배포
+- **CloudFormation 기반**: AWS 네이티브 IaC로 인프라 관리
+- **이미지 빌드 자동화**: CodeBuild로 MCP 서버 Docker 이미지 빌드 후 ECR 푸시
 - **환경별 분리**: dev/test/prod 환경 독립 배포 및 관리
 
 ## 프로젝트 구조
@@ -87,19 +117,18 @@ WGA_production/
 │   ├─stores
 │   ├─types
 │   ├─utils
-│     └─views
+│   └─views
 ├─images
 ├─layers
-│  └─common
+│ └─common
 ├─mcp
-│  └─lambda_mcp
-└─services
-│   ├─chat-history
-│   ├─db
-│   ├─llm
-│   └─slackbot
-│
-└── deploy.sh                
+│ └─lambda_mcp
+├─services
+│ ├─chat-history
+│ ├─db
+│ ├─llm
+│ └─slackbot
+└─deploy.sh
 ```
 
 ## 설치 및 배포
@@ -174,26 +203,26 @@ GuardDuty에서 감지된 보안 이벤트가 있나요?
 
 ## 핵심 구현 로직
 
-### React 기반 실시간 채팅 시스템
-React 18과 TypeScript를 활용하여 ChatGPT와 유사한 대화형 인터페이스를 구현했습니다. useState와 useEffect 훅을 통해 메시지 상태를 관리하고, 실시간으로 AI 응답을 스트리밍하는 것처럼 보이는 타이핑 애니메이션을 구현했습니다. 세션 기반 대화 히스토리를 지원하여 사용자가 이전 대화를 언제든 다시 확인할 수 있으며, 로컬 스토리지와 서버 동기화를 통해 데이터 일관성을 보장합니다. 마크다운 렌더링을 지원하여 코드 블록, 표, 링크 등을 올바르게 표시하고, 차트와 다이어그램은 이미지로 자동 렌더링됩니다.
+### Vue 3 기반 채팅 인터페이스
+Vue 3(Composition API)와 TypeScript로 대화형 채팅 인터페이스를 구현했습니다. 메시지와 세션 상태는 Pinia store(`chatbot`, `chatHistoryStore`)로 관리하고, AI 응답은 글자 단위로 출력하는 타이핑 애니메이션으로 표시합니다. 대화 기록은 Chat History API(`/sessions/*`)를 통해 DynamoDB에 저장되어 이전 대화를 다시 불러올 수 있습니다. 커스텀 디렉티브(`v-markdown`)로 마크다운을 렌더링하여 코드 블록, 표, 링크를 표시하고, 서버에서 생성한 차트·다이어그램은 S3 이미지로 표시합니다.
 
-### Cognito OAuth 2.0 통합 인증
-AWS Cognito User Pool과 Identity Pool을 활용한 완전한 인증 시스템을 구현했습니다. OAuth 2.0 Authorization Code Flow를 통해 안전한 로그인을 제공하고, JWT 토큰 기반의 세션 관리를 구현했습니다. 사용자 정보는 Context API를 통해 전역 상태로 관리되며, 토큰 만료 시 자동 갱신 로직을 포함합니다. 프론트엔드에서는 protected route를 구현하여 인증되지 않은 사용자의 접근을 차단하고, 로그인 상태에 따라 다른 UI를 조건부 렌더링합니다.
+### Cognito OAuth 2.0 인증
+AWS Cognito User Pool의 Hosted UI와 OAuth 2.0 Authorization Code Flow로 로그인을 처리합니다. 발급된 토큰과 사용자 정보는 Pinia `auth` store에서 관리하며, 만료 시 refresh token으로 갱신합니다. Vue Router의 `beforeEach` 가드에서 `meta.requiresAuth`가 설정된 라우트에 대해 인증 여부를 확인하고, 미인증 사용자는 로그인 페이지로 이동시킵니다.
 
 ### Lambda 기반 MCP 서버 및 클라이언트 구현
 기존 MCP 프로토콜의 HTTP+SSE(Server-Sent Events) 방식은 AWS Lambda의 제약사항과 호환되지 않아, Streamable HTTP 방식으로 재설계했습니다. Lambda의 서버리스 환경에서 지속적인 연결을 유지할 수 없는 특성을 고려하여, 요청-응답 기반의 HTTP 프로토콜로 MCP 스펙을 구현했습니다. 이를 위해 전용 MCP 서버와 클라이언트를 직접 설계하고 개발했으며, 기존에 존재하는 MCP 서버들을 우리의 Streamable HTTP 방식과 호환되도록 리팩토링했습니다. 추가로, analyze_log_groups_insights 등 필요한 MCP 도구를 직접 설계하고 구현하였고, 기존의 MCP 도구 중 fetch_cloudwatch_logs_for_service()의 치명적인 결함을 발견 후 수정하였으며, 원작자의 Github Repo에 해당 내용을 반영한 Pull Request를 생성했습니다.
 
 ### Lambda 기반 서버리스 백엔드 아키텍처
-전체 백엔드 시스템을 AWS Lambda 함수 기반으로 구현하여 서버리스 아키텍처의 장점을 극대화했습니다. 각 마이크로서비스를 독립적인 Lambda 함수로 분리하여 개발, 배포, 확장이 용이하도록 설계했습니다. LLM Service, Database Service, Chat History Service, Slackbot Service를 각각 별도의 Lambda 함수로 구현하고, API Gateway를 통해 통합된 RESTful API로 제공합니다. Lambda의 이벤트 기반 실행 모델을 활용하여 요청이 있을 때만 실행되므로 비용 효율성을 확보했으며, AWS의 관리형 서비스와의 네이티브 통합을 통해 운영 부담을 최소화했습니다. 특히 Lambda Layer를 활용하여 공통 라이브러리와 종속성을 효율적으로 관리하고, 콜드 스타트 최적화를 위해 함수별 메모리와 타임아웃을 세밀하게 조정했습니다.
+전체 백엔드 시스템을 AWS Lambda 함수 기반으로 구현하여 서버리스 아키텍처의 장점을 극대화했습니다. 각 마이크로서비스를 독립적인 Lambda 함수로 분리하여 개발, 배포, 확장이 용이하도록 설계했습니다. LLM Service, Database Service, Chat History Service, Slackbot Service를 각각 별도의 Lambda 함수로 구현하고, API Gateway를 통해 통합된 RESTful API로 제공합니다. Lambda의 이벤트 기반 실행 모델을 활용하여 요청이 있을 때만 실행되므로 비용 효율성을 확보했으며, AWS의 관리형 서비스와의 네이티브 통합을 통해 운영 부담을 최소화했습니다. Lambda Layer로 공통 라이브러리와 종속성을 관리하며, 함수별 메모리와 타임아웃은 역할에 따라 다르게 설정했습니다(예: MCP 서버 2048MB/180초, Slack 봇 256MB/15초).
 
 ### 세션 기반 컨텍스트 유지 시스템
-이전 대화 내용을 활용한 연속적인 질의응답을 위해 DynamoDB 기반의 세션 관리 시스템을 구현했습니다. 각 사용자의 대화 히스토리를 Messages 배열 형태로 저장하고, 새로운 질의 시 이전 컨텍스트와 함께 AI 모델에 전달하여 더 정확한 답변을 생성합니다. 메모리 효율성을 위해 세션당 최대 메시지 수를 제한하고, 오래된 세션은 TTL을 통해 자동 삭제되도록 구현했습니다. 특히 MCP 클라이언트에서 process_user_input_with_history 메서드를 통해 히스토리 기반 처리와 일반 처리를 구분하여 성능을 최적화했습니다.
+이전 대화 내용을 활용한 연속적인 질의응답을 위해 DynamoDB 기반의 세션 관리 시스템을 구현했습니다. 각 사용자의 대화 히스토리를 Messages 배열 형태로 저장하고, 새로운 질의 시 이전 대화와 함께 AI 모델에 전달합니다. MCP 세션 테이블(`wga-mcp-sessions-{env}`)은 `expires_at` TTL로 오래된 세션을 자동 삭제합니다. MCP 클라이언트의 `process_user_input_with_history` 메서드로 히스토리가 있는 요청과 단일 요청을 구분해 처리합니다.
 
 ### API Gateway 통합 및 라우팅 시스템
-모든 Lambda 함수들을 통합하는 단일 API Gateway를 구현하여 RESTful API 엔드포인트를 제공합니다. AWS_PROXY 통합 방식을 채택하여 Lambda 함수에서 HTTP 요청과 응답을 직접 처리할 수 있도록 했으며, 각 서비스별로 리소스를 분리하여 명확한 API 구조를 구성했습니다(/llm1, /llm2, /sessions, /execute-query, /create-table, /login, /callback, /models, /req 등). CORS 설정을 통해 프론트엔드와의 안전한 통신을 보장하고, OPTIONS 메서드를 지원하여 브라우저의 preflight 요청을 처리합니다. 환경별 스테이지(dev/test/prod) 배포를 통해 독립적인 API 엔드포인트를 관리하며, CloudFormation을 통한 자동화된 API 배포와 버전 관리를 구현했습니다. 특히 Slack 봇의 경우 서로 다른 인증 방식(OAuth, 슬래시 커맨드)에 대응하기 위해 라우팅별로 세밀한 권한 설정을 적용했습니다.
+모든 Lambda 함수들을 통합하는 단일 API Gateway를 구현하여 RESTful API 엔드포인트를 제공합니다. AWS_PROXY 통합 방식을 채택하여 Lambda 함수에서 HTTP 요청과 응답을 직접 처리할 수 있도록 했으며, 각 서비스별로 리소스를 분리하여 명확한 API 구조를 구성했습니다(/llm1, /llm2, /sessions, /execute-query, /create-table, /login, /callback, /models, /req 등). OPTIONS 메서드로 브라우저의 CORS preflight 요청을 처리합니다. 환경별 스테이지(dev/test/prod)로 독립적인 API 엔드포인트를 관리하며, API 리소스와 메서드는 CloudFormation으로 정의하고 main 스택의 Deployment로 한 번에 배포합니다. Slack 봇은 웹과 별도로 OAuth 로그인(`/login`, `/callback`)과 슬래시 커맨드(`/models`) 경로를 제공합니다.
 
-### CI/CD 파이프라인 구현
-전체 시스템의 배포와 관리를 자동화하기 위해 CloudFormation 기반의 IaC(Infrastructure as Code)와 CodeBuild를 활용한 CI/CD 파이프라인을 구현했습니다. `deploy.sh` 스크립트를 통해 원클릭 배포가 가능하며, 환경별(dev/test/prod) 독립적인 스택 관리를 지원합니다. MCP 서버의 경우 Docker 컨테이너화하여 ECR에 저장하고, Lambda Container Image로 배포하는 방식을 채택했습니다. CloudFormation 스택의 의존성 관리를 통해 안전한 배포 순서를 보장하며, 배포 실패 시 자동 롤백 기능을 제공합니다.
+### 배포 자동화 스크립트
+CloudFormation 기반 IaC와 `deploy.sh` 스크립트로 전체 시스템 배포를 자동화했습니다. 스크립트 하나로 템플릿 업로드, 스택 생성·업데이트, Lambda 패키징, MCP 이미지 빌드, 프론트엔드 빌드·배포까지 수행하며, 환경(dev/test/prod)별로 스택을 분리합니다. MCP 서버는 Docker 이미지로 만들어 CodeBuild로 빌드한 뒤 ECR에 저장하고, Lambda Container Image로 배포합니다. 스택 간 의존 관계에 맞춰 배포 순서를 스크립트에서 제어하며(위 [스택 구성](#cloudformation-스택-구성) 참고), 개별 스택 배포가 실패하면 CloudFormation 기본 롤백이 적용됩니다.
 
 ## 기여 가이드
 
@@ -216,7 +245,7 @@ cd services/llm && python lambda_function.py
 A: 현재 CloudWatch, CloudTrail, GuardDuty, Cost Explorer, EC2, Lambda 등을 지원하며, 지속적으로 확장 중입니다.
 
 ### Q: 비용은 얼마나 발생하나요?
-A: 사용량에 따라 다르지만, 일반적으로 월 $10-50 수준입니다.
+A: 서버리스 구성이라 고정 비용은 낮고, 대부분 LLM 호출(토큰) 사용량에 따라 달라집니다. 실측 비용은 측정 후 추가할 예정입니다.
 
 ### Q: 온프레미스에서도 사용할 수 있나요?
 A: 현재는 AWS 클라우드 전용입니다.
@@ -227,7 +256,3 @@ A: 네, Anthropic이 제공하는 다양한 모델을 지원하며, 설정에서
 ## 지원 및 문의
 
 - **GitHub Issues**: [프로젝트 이슈 페이지](https://github.com/WeGoAWS/WGA_production/issues)
-
-## 라이선스
-
-이 프로젝트는 MIT 라이선스 하에 배포됩니다. 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.
