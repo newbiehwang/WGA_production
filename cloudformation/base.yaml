@@ -106,6 +106,11 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -128,19 +133,12 @@ Resources:
             - ServerSideEncryptionByDefault:
                 SSEAlgorithm: AES256
         - !Ref "AWS::NoValue"
-      CorsConfiguration:
-        CorsRules:
-          - AllowedHeaders:
-              - '*'
-            AllowedMethods:
-              - GET
-              - PUT
-              - POST
-              - DELETE
-              - HEAD
-            AllowedOrigins:
-              - '*'
-            MaxAge: 3600
+      # 모든 접근은 IAM(Lambda Role, Amplify 서비스 주체)으로만 이뤄지므로 퍼블릭 접근과 CORS 규칙이 필요 없다
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -163,19 +161,12 @@ Resources:
               - ServerSideEncryptionByDefault:
                   SSEAlgorithm: AES256
           - !Ref "AWS::NoValue"
-      CorsConfiguration:
-        CorsRules:
-          - AllowedHeaders:
-              - '*'
-            AllowedMethods:
-              - GET
-              - PUT
-              - POST
-              - DELETE
-              - HEAD
-            AllowedOrigins:
-              - '*'
-            MaxAge: 3600
+      # 모든 접근은 IAM(Lambda Role, Amplify 서비스 주체)으로만 이뤄지므로 퍼블릭 접근과 CORS 규칙이 필요 없다
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -198,19 +189,12 @@ Resources:
             - ServerSideEncryptionByDefault:
                 SSEAlgorithm: AES256
         - !Ref "AWS::NoValue"
-      CorsConfiguration:
-        CorsRules:
-          - AllowedHeaders:
-              - '*'
-            AllowedMethods:
-              - GET
-              - PUT
-              - POST
-              - DELETE
-              - HEAD
-            AllowedOrigins:
-              - '*'
-            MaxAge: 3600
+      # 모든 접근은 IAM(Lambda Role, Amplify 서비스 주체)으로만 이뤄지므로 퍼블릭 접근과 CORS 규칙이 필요 없다
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -233,19 +217,12 @@ Resources:
             - ServerSideEncryptionByDefault:
                 SSEAlgorithm: AES256
         - !Ref "AWS::NoValue"
-      CorsConfiguration:
-        CorsRules:
-          - AllowedHeaders:
-              - '*'
-            AllowedMethods:
-              - GET
-              - PUT
-              - POST
-              - DELETE
-              - HEAD
-            AllowedOrigins:
-              - '*'
-            MaxAge: 3600
+      # 모든 접근은 IAM(Lambda Role, Amplify 서비스 주체)으로만 이뤄지므로 퍼블릭 접근과 CORS 규칙이 필요 없다
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -268,19 +245,12 @@ Resources:
             - ServerSideEncryptionByDefault:
                 SSEAlgorithm: AES256
         - !Ref "AWS::NoValue"
-      CorsConfiguration:
-        CorsRules:
-          - AllowedHeaders:
-              - '*'
-            AllowedMethods:
-              - GET
-              - PUT
-              - POST
-              - DELETE
-              - HEAD
-            AllowedOrigins:
-              - '*'
-            MaxAge: 3600
+      # 모든 접근은 IAM(Lambda Role, Amplify 서비스 주체)으로만 이뤄지므로 퍼블릭 접근과 CORS 규칙이 필요 없다
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -303,19 +273,12 @@ Resources:
             - ServerSideEncryptionByDefault:
                 SSEAlgorithm: AES256
         - !Ref "AWS::NoValue"
-      CorsConfiguration:
-        CorsRules:
-          - AllowedHeaders:
-              - '*'
-            AllowedMethods:
-              - GET
-              - PUT
-              - POST
-              - DELETE
-              - HEAD
-            AllowedOrigins:
-              - '*'
-            MaxAge: 3600
+      # 모든 접근은 IAM(Lambda Role, Amplify 서비스 주체)으로만 이뤄지므로 퍼블릭 접근과 CORS 규칙이 필요 없다
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -575,6 +538,15 @@ Resources:
       ProviderARNs:
         - !GetAtt UserPool.Arn
 
+  CognitoAuthorizerIdParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/CognitoAuthorizerId'
+      Type: String
+      Value: !Ref CognitoAuthorizer
+      Description: API Gateway Cognito User Pool Authorizer ID
+
   # SSM Parameters
   DeploymentBucketParameter:
     Type: AWS::SSM::Parameter
@@ -748,6 +720,10 @@ Resources:
       Description: 'Name of the DynamoDB table for mcp sessions'
 
 Outputs:
+
+  CognitoAuthorizerId:
+    Description: API Gateway Cognito User Pool Authorizer ID
+    Value: !Ref CognitoAuthorizer
   DeploymentBucketName:
     Description: Name of the S3 bucket for deployment packages
     Value: !If [ShouldCreateBucket, !Ref DeploymentBucket, !Sub 'wga-deployment-${AWS::AccountId}-${Environment}']

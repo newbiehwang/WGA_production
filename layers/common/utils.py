@@ -129,7 +129,24 @@ def create_success_response(data=None, message=None):
     
     return format_api_response(200, response_body)
 
+def get_allowed_origins():
+    """CORS 허용 Origin: 배포된 프론트엔드(Amplify) 도메인, dev 환경에서는 로컬 개발 서버 포함"""
+    config = get_config()
+    origins = set()
+    if config['amplify'].get('default_domain_with_env'):
+        origins.add(f"https://{config['amplify']['default_domain_with_env']}")
+    if config['frontend'].get('redirect_domain'):
+        origins.add(f"https://{config['env']}.{config['frontend']['redirect_domain']}")
+    if config['env'] == 'dev':
+        origins.update({"http://localhost:5173", "http://localhost:3000"})
+    return origins
+
+
 def cors_headers(origin):
+    # 요청 Origin을 그대로 반사하지 않고 허용 목록에 있을 때만 돌려준다 (credentials 허용과 함께 쓰이므로 필수)
+    allowed = get_allowed_origins()
+    if origin not in allowed:
+        origin = next((o for o in sorted(allowed) if o.startswith("https://")), "")
     return {
         "Access-Control-Allow-Origin": origin,
         "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",

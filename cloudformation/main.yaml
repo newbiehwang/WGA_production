@@ -79,6 +79,10 @@ Parameters:
     Default: "/wga/${Environment}/KnowledgeBaseId"
     Description: Knowledge Base ID
 
+  CognitoAuthorizerIdParameter:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Description: API Gateway Cognito User Pool Authorizer ID
+
 Resources:
   LlmStack:
     Type: AWS::CloudFormation::Stack
@@ -91,6 +95,7 @@ Resources:
         FrontendRedirectDomain: !Ref FrontendRedirectDomainParameter
         McpImageUri: !Ref McpImageUri # << 이 줄 추가
         KnowledgeBaseIdParameter: !Ref KnowledgeBaseIdParameter
+        CognitoAuthorizerId: !Ref CognitoAuthorizerIdParameter
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -134,6 +139,7 @@ Resources:
         ApiGatewayId: !Ref ApiGatewayIdParameter
         ApiGatewayRootResourceId: !Ref ApiGatewayRootResourceIdParameter
         FrontendRedirectDomain: !Ref FrontendRedirectDomainParameter
+        CognitoAuthorizerId: !Ref CognitoAuthorizerIdParameter
       Tags:
         - Key: Environment
           Value: !Ref Environment

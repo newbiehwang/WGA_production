@@ -3,6 +3,9 @@ import boto3
 import requests
 import time
 from typing import Dict, Any, List, Optional
+from urllib.parse import urlparse
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
 
 
 class MCPClient:
@@ -24,9 +27,27 @@ class MCPClient:
             'MCP-Version': '0.6'
         }
 
-        # 인증 헤더 추가 (제공된 경우)
-        if auth_token:
+        # Lambda Function URL(AuthType: AWS_IAM)이면 SigV4 서명, 그 외(로컬 서버 등)는 Bearer 토큰 사용
+        host = urlparse(self.mcp_url).hostname or ''
+        self.use_sigv4 = '.lambda-url.' in host
+        if self.use_sigv4:
+            # 호스트 형식: <url-id>.lambda-url.<region>.on.aws
+            self.region = host.split('.lambda-url.')[1].split('.')[0]
+        elif auth_token:
             self.headers['Authorization'] = f'Bearer {auth_token}'
+
+    def _send(self, method: str, payload: Optional[Dict[str, Any]] = None) -> requests.Response:
+        """MCP 서버로 요청 전송 (Function URL이면 Lambda 실행 Role 자격 증명으로 SigV4 서명)"""
+        body = json.dumps(payload) if payload is not None else None
+        headers = dict(self.headers)
+
+        if self.use_sigv4:
+            credentials = boto3.Session().get_credentials()
+            aws_request = AWSRequest(method=method, url=self.mcp_url, data=body, headers=headers)
+            SigV4Auth(credentials, 'lambda', self.region).add_auth(aws_request)
+            headers = dict(aws_request.headers)
+
+        return requests.request(method, self.mcp_url, headers=headers, data=body)
 
     def initialize(self) -> str:
         """
@@ -41,11 +62,7 @@ class MCPClient:
             "method": "initialize"
         }
 
-        response = requests.post(
-            self.mcp_url,
-            headers=self.headers,
-            json=payload
-        )
+        response = self._send('POST', payload)
 
         if response.status_code != 200:
             raise Exception(f"MCP 초기화 실패: {response.status_code} - {response.text}")
@@ -77,11 +94,7 @@ class MCPClient:
             "method": "tools/list"
         }
 
-        response = requests.post(
-            self.mcp_url,
-            headers=self.headers,
-            json=payload
-        )
+        response = self._send('POST', payload)
 
         if response.status_code != 200:
             raise Exception(f"도구 목록 조회 실패: {response.status_code} - {response.text}")
@@ -117,11 +130,7 @@ class MCPClient:
             }
         }
 
-        response = requests.post(
-            self.mcp_url,
-            headers=self.headers,
-            json=payload
-        )
+        response = self._send('POST', payload)
 
         if response.status_code != 200:
             raise Exception(f"도구 호출 실패: {response.status_code} - {response.text}")
@@ -142,10 +151,7 @@ class MCPClient:
         if not self.session_id:
             return True  # 세션이 없으면 이미 종료된 것으로 간주
 
-        response = requests.delete(
-            self.mcp_url,
-            headers=self.headers
-        )
+        response = self._send('DELETE')
 
         # 세션 ID 초기화
         self.session_id = None
