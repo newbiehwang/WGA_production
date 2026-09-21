@@ -83,6 +83,11 @@ Parameters:
     Type: "AWS::SSM::Parameter::Value<String>"
     Description: API Gateway Cognito User Pool Authorizer ID
 
+
+  AlarmEmail:
+    Type: String
+    Default: ""
+    Description: CloudWatch 알람을 받을 이메일 주소 (비워 두면 구독 없이 SNS 토픽만 생성)
 Resources:
   LlmStack:
     Type: AWS::CloudFormation::Stack
@@ -152,6 +157,17 @@ Resources:
       Type: String
       Value: !Sub "https://${ApiGatewayIdParameter}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
       Description: API Gateway endpoint URL
+
+  MonitoringStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/wga-cloudformation-${AWS::AccountId}/monitoring.yaml"
+      Parameters:
+        Environment: !Ref Environment
+        AlarmEmail: !Ref AlarmEmail
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
 
   ApiGatewayFinalDeployment:
     Type: AWS::ApiGateway::Deployment

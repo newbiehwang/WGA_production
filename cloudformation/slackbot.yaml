@@ -42,6 +42,8 @@ Resources:
                       Principal:
                           Service: lambda.amazonaws.com
                       Action: sts:AssumeRole
+            ManagedPolicyArns:
+                - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
             Policies:
                 - PolicyName: SlackbotLambdaAccessSSM
                   PolicyDocument:
@@ -110,6 +112,13 @@ Resources:
             Timeout: 15
             MemorySize: 256
             Role: !GetAtt SlackbotLambdaExecutionRole.Arn
+            # X-Ray 추적과 JSON 구조화 로그 (REPORT 레코드의 initDurationMs로 콜드 스타트 측정 가능)
+            TracingConfig:
+              Mode: Active
+            LoggingConfig:
+              LogFormat: JSON
+              ApplicationLogLevel: INFO
+              SystemLogLevel: INFO
             Environment:
                 Variables:
                     ENV: !Ref Environment

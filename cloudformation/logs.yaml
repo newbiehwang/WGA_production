@@ -35,6 +35,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
         - arn:aws:iam::aws:policy/AmazonAthenaFullAccess
         - arn:aws:iam::aws:policy/AmazonS3FullAccess
         - arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess
@@ -72,6 +73,13 @@ Resources:
     Properties:
       FunctionName: !Sub 'wga-athena-utility-${Environment}'
       Role: !GetAtt AthenaUtilityLambdaRole.Arn
+      # X-Ray 추적과 JSON 구조화 로그 (REPORT 레코드의 initDurationMs로 콜드 스타트 측정 가능)
+      TracingConfig:
+        Mode: Active
+      LoggingConfig:
+        LogFormat: JSON
+        ApplicationLogLevel: INFO
+        SystemLogLevel: INFO
       Layers:
         - !Ref AthenaUtilityLambdaLayer
       Runtime: python3.12

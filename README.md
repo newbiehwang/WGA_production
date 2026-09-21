@@ -42,11 +42,12 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 | base (`base.yaml`) | `wga-base-{env}` | API Gateway RestApi, Cognito User/Identity Pool, DynamoDB 테이블 4개, S3 버킷 7개, SSM Parameter |
 | frontend (`frontend.yaml`) | `wga-frontend-{env}` | Amplify App/Branch, 프론트엔드 버킷 정책 |
 | mcp (`mcp.yaml`) | `wga-mcp-{env}` | MCP 이미지용 ECR 리포지토리, CodeBuild 프로젝트 |
-| main (`main.yaml`) | `wga-{env}` | 아래 4개 Nested Stack과 API Gateway 최종 Deployment |
+| main (`main.yaml`) | `wga-{env}` | 아래 5개 Nested Stack과 API Gateway 최종 Deployment |
 | └ llm (`llm.yaml`) | Nested | LLM Lambda, MCP Lambda(Container Image, Function URL), `/llm1`, `/llm2` 등 |
 | └ logs (`logs.yaml`) | Nested | Athena 유틸리티 Lambda, `/execute-query`, `/create-table` |
 | └ slackbot (`slackbot.yaml`) | Nested | Slack 봇 Lambda, `/login`, `/callback`, `/models`, `/req` 등 |
 | └ chat-history (`chat-history.yaml`) | Nested | 대화 기록 Lambda, `/sessions/*` |
+| └ monitoring (`monitoring.yaml`) | Nested | CloudWatch 알람 21개, SNS 알림 토픽, 서비스 대시보드, Logs Insights 저장 쿼리 |
 
 **의존 관계**: base가 API Gateway·Cognito·DynamoDB·S3를 만들고, 나머지 스택은 base의 RestApi ID와 루트 리소스 ID를 파라미터로 받아 리소스와 메서드를 추가합니다. llm 스택은 mcp 스택이 ECR에 올린 이미지를 사용합니다.
 
@@ -56,7 +57,7 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 3. frontend 스택 배포 → Amplify 도메인을 base 스택에 반영(콜백 URL 갱신)
 4. Lambda Layer·함수 코드 패키징 및 S3 업로드
 5. mcp 스택 배포 → CodeBuild로 MCP 이미지 빌드 후 ECR에 푸시
-6. main 스택 배포 (llm, logs, slackbot, chat-history + API Deployment)
+6. main 스택 배포 (llm, logs, slackbot, chat-history, monitoring + API Deployment) → API 스테이지 재배포, X-Ray 추적 활성화
 7. 프론트엔드 환경 변수 설정, 빌드, Amplify 배포
 8. MCP Function URL을 base 스택 SSM 파라미터에 반영
 
@@ -164,7 +165,12 @@ aws ssm put-parameter --name "/wga/${Environment}/ANTHROPIC_API_KEY" --value "yo
 
 # 프로덕션 환경 배포
 ./deploy.sh prod
+
+# 알람을 이메일로 받으려면 (구독 확인 메일의 링크를 눌러야 활성화됨)
+ALARM_EMAIL=you@example.com ./deploy.sh dev
 ```
+
+모든 스택에 `Project=WGA`, `Environment={env}` 태그가 붙어 하위 리소스까지 전파됩니다. Cost Explorer에서 두 태그를 비용 할당 태그로 활성화하면 프로젝트·환경별 비용을 볼 수 있습니다.
 
 ### 3단계: 배포 확인
 배포 완료 후 다음 정보가 출력됩니다:
@@ -173,6 +179,35 @@ aws ssm put-parameter --name "/wga/${Environment}/ANTHROPIC_API_KEY" --value "yo
 - **MCP Function URL**: `https://xxxxxxxxxx.lambda-url.AWSREGION.on.aws/`
 
 추가로, SSM Parameter 정보도 제공됩니다.
+
+## 운영 및 모니터링
+
+### 알람 (`monitoring.yaml`)
+모든 알람은 SNS 토픽 `wga-alarms-{env}`로 발생·해소 알림을 보냅니다.
+
+| 대상 | 지표 | 조건 | 의도 |
+|---|---|---|---|
+| Lambda 5개 | Errors | 5분 합계 1건 이상 | 함수 오류 즉시 감지 |
+| Lambda 5개 | Throttles | 5분 합계 1건 이상 | 동시성 한도 도달 감지 |
+| Lambda 5개 | Duration p95 | 함수 Timeout의 80% 초과, 2회 연속 | 타임아웃 임박 감지 (LLM·MCP 144초, Slack 봇 12초 등) |
+| API Gateway | 5XXError | 5분 합계 5건 이상 | 백엔드 장애 감지 |
+| API Gateway | Latency p95 | 150초 초과, 2회 연속 | 통합 타임아웃(180초) 임박 감지 |
+| DynamoDB 4개 | Read + Write ThrottleEvents | 5분 합계 1건 이상 | 프로비저닝 용량(5 RCU/WCU) 부족 감지 |
+
+Lambda 알람은 `Fn::ForEach`(AWS::LanguageExtensions)로 함수 목록과 임계값 매핑만 두고 한 번에 정의했습니다.
+
+### 대시보드와 추적
+- **대시보드** `wga-{env}-service`: API 요청 수·오류·응답 시간, Lambda 호출·오류·실행 시간 p95, DynamoDB 스로틀·소비 용량. 챗봇의 대시보드 조회 도구로도 확인할 수 있습니다.
+- **X-Ray**: 모든 Lambda와 API Gateway 스테이지에서 Active 추적을 켜서 API → Lambda → MCP 호출 구간별 지연을 볼 수 있습니다.
+- **구조화 로그**: Lambda 로그 형식을 JSON으로 설정했습니다. 플랫폼 `REPORT` 레코드의 `initDurationMs`, `durationMs`, `maxMemoryUsedMB`로 콜드 스타트와 메모리 사용률을 집계합니다.
+- **저장 쿼리**: CloudWatch Logs Insights의 `wga-{env}/lambda-performance`(함수별 콜드 스타트 비율, p50/p95, 최대 메모리)와 `wga-{env}/cold-start-vs-warm`(콜드/웜 응답 시간 비교).
+
+### 데이터 보호 정책
+| 리소스 | 설정 | 이유 |
+|---|---|---|
+| S3 버킷 7개 | `DeletionPolicy: Retain`, 퍼블릭 액세스 차단 | 스택을 지워도 로그·산출물을 보존하고, 재배포 시 `deploy.sh`가 기존 버킷을 재사용 |
+| DynamoDB 테이블 4개 | Point-in-Time Recovery, prod에서 삭제 방지 | 최근 35일 내 임의 시점 복구. 테이블 이름이 고정이라 Retain 대신 삭제 방지로 prod 데이터를 보호 |
+| SSM 파라미터 | `DeletionPolicy: Delete` | 스택 출력값에서 파생되는 설정이라 재배포 시 다시 생성됨 |
 
 ## 설정 가이드
 
