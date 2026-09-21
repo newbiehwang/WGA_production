@@ -1,0 +1,341 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::LanguageExtensions
+Description: 'WGA Monitoring - CloudWatch 알람, SNS 알림, 운영 대시보드'
+
+Parameters:
+  Environment:
+    Type: String
+    Description: The deployment environment
+
+  AlarmEmail:
+    Type: String
+    Default: ''
+    Description: 알람을 받을 이메일 주소 (비워 두면 SNS 토픽만 생성)
+
+  ApiLatencyP95ThresholdMs:
+    Type: Number
+    Default: 150000
+    Description: API Gateway Latency p95 알람 임계값(ms). 통합 타임아웃 180초에 근접하면 알린다
+
+Conditions:
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+
+# 함수별 이름과 Duration p95 임계값(각 함수 Timeout의 80%, ms)
+Mappings:
+  Functions:
+    llm:
+      Name: wga-llm
+      DurationThresholdMs: 144000
+    mcp:
+      Name: wga-mcp
+      DurationThresholdMs: 144000
+    chathistory:
+      Name: wga-chat-history
+      DurationThresholdMs: 24000
+    slackbot:
+      Name: wga-slackbot
+      DurationThresholdMs: 12000
+    athenautility:
+      Name: wga-athena-utility
+      DurationThresholdMs: 720000
+  Tables:
+    slackbotsessions:
+      Name: SlackbotSessions
+    athenatableregistry:
+      Name: AthenaTableRegistry
+    chathistory:
+      Name: wga-chat-history
+    mcpsessions:
+      Name: wga-mcp-sessions
+
+Resources:
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'wga-alarms-${Environment}'
+      DisplayName: !Sub 'WGA ${Environment} Alarms'
+
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  # Lambda 함수별 알람: 오류, 스로틀, 실행 시간 p95(타임아웃 임박)
+  Fn::ForEach::LambdaAlarms:
+    - Fn
+    - [llm, mcp, chathistory, slackbot, athenautility]
+    - ${Fn}ErrorsAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+          AlarmName: !Sub
+            - 'wga-${Environment}-${Name}-errors'
+            - Name: !FindInMap [Functions, !Ref Fn, Name]
+          AlarmDescription: Lambda 함수 오류 발생 (5분 합계 1건 이상)
+          Namespace: AWS/Lambda
+          MetricName: Errors
+          Dimensions:
+            - Name: FunctionName
+              Value: !Sub
+                - '${Name}-${Environment}'
+                - Name: !FindInMap [Functions, !Ref Fn, Name]
+          Statistic: Sum
+          Period: 300
+          EvaluationPeriods: 1
+          Threshold: 1
+          ComparisonOperator: GreaterThanOrEqualToThreshold
+          TreatMissingData: notBreaching
+          AlarmActions: [!Ref AlarmTopic]
+          OKActions: [!Ref AlarmTopic]
+
+      ${Fn}ThrottlesAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+          AlarmName: !Sub
+            - 'wga-${Environment}-${Name}-throttles'
+            - Name: !FindInMap [Functions, !Ref Fn, Name]
+          AlarmDescription: Lambda 동시성 한도로 인한 스로틀 발생
+          Namespace: AWS/Lambda
+          MetricName: Throttles
+          Dimensions:
+            - Name: FunctionName
+              Value: !Sub
+                - '${Name}-${Environment}'
+                - Name: !FindInMap [Functions, !Ref Fn, Name]
+          Statistic: Sum
+          Period: 300
+          EvaluationPeriods: 1
+          Threshold: 1
+          ComparisonOperator: GreaterThanOrEqualToThreshold
+          TreatMissingData: notBreaching
+          AlarmActions: [!Ref AlarmTopic]
+          OKActions: [!Ref AlarmTopic]
+
+      ${Fn}DurationAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+          AlarmName: !Sub
+            - 'wga-${Environment}-${Name}-duration-p95'
+            - Name: !FindInMap [Functions, !Ref Fn, Name]
+          AlarmDescription: 실행 시간 p95가 함수 Timeout의 80%를 넘음 (타임아웃 임박)
+          Namespace: AWS/Lambda
+          MetricName: Duration
+          Dimensions:
+            - Name: FunctionName
+              Value: !Sub
+                - '${Name}-${Environment}'
+                - Name: !FindInMap [Functions, !Ref Fn, Name]
+          ExtendedStatistic: p95
+          Period: 300
+          EvaluationPeriods: 2
+          DatapointsToAlarm: 2
+          Threshold: !FindInMap [Functions, !Ref Fn, DurationThresholdMs]
+          ComparisonOperator: GreaterThanThreshold
+          TreatMissingData: notBreaching
+          AlarmActions: [!Ref AlarmTopic]
+          OKActions: [!Ref AlarmTopic]
+
+  # DynamoDB 테이블별 스로틀 알람 (읽기 + 쓰기 스로틀 이벤트 합계)
+  Fn::ForEach::TableAlarms:
+    - Table
+    - [slackbotsessions, athenatableregistry, chathistory, mcpsessions]
+    - ${Table}ThrottleAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+          AlarmName: !Sub
+            - 'wga-${Environment}-ddb-${Name}-throttles'
+            - Name: !FindInMap [Tables, !Ref Table, Name]
+          AlarmDescription: DynamoDB 읽기/쓰기 스로틀 발생 (프로비저닝 용량 부족)
+          Metrics:
+            - Id: total
+              Expression: 'reads + writes'
+              Label: ThrottleEvents
+              ReturnData: true
+            - Id: reads
+              ReturnData: false
+              MetricStat:
+                Metric:
+                  Namespace: AWS/DynamoDB
+                  MetricName: ReadThrottleEvents
+                  Dimensions:
+                    - Name: TableName
+                      Value: !Sub
+                        - '${Name}-${Environment}'
+                        - Name: !FindInMap [Tables, !Ref Table, Name]
+                Period: 300
+                Stat: Sum
+            - Id: writes
+              ReturnData: false
+              MetricStat:
+                Metric:
+                  Namespace: AWS/DynamoDB
+                  MetricName: WriteThrottleEvents
+                  Dimensions:
+                    - Name: TableName
+                      Value: !Sub
+                        - '${Name}-${Environment}'
+                        - Name: !FindInMap [Tables, !Ref Table, Name]
+                Period: 300
+                Stat: Sum
+          EvaluationPeriods: 1
+          Threshold: 1
+          ComparisonOperator: GreaterThanOrEqualToThreshold
+          TreatMissingData: notBreaching
+          AlarmActions: [!Ref AlarmTopic]
+          OKActions: [!Ref AlarmTopic]
+
+  # API Gateway 알람
+  Api5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'wga-${Environment}-api-5xx'
+      AlarmDescription: API Gateway 5XX 오류 (5분 합계 5건 이상)
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: ApiName
+          Value: !Sub 'wga-api-${Environment}'
+        - Name: Stage
+          Value: !Ref Environment
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  ApiLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'wga-${Environment}-api-latency-p95'
+      AlarmDescription: API Gateway 응답 시간 p95가 통합 타임아웃(180초)에 근접
+      Namespace: AWS/ApiGateway
+      MetricName: Latency
+      Dimensions:
+        - Name: ApiName
+          Value: !Sub 'wga-api-${Environment}'
+        - Name: Stage
+          Value: !Ref Environment
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: !Ref ApiLatencyP95ThresholdMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  # 서비스 상태 대시보드 (챗봇의 get_dashboard_summary 도구로도 조회 가능)
+  ServiceDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub 'wga-${Environment}-service'
+      DashboardBody: !Sub
+        - |
+          {
+            "widgets": [
+              {"type": "text", "x": 0, "y": 0, "width": 24, "height": 1,
+               "properties": {"markdown": "## WGA ${Environment} 서비스 상태 (API Gateway → Lambda → DynamoDB)"}},
+              {"type": "metric", "x": 0, "y": 1, "width": 8, "height": 6,
+               "properties": {"title": "API 요청 수 / 4XX / 5XX", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
+                 "metrics": [
+                   ["AWS/ApiGateway", "Count", "ApiName", "${Api}", "Stage", "${Environment}"],
+                   [".", "4XXError", ".", ".", ".", "."],
+                   [".", "5XXError", ".", ".", ".", "."]]}},
+              {"type": "metric", "x": 8, "y": 1, "width": 8, "height": 6,
+               "properties": {"title": "API 응답 시간 (p50 / p95, ms)", "region": "${AWS::Region}", "period": 300, "view": "timeSeries",
+                 "metrics": [
+                   ["AWS/ApiGateway", "Latency", "ApiName", "${Api}", "Stage", "${Environment}", {"stat": "p50"}],
+                   ["...", {"stat": "p95"}]]}},
+              {"type": "metric", "x": 16, "y": 1, "width": 8, "height": 6,
+               "properties": {"title": "Lambda 오류 / 스로틀", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
+                 "metrics": [
+                   ["AWS/Lambda", "Errors", "FunctionName", "wga-llm-${Environment}"],
+                   ["...", "wga-mcp-${Environment}"],
+                   ["...", "wga-chat-history-${Environment}"],
+                   ["...", "wga-slackbot-${Environment}"],
+                   ["...", "wga-athena-utility-${Environment}"],
+                   ["AWS/Lambda", "Throttles", "FunctionName", "wga-llm-${Environment}"],
+                   ["...", "wga-mcp-${Environment}"]]}},
+              {"type": "metric", "x": 0, "y": 7, "width": 12, "height": 6,
+               "properties": {"title": "Lambda 호출 수", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
+                 "metrics": [
+                   ["AWS/Lambda", "Invocations", "FunctionName", "wga-llm-${Environment}"],
+                   ["...", "wga-mcp-${Environment}"],
+                   ["...", "wga-chat-history-${Environment}"],
+                   ["...", "wga-slackbot-${Environment}"],
+                   ["...", "wga-athena-utility-${Environment}"]]}},
+              {"type": "metric", "x": 12, "y": 7, "width": 12, "height": 6,
+               "properties": {"title": "Lambda 실행 시간 p95 (ms)", "region": "${AWS::Region}", "stat": "p95", "period": 300, "view": "timeSeries",
+                 "metrics": [
+                   ["AWS/Lambda", "Duration", "FunctionName", "wga-llm-${Environment}"],
+                   ["...", "wga-mcp-${Environment}"],
+                   ["...", "wga-chat-history-${Environment}"],
+                   ["...", "wga-slackbot-${Environment}"]]}},
+              {"type": "metric", "x": 0, "y": 13, "width": 12, "height": 6,
+               "properties": {"title": "DynamoDB 스로틀 (읽기 + 쓰기)", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
+                 "metrics": [
+                   ["AWS/DynamoDB", "ReadThrottleEvents", "TableName", "wga-chat-history-${Environment}"],
+                   [".", "WriteThrottleEvents", ".", "."],
+                   [".", "ReadThrottleEvents", ".", "SlackbotSessions-${Environment}"],
+                   [".", "WriteThrottleEvents", ".", "."]]}},
+              {"type": "metric", "x": 12, "y": 13, "width": 12, "height": 6,
+               "properties": {"title": "DynamoDB 소비 용량 (대화 기록)", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
+                 "metrics": [
+                   ["AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "wga-chat-history-${Environment}"],
+                   [".", "ConsumedWriteCapacityUnits", ".", "."]]}}
+            ]
+          }
+        - Api: !Sub 'wga-api-${Environment}'
+
+  # 성능 측정용 저장 쿼리 (Lambda LogFormat: JSON의 platform.report 레코드 기준)
+  # 콜드 스타트 비율·초기화 시간, 실행 시간 p50/p95, 메모리 사용률을 함수별로 집계한다
+  LambdaPerformanceQuery:
+    Type: AWS::Logs::QueryDefinition
+    Properties:
+      Name: !Sub 'wga-${Environment}/lambda-performance'
+      LogGroupNames:
+        - !Sub '/aws/lambda/wga-llm-${Environment}'
+        - !Sub '/aws/lambda/wga-mcp-${Environment}'
+        - !Sub '/aws/lambda/wga-chat-history-${Environment}'
+        - !Sub '/aws/lambda/wga-slackbot-${Environment}'
+        - !Sub '/aws/lambda/wga-athena-utility-${Environment}'
+      QueryString: |
+        filter type = "platform.report"
+        | stats count(*) as invocations,
+                count(record.metrics.initDurationMs) as coldStarts,
+                avg(record.metrics.initDurationMs) as avgInitMs,
+                pct(record.metrics.durationMs, 50) as p50Ms,
+                pct(record.metrics.durationMs, 95) as p95Ms,
+                max(record.metrics.maxMemoryUsedMB) as maxMemoryUsedMB,
+                max(record.metrics.memorySizeMB) as memorySizeMB
+          by @log
+
+  ColdStartQuery:
+    Type: AWS::Logs::QueryDefinition
+    Properties:
+      Name: !Sub 'wga-${Environment}/cold-start-vs-warm'
+      LogGroupNames:
+        - !Sub '/aws/lambda/wga-llm-${Environment}'
+        - !Sub '/aws/lambda/wga-mcp-${Environment}'
+      QueryString: |
+        filter type = "platform.report"
+        | fields ispresent(record.metrics.initDurationMs) as isColdStart
+        | stats count(*) as invocations,
+                pct(record.metrics.durationMs, 50) as p50Ms,
+                pct(record.metrics.durationMs, 95) as p95Ms
+          by @log, isColdStart
+
+Outputs:
+  AlarmTopicArn:
+    Description: 알람 알림용 SNS 토픽 ARN
+    Value: !Ref AlarmTopic
+
+  DashboardName:
+    Description: 서비스 상태 대시보드 이름
+    Value: !Ref ServiceDashboard

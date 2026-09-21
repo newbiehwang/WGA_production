@@ -6,6 +6,7 @@ set -e
 
 # 환경 변수 설정
 ENV=${1:-dev}  # 기본값: dev
+ALARM_EMAIL=${ALARM_EMAIL:-}  # CloudWatch 알람 수신 이메일 (선택, 예: ALARM_EMAIL=me@example.com ./deploy.sh dev)
 ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
 REGION=$(aws configure get region)
 MCP_IMAGE_URI="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/wga-mcp-$ENV:latest"
@@ -74,6 +75,7 @@ aws s3 cp cloudformation/logs.yaml "s3://$CLOUDFORMATION_BUCKET/logs.yaml"
 aws s3 cp cloudformation/slackbot.yaml "s3://$CLOUDFORMATION_BUCKET/slackbot.yaml"
 aws s3 cp cloudformation/mcp.yaml "s3://$CLOUDFORMATION_BUCKET/mcp.yaml"
 aws s3 cp cloudformation/chat-history.yaml "s3://$CLOUDFORMATION_BUCKET/chat-history.yaml"
+aws s3 cp cloudformation/monitoring.yaml "s3://$CLOUDFORMATION_BUCKET/monitoring.yaml"
 
 echo "CloudFormation 템플릿 업로드 완료"
 
@@ -178,6 +180,7 @@ if aws cloudformation describe-stacks --stack-name "$BASE_STACK_NAME" > /dev/nul
                     ParameterKey=DiagramBucketExists,ParameterValue=$DIAGRAM_BUCKET_EXISTS \
                     ParameterKey=FrontendRedirectDomain,ParameterValue=placeholder.example.com \
                     ParameterKey=CallbackDomain,ParameterValue=placeholder.example.com \
+        --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
         --capabilities CAPABILITY_NAMED_IAM
 
     # 스택 업데이트 완료 대기
@@ -199,6 +202,7 @@ else
                     ParameterKey=DiagramBucketExists,ParameterValue=$DIAGRAM_BUCKET_EXISTS \
                     ParameterKey=FrontendRedirectDomain,ParameterValue=placeholder.example.com \
                     ParameterKey=CallbackDomain,ParameterValue=placeholder.example.com \
+        --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
         --capabilities CAPABILITY_NAMED_IAM
 
     # 스택 생성 완료 대기
@@ -244,6 +248,7 @@ if aws cloudformation describe-stacks --stack-name $FRONTEND_STACK_NAME > /dev/n
             ParameterKey=CertificateARN,ParameterValue=$CERTIFICATE_ARN \
             ParameterKey=ApiEndpoint,ParameterValue=$API_ENDPOINT \
             ParameterKey=FrontendBucketName,ParameterValue=$FRONTEND_BUCKET \
+        --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
         --capabilities CAPABILITY_NAMED_IAM
 
     # 스택 업데이트 완료 대기
@@ -261,6 +266,7 @@ else
             ParameterKey=CertificateARN,ParameterValue=$CERTIFICATE_ARN \
             ParameterKey=ApiEndpoint,ParameterValue=$API_ENDPOINT \
             ParameterKey=FrontendBucketName,ParameterValue=$FRONTEND_BUCKET \
+        --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
         --capabilities CAPABILITY_NAMED_IAM
 
     # 스택 생성 완료 대기
@@ -305,6 +311,7 @@ aws cloudformation update-stack \
                 ParameterKey=DiagramBucketExists,ParameterValue=true \
                 ParameterKey=FrontendRedirectDomain,ParameterValue=$FRONTEND_URL \
                 ParameterKey=CallbackDomain,ParameterValue=$CALLBACK_DOMAIN \
+    --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
     --capabilities CAPABILITY_NAMED_IAM
 
 aws cloudformation wait stack-update-complete --stack-name $BASE_STACK_NAME
@@ -445,6 +452,7 @@ if aws cloudformation describe-stacks --stack-name $MCP_STACK_NAME > /dev/null 2
         --parameters \
             ParameterKey=Environment,ParameterValue=$ENV \
             ParameterKey=DockerBuildBucketName,ParameterValue="$DOCKER_BUILD_BUCKET" \
+        --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
         --capabilities CAPABILITY_NAMED_IAM
 
     # 스택 업데이트 완료 대기
@@ -459,6 +467,7 @@ else
         --parameters \
             ParameterKey=Environment,ParameterValue=$ENV \
             ParameterKey=DockerBuildBucketName,ParameterValue="$DOCKER_BUILD_BUCKET" \
+        --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
         --capabilities CAPABILITY_NAMED_IAM
     # 스택 생성 완료 대기
     echo "MCP 스택 생성 완료 대기 중: $MCP_STACK_NAME"
@@ -533,7 +542,9 @@ if aws cloudformation describe-stacks --stack-name $MAIN_STACK_NAME > /dev/null 
             ParameterKey=KnowledgeBaseIdParameter,ParameterValue="$SSM_PATH_PREFIX/KnowledgeBaseId" \
             ParameterKey=CognitoAuthorizerIdParameter,ParameterValue="$SSM_PATH_PREFIX/CognitoAuthorizerId" \
             ParameterKey=McpImageUri,ParameterValue=$MCP_IMAGE_URI \
-        --capabilities CAPABILITY_NAMED_IAM
+            ParameterKey=AlarmEmail,ParameterValue="$ALARM_EMAIL" \
+        --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
+        --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
 else
     # 스택이 존재하지 않으면 생성
     echo "새 스택 생성 중: $MAIN_STACK_NAME"
@@ -556,7 +567,9 @@ else
             ParameterKey=KnowledgeBaseIdParameter,ParameterValue="$SSM_PATH_PREFIX/KnowledgeBaseId" \
             ParameterKey=CognitoAuthorizerIdParameter,ParameterValue="$SSM_PATH_PREFIX/CognitoAuthorizerId" \
             ParameterKey=McpImageUri,ParameterValue=$MCP_IMAGE_URI \
-        --capabilities CAPABILITY_NAMED_IAM
+            ParameterKey=AlarmEmail,ParameterValue="$ALARM_EMAIL" \
+        --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
+        --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
 fi
 
 echo "메인 스택 생성 대기 중..."
@@ -591,6 +604,12 @@ aws apigateway create-deployment \
     --rest-api-id "$API_GATEWAY_ID" \
     --stage-name "$ENV" \
     --description "deploy.sh $(date -u +%Y-%m-%dT%H:%M:%SZ)" > /dev/null
+
+# 스테이지 X-Ray 추적 활성화 (Deployment가 만든 스테이지라 템플릿 대신 여기서 설정)
+aws apigateway update-stage \
+    --rest-api-id "$API_GATEWAY_ID" \
+    --stage-name "$ENV" \
+    --patch-operations op=replace,path=/tracingEnabled,value=true > /dev/null
 API_URL="https://${API_GATEWAY_ID}.execute-api.${REGION}.amazonaws.com/${ENV}"
 echo "API Gateway URL: $API_URL"
 
@@ -693,6 +712,7 @@ aws cloudformation update-stack \
                 ParameterKey=FrontendRedirectDomain,ParameterValue=$FRONTEND_URL \
                 ParameterKey=CallbackDomain,ParameterValue=$CALLBACK_DOMAIN \
                 ParameterKey=McpFunctionUrl,ParameterValue=$McpFunctionUrl \
+    --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
     --capabilities CAPABILITY_NAMED_IAM
 
 #################################################

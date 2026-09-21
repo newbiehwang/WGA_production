@@ -39,6 +39,13 @@ Resources:
       Code:
         ImageUri: !Ref McpImageUri
       Role: !GetAtt McpLambdaExecutionRole.Arn
+      # X-Ray 추적과 JSON 구조화 로그 (REPORT 레코드의 initDurationMs로 콜드 스타트 측정 가능)
+      TracingConfig:
+        Mode: Active
+      LoggingConfig:
+        LogFormat: JSON
+        ApplicationLogLevel: INFO
+        SystemLogLevel: INFO
       Timeout: 180
       MemorySize: 2048
       Environment:
@@ -68,6 +75,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
         - PolicyName: McpReadOnlyTools
@@ -125,6 +133,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
         - PolicyName: LlmServiceAccess
@@ -202,6 +211,13 @@ Resources:
       Timeout: 180
       MemorySize: 256
       Role: !GetAtt LlmLambdaExecutionRole.Arn
+      # X-Ray 추적과 JSON 구조화 로그 (REPORT 레코드의 initDurationMs로 콜드 스타트 측정 가능)
+      TracingConfig:
+        Mode: Active
+      LoggingConfig:
+        LogFormat: JSON
+        ApplicationLogLevel: INFO
+        SystemLogLevel: INFO
       Environment:
         Variables:
           ENV: !Ref Environment

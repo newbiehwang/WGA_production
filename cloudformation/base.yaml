@@ -290,6 +290,11 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub 'SlackbotSessions-${Environment}'
+      # 실수로 인한 삭제·덮어쓰기에 대비해 최근 35일 내 임의 시점으로 복구 가능
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      # prod에서는 테이블 삭제 방지 (스택 삭제 전 수동으로 해제해야 함)
+      DeletionProtectionEnabled: !If [IsProd, true, false]
       AttributeDefinitions:
         - AttributeName: 'slack_user_id'
           AttributeType: S
@@ -304,6 +309,11 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub 'AthenaTableRegistry-${Environment}'
+      # 실수로 인한 삭제·덮어쓰기에 대비해 최근 35일 내 임의 시점으로 복구 가능
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      # prod에서는 테이블 삭제 방지 (스택 삭제 전 수동으로 해제해야 함)
+      DeletionProtectionEnabled: !If [IsProd, true, false]
       AttributeDefinitions:
         - AttributeName: 'log_type'
           AttributeType: S
@@ -318,6 +328,11 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub 'wga-chat-history-${Environment}'
+      # 실수로 인한 삭제·덮어쓰기에 대비해 최근 35일 내 임의 시점으로 복구 가능
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      # prod에서는 테이블 삭제 방지 (스택 삭제 전 수동으로 해제해야 함)
+      DeletionProtectionEnabled: !If [IsProd, true, false]
       AttributeDefinitions:
         - AttributeName: 'sessionId'
           AttributeType: S
@@ -344,6 +359,11 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub 'wga-mcp-sessions-${Environment}'
+      # 실수로 인한 삭제·덮어쓰기에 대비해 최근 35일 내 임의 시점으로 복구 가능
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      # prod에서는 테이블 삭제 방지 (스택 삭제 전 수동으로 해제해야 함)
+      DeletionProtectionEnabled: !If [IsProd, true, false]
       AttributeDefinitions:
         - AttributeName: 'session_id'
           AttributeType: S
