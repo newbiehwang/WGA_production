@@ -531,6 +531,7 @@ if aws cloudformation describe-stacks --stack-name $MAIN_STACK_NAME > /dev/null 
             ParameterKey=SlackBotTokenSSMPathParameter,ParameterValue="$SSM_PATH_PREFIX/SlackbotToken" \
             ParameterKey=AthenaOutputBucketParameter,ParameterValue="$SSM_PATH_PREFIX/AthenaOutputBucketName" \
             ParameterKey=KnowledgeBaseIdParameter,ParameterValue="$SSM_PATH_PREFIX/KnowledgeBaseId" \
+            ParameterKey=CognitoAuthorizerIdParameter,ParameterValue="$SSM_PATH_PREFIX/CognitoAuthorizerId" \
             ParameterKey=McpImageUri,ParameterValue=$MCP_IMAGE_URI \
         --capabilities CAPABILITY_NAMED_IAM
 else
@@ -553,6 +554,7 @@ else
             ParameterKey=SlackBotTokenSSMPathParameter,ParameterValue="$SSM_PATH_PREFIX/SlackbotToken" \
             ParameterKey=AthenaOutputBucketParameter,ParameterValue="$SSM_PATH_PREFIX/AthenaOutputBucketName" \
             ParameterKey=KnowledgeBaseIdParameter,ParameterValue="$SSM_PATH_PREFIX/KnowledgeBaseId" \
+            ParameterKey=CognitoAuthorizerIdParameter,ParameterValue="$SSM_PATH_PREFIX/CognitoAuthorizerId" \
             ParameterKey=McpImageUri,ParameterValue=$MCP_IMAGE_URI \
         --capabilities CAPABILITY_NAMED_IAM
 fi
@@ -581,6 +583,14 @@ echo "메인 스택 배포 완료: $MAIN_STACK_NAME"
 
 # API Gateway URL 확인 (CloudFormation Output 대신 SSM 기반으로 구성)
 API_GATEWAY_ID=$(aws ssm get-parameter --name "$SSM_PATH_PREFIX/ApiGatewayId" --query "Parameter.Value" --output text)
+
+# main 스택의 Deployment 리소스는 스택 업데이트 시 다시 생성되지 않으므로,
+# 메서드 변경(인증 방식 등)이 스테이지에 반영되도록 매 배포마다 새 Deployment를 만든다
+echo "API Gateway 스테이지 재배포 중: $ENV"
+aws apigateway create-deployment \
+    --rest-api-id "$API_GATEWAY_ID" \
+    --stage-name "$ENV" \
+    --description "deploy.sh $(date -u +%Y-%m-%dT%H:%M:%SZ)" > /dev/null
 API_URL="https://${API_GATEWAY_ID}.execute-api.${REGION}.amazonaws.com/${ENV}"
 echo "API Gateway URL: $API_URL"
 
@@ -608,7 +618,6 @@ VITE_API_DEST=$API_URL
 
 COGNITO_DOMAIN=$(echo "$USER_POOL_DOMAIN" | sed -E 's#https://([^.]*)\..*#\1#')
 COGNITO_CLIENT_ID=$USER_POOL_CLIENT_ID
-COGNITO_CLIENT_SECRET=
 COGNITO_REDIRECT_URI=https://${ENV}.${FRONTEND_URL}/redirect
 COGNITO_IDENTITY_POOL_ID=$IDENTITY_POOL_ID
 USER_POOL_ID=$USER_POOL_ID

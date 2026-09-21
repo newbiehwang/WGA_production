@@ -88,7 +88,6 @@ export const useAuthStore = defineStore('auth', {
 
                 const cognitoDomain = import.meta.env.COGNITO_DOMAIN;
                 const clientId = import.meta.env.COGNITO_CLIENT_ID;
-                const clientSecret = import.meta.env.COGNITO_CLIENT_SECRET || '';
 
                 const tokenEndpoint = `https://${cognitoDomain}.auth.us-east-1.amazoncognito.com/oauth2/token`;
 
@@ -101,10 +100,6 @@ export const useAuthStore = defineStore('auth', {
                     'Content-Type': 'application/x-www-form-urlencoded',
                 };
 
-                if (clientSecret) {
-                    const auth = btoa(`${clientId}:${clientSecret}`);
-                    headers['Authorization'] = `Basic ${auth}`;
-                }
 
                 const response = await axios.post(tokenEndpoint, params, { headers });
 
@@ -165,7 +160,6 @@ export const useAuthStore = defineStore('auth', {
             try {
                 const clientId = import.meta.env.COGNITO_CLIENT_ID;
                 const redirectUri = import.meta.env.COGNITO_REDIRECT_URI;
-                const clientSecret = import.meta.env.COGNITO_CLIENT_SECRET || '';
 
                 const cognitoDomain = import.meta.env.COGNITO_DOMAIN;
 
@@ -181,10 +175,6 @@ export const useAuthStore = defineStore('auth', {
                     'Content-Type': 'application/x-www-form-urlencoded',
                 };
 
-                if (clientSecret) {
-                    const auth = btoa(`${clientId}:${clientSecret}`);
-                    headers['Authorization'] = `Basic ${auth}`;
-                }
 
                 const params = new URLSearchParams();
                 params.append('grant_type', 'authorization_code');

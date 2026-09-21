@@ -3,8 +3,10 @@ from slack_sdk import WebClient
 from common.config import get_config
 import requests
 import json
+import os
 import boto3
 import time
+from botocore.config import Config
 
 print("==== Lambda 호출됨 ====")
 
@@ -12,6 +14,26 @@ CONFIG = get_config()
 client = WebClient(token=CONFIG["slackbot"]["token"])
 dynamodb = boto3.resource('dynamodb')
 user_settings_table = dynamodb.Table('slack_user_settings')
+# LLM 호출이 오래 걸리므로 재시도(중복 실행)를 막고 읽기 타임아웃을 LLM Lambda 제한(180초)에 맞춘다
+lambda_client = boto3.client('lambda', config=Config(read_timeout=180, retries={'total_max_attempts': 1}))
+
+
+def invoke_llm(payload):
+    """LLM Lambda를 API Gateway 프록시 이벤트 형식으로 직접 호출하고 (statusCode, body)를 반환"""
+    event = {
+        "path": "/llm1",
+        "httpMethod": "POST",
+        "headers": {"content-type": "application/json"},
+        "body": json.dumps(payload),
+    }
+    response = lambda_client.invoke(
+        FunctionName=os.environ["LLM_FUNCTION_NAME"],
+        InvocationType="RequestResponse",
+        Payload=json.dumps(event).encode(),
+    )
+    result = json.loads(response["Payload"].read() or b"{}")
+    body = result.get("body") or "{}"
+    return result.get("statusCode", 500), json.loads(body) if isinstance(body, str) else body
 
 def set_user_processing_status(user_id, status):
     """사용자 처리 상태 설정"""
@@ -496,18 +518,14 @@ def handle_req_command(payload):
     print(f"analysis_messages: {analysis_messages}\n")
     print(f"분석 결과 메시지 개수: {len(analysis_messages)}")
     try:
-        res = requests.post(
-            f"{CONFIG['api']['endpoint']}/llm1",
-            json={
-                "question": question,
-                "modelId": model_id,
-                "user_id": user_id,
-                "previous_questions": analysis_messages,
-            },
-        )
+        status_code, response_data = invoke_llm({
+            "question": question,
+            "modelId": model_id,
+            "user_id": user_id,
+            "previous_questions": analysis_messages,
+        })
 
-        if res.status_code == 200:
-            response_data = res.json()
+        if status_code == 200:
             llm_status = response_data.get("llm_processing_status", "unknown")
             if llm_status == "success":
                 # 처리 완료 - 상태 초기화

@@ -16,38 +16,39 @@ table = dynamodb.Table(CHAT_HISTORY_TABLE)
 # KST 타임존 정의
 KST = datetime.timezone(datetime.timedelta(hours=9))
 
+def get_caller_id(event):
+    """API Gateway Cognito Authorizer가 검증한 토큰의 sub(사용자 고유 ID)를 반환"""
+    claims = (event.get('requestContext') or {}).get('authorizer', {}).get('claims') or {}
+    return claims.get('sub')
+
+
 def handle_chat_history_request(path, http_method, body, event, origin):
-    """채팅 기록 관련 요청 처리"""
+    """채팅 기록 관련 요청 처리
+
+    사용자 식별은 클라이언트가 보낸 userId가 아니라 검증된 토큰의 sub로만 하며,
+    다른 사용자의 세션은 존재하지 않는 것(404)으로 응답한다.
+    """
+    if http_method == "OPTIONS":
+        return cors_response(200, "", origin)
+
+    user_id = get_caller_id(event)
+    if not user_id:
+        return cors_response(401, {'error': 'Unauthorized'}, origin)
 
     # /sessions 엔드포인트 처리
     if path.endswith('/sessions'):
-        if http_method == "OPTIONS":
-            response = cors_response(200, "", origin)
-            return response
-        elif http_method == 'POST':
+        if http_method == 'POST':
             # 새 세션 생성
-            result = create_session(body)
+            result = create_session(user_id, body)
             return cors_response(200, result, origin)
 
         elif http_method == 'GET':
             # 사용자의 세션 목록 조회
-            query_params = event.get('queryStringParameters', {}) or {}
-            user_id = query_params.get('userId')
-
-            if not user_id:
-                return cors_response(400, {'error': 'Missing userId parameter'}, origin)
-
             sessions = get_sessions(user_id)
             return cors_response(200, {'sessions': sessions}, origin)
 
         elif http_method == 'DELETE':
             # 사용자 세션 전체 삭제
-            query_params = event.get('queryStringParameters', {}) or {}
-            user_id = query_params.get('userId')
-
-            if not user_id:
-                return cors_response(400, {'error': 'Missing userId parameter'}, origin)
-
             result = delete_sessions_by_user(user_id)
             return cors_response(200, result, origin)
 
@@ -64,14 +65,14 @@ def handle_chat_history_request(path, http_method, body, event, origin):
     if not session_id:
         return cors_response(400, {'error': 'Invalid path'}, origin)
 
+    # 세션 소유자 확인
+    if not get_owned_session(session_id, user_id):
+        return cors_response(404, {'error': 'Session not found'}, origin)
+
     # 세션 ID가 유효한 경우 요청 처리
     if path.endswith(f'/sessions/{session_id}'):
-        if http_method == "OPTIONS":
-            response = cors_response(200, "", origin)
-            return response
-
         # 특정 세션 관련 요청
-        elif http_method == 'GET':
+        if http_method == 'GET':
             # 세션 조회
             session = get_session(session_id)
             if not session:
@@ -100,11 +101,7 @@ def handle_chat_history_request(path, http_method, body, event, origin):
 
     # /sessions/{sessionId}/messages 패턴 확인
     elif path.endswith(f'/sessions/{session_id}/messages'):
-        if http_method == "OPTIONS":
-            response = cors_response(200, "", origin)
-            return response
-
-        elif http_method == 'GET':
+        if http_method == 'GET':
             # 메시지 목록 조회
             messages = get_messages(session_id)
             if messages is None:
@@ -131,9 +128,8 @@ def handle_chat_history_request(path, http_method, body, event, origin):
     return cors_response(404, {'error': f'Route not found: {http_method} {path}'}, origin)
 
 
-def create_session(data):
+def create_session(user_id, data):
     """새로운 채팅 세션 생성"""
-    user_id = data.get('userId', str(uuid.uuid4()))
     title = data.get('title', '새 대화')
 
     session_id = str(uuid.uuid4())
@@ -180,6 +176,14 @@ def get_sessions(user_id):
     sessions.sort(key=lambda x: x.get('updatedAt', ''), reverse=True)
 
     return sessions
+
+
+def get_owned_session(session_id, user_id):
+    """세션이 존재하고 요청한 사용자 소유일 때만 세션 항목을 반환"""
+    session = table.get_item(Key={'sessionId': session_id}).get('Item')
+    if not session or session.get('userId') != user_id:
+        return None
+    return session
 
 
 def get_session(session_id):

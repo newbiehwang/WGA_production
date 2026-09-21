@@ -100,7 +100,7 @@ Resources:
       RestApiId: !Ref ApiGatewayId
       ResourceId: !Ref ExecuteQueryApiResource
       HttpMethod: POST
-      AuthorizationType: NONE
+      AuthorizationType: AWS_IAM
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -128,7 +128,7 @@ Resources:
       RestApiId: !Ref ApiGatewayId
       ResourceId: !Ref CreateTableApiResource
       HttpMethod: POST
-      AuthorizationType: NONE
+      AuthorizationType: AWS_IAM
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST

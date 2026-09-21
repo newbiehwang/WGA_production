@@ -4,16 +4,24 @@ import json
 from common.config import get_config
 from common.slackbot_session import get_session, save_session, send_slack_dm
 from slackbot_service import send_login_button, handle_models_command, handle_interaction, handle_req_command, handle_slack_events, handle_slack_events
-from jose import jwt
+from slack_security import get_raw_body, verify_slack_request, verify_cognito_id_token
+
+# Slack이 호출하는 경로: Signing Secret 서명 검증 대상 (/callback은 Cognito 리다이렉트라 제외)
+SLACK_SIGNED_PATHS = {"/login", "/models", "/slack-interactions", "/events"}
 
 def lambda_handler(event, context):
-    body = event.get("body") or ""
     path = event.get("path", "")
     http_method = event.get("httpMethod", "")
     CONFIG = get_config()
 
+    if path in SLACK_SIGNED_PATHS and not verify_slack_request(event, CONFIG["slackbot"].get("signing_secret")):
+        print(f"Slack 서명 검증 실패: {http_method} {path}")
+        return {"statusCode": 401, "body": "invalid signature"}
+
+    body = get_raw_body(event)
+
     if path == "/login" and http_method == "POST":
-        body = urllib.parse.parse_qs(event["body"])
+        body = urllib.parse.parse_qs(body)
         slack_user_id = body.get("user_id", [""])[0]
         send_login_button(slack_user_id)
         return {
@@ -55,7 +63,21 @@ def lambda_handler(event, context):
         tokens = res.json()
         # 여기에 access_token, id_token 저장 or 검증
 
-        user_info = jwt.decode(tokens["id_token"], key="", access_token=tokens["access_token"], options={"verify_signature": False, "verify_aud": False})
+        try:
+            user_info = verify_cognito_id_token(
+                tokens["id_token"],
+                tokens["access_token"],
+                region=CONFIG["aws_region"],
+                user_pool_id=CONFIG["cognito"]["user_pool_id"],
+                client_id=CONFIG["cognito"]["client_id"],
+            )
+        except Exception as e:
+            print(f"ID 토큰 검증 실패: {e}")
+            return {
+                "statusCode": 401,
+                "body": "<h3>Invalid token.</h3>",
+                "headers": {"Content-Type": "text/html"}
+            }
         email = user_info.get("email")
 
         save_session(
@@ -72,7 +94,7 @@ def lambda_handler(event, context):
         }
     # Slack Slash Command 처리
     elif path == "/models" and http_method == "POST":
-        body = urllib.parse.parse_qs(event["body"])
+        body = urllib.parse.parse_qs(body)
         slack_user_id = body.get("user_id", [""])[0]
 
         try:

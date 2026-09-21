@@ -52,7 +52,8 @@ def load_config():
             'identity_pool_id': ''
         },
         'slackbot': {
-            'token': ''
+            'token': '',
+            'signing_secret': ''
         },
         'mcp': {
             'function_url': os.environ.get('MCP_FUNCTION_URL', '')
@@ -108,6 +109,7 @@ def load_config():
             'IdentityPoolId': ('cognito', 'identity_pool_id'),
             'OutputBucketName': ('s3', 'output_bucket'),
             'SlackbotToken': ('slackbot', 'token'),
+            'SlackSigningSecret': ('slackbot', 'signing_secret'),
             'UserPoolClientId': ('cognito', 'client_id'),
             'UserPoolDomain': ('cognito', 'domain'),
             'UserPoolId': ('cognito', 'user_pool_id'),

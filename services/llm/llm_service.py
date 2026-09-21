@@ -82,12 +82,13 @@ def get_anthropic_models():
         return []
 
 
-def get_session_messages_as_array(session_id: str) -> list:
+def get_session_messages_as_array(session_id: str, user_id: str) -> list:
     """
     DynamoDB에서 세션의 메시지 히스토리를 messages 배열 형식으로 가져옴
 
     Args:
         session_id: 채팅 세션 ID
+        user_id: 요청자(Cognito sub). 세션 소유자와 다르면 히스토리를 사용하지 않음
 
     Returns:
         messages 배열 형식의 대화 기록
@@ -102,8 +103,8 @@ def get_session_messages_as_array(session_id: str) -> list:
         )
 
         session = response.get('Item')
-        if not session:
-            print(f"세션을 찾을 수 없습니다: {session_id}")
+        if not session or not user_id or session.get('userId') != user_id:
+            print(f"세션을 찾을 수 없거나 요청자 소유가 아닙니다: {session_id}")
             return []
 
         messages = session.get('messages', [])
@@ -188,7 +189,7 @@ def get_client(model_id: str = None):
     return client_cache[model_id]
 
 
-def handle_llm1_with_mcp(body, origin):
+def handle_llm1_with_mcp(body, origin, caller_id=None):
     """
     MCP 클라이언트를 사용하여 llm1 요청을 처리하고 도구 사용 과정 및 결과 포함
     세션 기반 메시지 캐싱 지원 (개선된 messages 배열 방식)
@@ -196,6 +197,7 @@ def handle_llm1_with_mcp(body, origin):
     Args:
         body: 요청 본문
         origin: CORS origin
+        caller_id: Cognito Authorizer가 검증한 요청자 sub (웹 요청), Slack 봇 직접 호출은 None
 
     Returns:
         응답 객체 (도구 사용 과정 및 결과 포함)
@@ -280,7 +282,7 @@ def handle_llm1_with_mcp(body, origin):
                 print(f"세션 ID: {session_id}")
 
                 # 세션 메시지 히스토리를 messages 배열로 로드
-                previous_messages = get_session_messages_as_array(session_id)
+                previous_messages = get_session_messages_as_array(session_id, caller_id)
 
                 if previous_messages:
                     print(f"=== 히스토리 발견 ===")
@@ -421,17 +423,6 @@ def get_table_registry():
     return {item["log_type"]: item for item in response.get("Items", [])}
 
 
-def call_mcp_service(user_question):
-    CONFIG = get_config()
-    payload = {
-        "input": {
-            "text": user_question
-        }
-    }
-    response = requests.post(CONFIG['mcp']['function_url'], json=payload)
-    return response.json()
-
-
 def trans_eng_to_kor(text):
     prompt = f"""
 You are a professional translator.
@@ -549,35 +540,6 @@ def parse_body(event):
 
     return {}
 
-
-def call_create_table_cloudtrail():
-    CONFIG = get_config()
-    payload = {
-        "log_type": "cloudtrail",
-        "s3_path": "s3://wga-cloudtrail-2/AWSLogs/339712974607/CloudTrail/us-east-1/",
-        "table_name": "cloudtrail_logs"
-    }
-    return requests.post(f'{CONFIG['api']['endpoint']}/create-table', json=payload)
-
-
-def call_create_table_guardduty():
-    CONFIG = get_config()
-    payload = {
-        "log_type": "guardduty",
-        "s3_path": "s3://wga-guardduty-logs/guardduty-logs/",
-        "table_name": "guardduty_logs"
-    }
-    return requests.post(f'{CONFIG['api']['endpoint']}/create-table', json=payload)
-
-
-def call_execute_query(sql_query):
-    CONFIG = get_config()
-    wrapper_payload = {
-        "query": sql_query
-    }
-    res = requests.post(f'{CONFIG['api']['endpoint']}/execute-query',
-                        json=wrapper_payload)  # Athena 쿼리 실행 API URL을 여기에 입력하세요
-    return res.json()
 
 def markdown_to_slack_mrkdwn(text):
     # 헤더를 볼드로 치환 (모든 헤더 레벨)
