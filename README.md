@@ -266,16 +266,36 @@ CloudFormation 기반 IaC와 `deploy.sh` 스크립트로 전체 시스템 배포
 
 ### 개발 환경 설정
 ```bash
-# 개발 종속성 설치
-cd frontend && npm install
-cd ../services/llm && pip install -r requirements.txt
+# 프론트엔드 개발 서버
+cd frontend && npm install && npm run dev
 
-# 로컬 개발 서버 실행
-cd frontend && npm run dev
-
-# Lambda 함수 로컬 테스트
-cd services/llm && python lambda_function.py
+# 백엔드 테스트·정적 분석 (Python 3.12)
+pip install -r requirements-dev.txt
+ruff check .
+pytest
 ```
+
+### 테스트
+`tests/`의 단위 테스트는 [moto](https://github.com/getmoto/moto)로 DynamoDB, CloudWatch Logs, CloudWatch를 모킹해 AWS 계정 없이 실행됩니다.
+
+| 파일 | 검증 내용 |
+|---|---|
+| `test_chat_history.py` | 토큰 `sub` 기반 사용자 식별, 다른 사용자의 세션 조회·수정·삭제 차단 |
+| `test_llm_service.py` | 웹 요청의 Slack 전용 필드 제거, 세션 히스토리 소유자 확인, CORS 허용 목록 |
+| `test_mcp_client.py` | MCP Function URL 호출 시 SigV4 서명 |
+| `test_slack_security.py` | Slack 요청 서명(위조·변조·재전송), Cognito ID 토큰(aud·iss·만료·서명) 검증 |
+| `test_mcp_tools.py` | MCP 도구(로그 조회, 대시보드 조회)와 세션 저장소 동작 |
+
+### CI (`.github/workflows/ci.yml`)
+PR과 `main` 푸시마다 세 작업이 병렬로 실행됩니다. AWS 자격 증명은 사용하지 않습니다.
+
+| 작업 | 내용 |
+|---|---|
+| Python | `ruff`(문법 오류·정의되지 않은 이름), `pytest` |
+| IaC | `cfn-lint`(오류 시 실패), `checkov` 보안 스캔, `deploy.sh` 문법 검사 |
+| 프론트엔드 | `vue-tsc` 타입 검사, `vite build` |
+
+`checkov`는 도입 시점의 기존 결과를 `cloudformation/.checkov.baseline`에 기준선으로 저장하고, **새로 생기는 보안 문제만** 실패로 처리합니다. 기준선의 항목은 하나씩 해결하면서 기준선을 다시 만듭니다.
 
 ## FAQ
 

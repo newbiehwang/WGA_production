@@ -6,7 +6,7 @@ import httpx
 import re
 import requests
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from typing import Optional, Dict, List, Any, Union
 from tabulate import tabulate
@@ -110,7 +110,7 @@ def fetch_cloudwatch_logs_for_service(
             return {"status": "warning", "message": f"No log groups found for service: {service_name}"}
 
         # Calculate time range
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(days=days)
 
         # Convert to milliseconds since epoch
@@ -372,7 +372,7 @@ def analyze_log_group(
     """
     try:
         # Calculate time range
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(days=days)
 
         # Convert to milliseconds since epoch
@@ -623,7 +623,7 @@ def analyze_log_groups_insights(
             return {"status": "error", "message": "로그 그룹을 지정해야 합니다."}
 
         # 시간 범위 계산
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(days=days)
         start_timestamp = int(start_time.timestamp())
         end_timestamp = int(end_time.timestamp())

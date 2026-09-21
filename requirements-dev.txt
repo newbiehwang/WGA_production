@@ -1,0 +1,19 @@
+# 테스트·정적 분석용 의존성 (Lambda 런타임에는 포함되지 않음)
+pytest==8.3.5
+moto[dynamodb,logs,cloudwatch]==5.2.3
+boto3
+requests
+python-jose[cryptography]
+slack_sdk
+# MCP 서버(mcp/app.py) import에 필요한 패키지
+pandas
+tabulate
+pydantic
+httpx
+markdownify
+beautifulsoup4
+diagrams
+matplotlib
+# 정적 분석
+ruff==0.11.8
+cfn-lint==1.34.2
