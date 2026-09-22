@@ -29,15 +29,15 @@ final class KeychainIntegrationTests: XCTestCase {
     func testSaveLoadStatusDelete() throws {
         KeychainStore.disableUserInteraction()
         let store = KeychainStore(keychainPath: path)
-        let credentials = AWSCredentials(accessKeyId: "AKIAIOSFODNN7EXAMPLE",
-                                         secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+        let credentials = AWSCredentials(accessKeyId: TestKeys.accessKeyId,
+                                         secretAccessKey: TestKeys.secretAccessKey)
         XCTAssertEqual(try store.status(account: "t"), StoredStatus(stored: false, maskedAccessKeyId: nil))
         try store.save(credentials, account: "t")
         XCTAssertEqual(try store.load(account: "t"), credentials)
-        XCTAssertEqual(try store.status(account: "t"), StoredStatus(stored: true, maskedAccessKeyId: "AKIA************MPLE"))
-        try store.save(AWSCredentials(accessKeyId: "AKIAIOSFODNN7EXAMPL2", secretAccessKey: credentials.secretAccessKey),
+        XCTAssertEqual(try store.status(account: "t"), StoredStatus(stored: true, maskedAccessKeyId: TestKeys.maskedAccessKeyId))
+        try store.save(AWSCredentials(accessKeyId: TestKeys.otherAccessKeyId, secretAccessKey: credentials.secretAccessKey),
                        account: "t")   // 다시 저장하면 덮어쓴다
-        XCTAssertEqual(try store.load(account: "t")?.accessKeyId, "AKIAIOSFODNN7EXAMPL2")
+        XCTAssertEqual(try store.load(account: "t")?.accessKeyId, TestKeys.otherAccessKeyId)
         try store.delete(account: "t")
         XCTAssertNil(try store.load(account: "t"))
     }

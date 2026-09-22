@@ -34,7 +34,7 @@ final class FakeHelper: CredentialHelping, @unchecked Sendable {
         stored.append((accessKeyId, secretAccessKey))
     }
     func status() throws -> HelperStatus {
-        HelperStatus(stored: !stored.isEmpty, maskedAccessKeyId: stored.isEmpty ? nil : "AKIA************MPLE")
+        HelperStatus(stored: !stored.isEmpty, maskedAccessKeyId: stored.isEmpty ? nil : TestKeys.maskedAccessKeyId)
     }
     func delete() throws { stored.removeAll() }
 }
@@ -47,8 +47,8 @@ final class MemoryStorage: SettingsStorage {
 
 @MainActor
 final class WizardModelTests: XCTestCase {
-    let accessKey = "AKIAIOSFODNN7EXAMPLE"
-    let secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    let accessKey = TestKeys.accessKeyId
+    let secret = TestKeys.secretAccessKey
     var directory: URL!
 
     override func setUp() {
@@ -126,7 +126,7 @@ final class WizardModelTests: XCTestCase {
     func testInvalidKeyIsRejectedBeforeCallingHelper() async {
         let helper = FakeHelper()
         let model = makeModel(FakeLauncher(), helper)
-        let saved = await model.saveAccessKey(accessKeyId: "ASIAIOSFODNN7EXAMPLE", secretAccessKey: secret)
+        let saved = await model.saveAccessKey(accessKeyId: TestKeys.temporaryAccessKeyId, secretAccessKey: secret)
         XCTAssertFalse(saved)
         XCTAssertTrue(helper.stored.isEmpty)
         XCTAssertTrue(model.awsMessage?.contains("임시 자격 증명") == true)

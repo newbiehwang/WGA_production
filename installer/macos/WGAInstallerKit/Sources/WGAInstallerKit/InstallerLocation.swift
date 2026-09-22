@@ -49,6 +49,10 @@ public enum ToolPath {
     public static func environment(_ base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
         var env = base
         env["PATH"] = augmented(base["PATH"])
+        // CLI(Python)가 앱 번들 안(Resources/core/__pycache__)에 바이트코드 캐시를 쓰지 않게 한다.
+        // 번들 내용이 바뀌면 코드 서명이 깨지고("a sealed resource is missing or invalid"), 나중에 공증한 앱은
+        // 실행이 막힐 수 있다. 캐시가 없어도 CLI는 몇 초 안에 뜨므로 속도 차이는 거의 없다.
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         return env
     }
 }

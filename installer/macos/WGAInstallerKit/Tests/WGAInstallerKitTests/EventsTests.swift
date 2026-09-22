@@ -84,6 +84,11 @@ final class EventsTests: XCTestCase {
                        "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
     }
 
+    func testCLIDoesNotWriteBytecodeIntoAppBundle() {
+        // 번들 안에 __pycache__가 생기면 코드 서명이 깨진다
+        XCTAssertEqual(ToolPath.environment(["PATH": "/usr/bin"])["PYTHONDONTWRITEBYTECODE"], "1")
+    }
+
     func testCopyableCommandFromHint() {
         // 실제 CLI 안내 문구 (installer/core/wga_installer/steps/check.py)
         XCTAssertEqual(CommandHint.copyableCommand(in: "brew install awscli v1이 설치되어 있다면 먼저 제거하세요 (pip uninstall awscli)"),

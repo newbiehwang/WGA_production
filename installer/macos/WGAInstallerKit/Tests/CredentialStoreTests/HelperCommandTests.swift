@@ -21,7 +21,7 @@ final class MemoryStore: SecretStore {
 
 /// 헬퍼 명령 처리 (키체인 없이)
 final class HelperCommandTests: XCTestCase {
-    let valid = #"{"AccessKeyId": "AKIAIOSFODNN7EXAMPLE", "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"}"#
+    let valid = #"{"AccessKeyId": "\#(TestKeys.accessKeyId)", "SecretAccessKey": "\#(TestKeys.secretAccessKey)"}"#
 
     func run(_ args: [String], stdin: String = "", store: SecretStore) -> HelperCommand.Output {
         HelperCommand.run(arguments: args, stdin: { Data(stdin.utf8) }, store: store)
@@ -34,8 +34,8 @@ final class HelperCommandTests: XCTestCase {
         XCTAssertEqual(output.exitCode, 0)
         let json = try JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as! [String: Any]
         XCTAssertEqual(json["Version"] as? Int, 1)
-        XCTAssertEqual(json["AccessKeyId"] as? String, "AKIAIOSFODNN7EXAMPLE")
-        XCTAssertEqual(json["SecretAccessKey"] as? String, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+        XCTAssertEqual(json["AccessKeyId"] as? String, TestKeys.accessKeyId)
+        XCTAssertEqual(json["SecretAccessKey"] as? String, TestKeys.secretAccessKey)
         XCTAssertEqual(run([], store: store).stdout, output.stdout)   // 인자 없이 실행하면 get
     }
 
@@ -54,9 +54,9 @@ final class HelperCommandTests: XCTestCase {
 
     func testInvalidFormatsAreRejected() {
         let store = MemoryStore()
-        let temporary = #"{"AccessKeyId": "ASIAIOSFODNN7EXAMPLE", "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"}"#
+        let temporary = #"{"AccessKeyId": "\#(TestKeys.temporaryAccessKeyId)", "SecretAccessKey": "\#(TestKeys.secretAccessKey)"}"#
         XCTAssertTrue(run(["store"], stdin: temporary, store: store).stderr.contains("임시 자격 증명"))
-        let shortSecret = #"{"AccessKeyId": "AKIAIOSFODNN7EXAMPLE", "SecretAccessKey": "short"}"#
+        let shortSecret = #"{"AccessKeyId": "\#(TestKeys.accessKeyId)", "SecretAccessKey": "short"}"#
         XCTAssertTrue(run(["store"], stdin: shortSecret, store: store).stderr.contains("Secret Access Key"))
         XCTAssertTrue(store.items.isEmpty)
     }
@@ -65,7 +65,7 @@ final class HelperCommandTests: XCTestCase {
         let store = MemoryStore()
         _ = run(["store"], stdin: valid, store: store)
         let output = run(["status"], store: store)
-        XCTAssertEqual(output.stdout, #"{"maskedAccessKeyId":"AKIA************MPLE","stored":true}"# + "\n")
+        XCTAssertEqual(output.stdout, #"{"maskedAccessKeyId":"\#(TestKeys.maskedAccessKeyId)","stored":true}"# + "\n")
     }
 
     func testDeleteAndUnknownCommand() {
@@ -85,7 +85,7 @@ final class HelperCommandTests: XCTestCase {
     }
 
     func testMasking() {
-        XCTAssertEqual(CredentialFormat.masked("AKIAIOSFODNN7EXAMPLE"), "AKIA************MPLE")
+        XCTAssertEqual(CredentialFormat.masked(TestKeys.accessKeyId), TestKeys.maskedAccessKeyId)
         XCTAssertEqual(CredentialFormat.masked("short"), "*****")
     }
 }
