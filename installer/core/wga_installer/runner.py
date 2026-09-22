@@ -24,7 +24,7 @@ import os
 import subprocess
 import tempfile
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TextIO
@@ -231,8 +231,9 @@ class Runner:
         return CommandResult(returncode, "".join(chunks["stdout"]), "".join(chunks["stderr"]))
 
 
+# 반환 타입: (yield 값, send 값, return 값). Generator[str]처럼 줄여 쓰는 형식은 3.13부터라 전부 적는다
 @contextmanager
-def secret_file(data: dict, *, directory: str | None = None) -> Iterator[str]:
+def secret_file(data: dict, *, directory: str | None = None) -> Generator[str, None, None]:
     """비밀 값을 담은 JSON을 권한 0600 임시 파일로 만들고 경로를 돌려준다. with 블록이 끝나면
     (예외가 나도) 파일을 지운다. 사용 예:
 
