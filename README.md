@@ -302,6 +302,36 @@ PR과 `main` 푸시마다 세 작업이 병렬로 실행됩니다. AWS 자격 �
 
 `checkov`는 도입 시점의 기존 결과를 `cloudformation/.checkov.baseline`에 기준선으로 저장하고, **새로 생기는 보안 문제만** 실패로 처리합니다. 기준선의 항목은 하나씩 해결하면서 기준선을 다시 만듭니다.
 
+### 배포 파이프라인 (`.github/workflows/deploy.yml`)
+`main`에 머지되면 dev에 자동 배포하고, prod는 GitHub Environment 승인 후 배포합니다. AWS 인증은 GitHub OIDC로 받은 단기 자격 증명만 사용하며 Access Key를 저장하지 않습니다.
+
+```
+main 머지 ──▶ dev 배포 (OIDC Role: wga-github-deploy-dev) ──▶ 승인 대기 ──▶ prod 배포 (wga-github-deploy-prod)
+```
+
+**처음 한 번 설정** (저장소 변수를 등록하기 전에는 배포 작업이 실행되지 않습니다)
+1. 환경별로 OIDC Role 스택을 관리자 권한으로 배포합니다. 계정에 GitHub OIDC 공급자가 이미 있으면 `ExistingOidcProviderArn`에 그 ARN을 넘깁니다.
+   ```bash
+   aws cloudformation deploy --stack-name wga-github-oidc-dev \
+     --template-file cloudformation/github-oidc.yaml \
+     --parameter-overrides Environment=dev \
+     --capabilities CAPABILITY_NAMED_IAM
+   ```
+2. GitHub 저장소 Settings → Environments에서 `dev`, `prod`를 만들고 다음을 설정합니다.
+   - **두 Environment 모두** Deployment branches and tags를 `main`만 허용하도록 제한합니다.
+     수동 실행(`workflow_dispatch`)은 브랜치를 고를 수 있어서, 제한하지 않으면 리뷰받지 않은 브랜치의 코드도 `environment:dev`로 실행되어 OIDC 신뢰 정책을 통과합니다. Environment 보호 규칙은 워크플로 파일 내용과 관계없이 GitHub가 강제하므로, `main`이 아닌 브랜치에서는 배포 작업이 시작되지 않고 OIDC 토큰도 발급되지 않습니다.
+   - `prod`에는 Required reviewers를 지정합니다.
+3. Settings → Variables → Actions에 스택 출력값 `DeployRoleArn`을 등록합니다.
+
+| 변수 | 값 |
+|---|---|
+| `AWS_DEPLOY_ROLE_ARN_DEV` | dev OIDC 스택의 `DeployRoleArn` |
+| `AWS_DEPLOY_ROLE_ARN_PROD` | prod OIDC 스택의 `DeployRoleArn` |
+| `AWS_REGION` | 배포 리전 (선택, 기본 `us-east-1`) |
+| `ALARM_EMAIL` | CloudWatch 알람 수신 이메일 (선택) |
+
+**배포 Role 권한 범위**: `PowerUserAccess`(IAM 제외 전 서비스) + `wga-*` Role에 한정한 IAM 관리 권한입니다. 관리형 정책은 템플릿에서 쓰는 목록만 연결할 수 있고, 배포 Role 자신은 수정할 수 없습니다. Role 신뢰 정책은 이 저장소의 해당 GitHub Environment에서 실행된 작업만 허용하고(`sub` 조건), Environment의 브랜치 제한과 승인 규칙이 그 작업을 실행할 수 있는 코드와 사람을 제한합니다.
+
 ## FAQ
 
 ### Q: 어떤 AWS 서비스를 지원하나요?

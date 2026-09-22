@@ -1,0 +1,116 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  WGA GitHub Actions 배포용 OIDC Role (부트스트랩 스택).
+  deploy.sh가 배포하지 않으며, 환경마다 한 번 수동으로 배포한다.
+  GitHub Actions가 장기 Access Key 없이 단기 자격 증명으로 배포하도록 한다.
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, test, prod]
+    Description: 이 Role로 배포할 환경. GitHub Environment 이름과 같아야 한다
+
+  GitHubRepository:
+    Type: String
+    Default: newbiehwang/WGA_production
+    AllowedPattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
+    Description: 배포를 허용할 GitHub 저장소 (owner/repo)
+
+  ExistingOidcProviderArn:
+    Type: String
+    Default: ''
+    Description: 계정에 GitHub OIDC 공급자가 이미 있으면 그 ARN (계정당 URL별로 하나만 만들 수 있음). 비워 두면 새로 만든다
+
+Conditions:
+  CreateOidcProvider: !Equals [!Ref ExistingOidcProviderArn, '']
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # AWS는 GitHub OIDC를 신뢰된 CA로 검증하므로 지문은 형식상 값이다
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  GitHubDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'wga-github-deploy-${Environment}'
+      Description: !Sub 'GitHub Actions에서 ${GitHubRepository}의 ${Environment} 환경 배포'
+      MaxSessionDuration: 7200   # deploy.sh 전체 실행(스택 생성, 이미지 빌드 대기) 시간 여유
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref ExistingOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                # 해당 저장소에서 GitHub Environment(dev/prod)를 지정한 작업만 이 Role을 쓸 수 있다.
+                # prod Environment에 필수 검토자를 두면 사람이 승인해야 배포된다.
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubRepository}:environment:${Environment}'
+      # deploy.sh는 CloudFormation으로 Lambda, API Gateway, Cognito, DynamoDB, S3, Amplify, CodeBuild, ECR,
+      # CloudWatch, SNS 등을 만들고 일부는 CLI로 직접 호출하므로 IAM 외 서비스 전반의 권한이 필요하다.
+      # PowerUserAccess는 IAM·Organizations·계정 관리를 제외하므로, IAM은 아래 정책에서 wga-* Role로 한정한다.
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/PowerUserAccess
+      Policies:
+        - PolicyName: WgaIamRoleManagement
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ManageWgaRoles
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:UpdateRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:ListRoleTags
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:PassRole
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/wga-*'
+              # 관리형 정책 연결은 템플릿에서 실제로 쓰는 정책만 허용 (AdministratorAccess 연결로 권한 상승 방지)
+              - Sid: AttachOnlyKnownManagedPolicies
+                Effect: Allow
+                Action:
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/wga-*'
+                Condition:
+                  ArnEquals:
+                    iam:PolicyARN:
+                      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+                      - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+                      - arn:aws:iam::aws:policy/AmazonAthenaFullAccess
+                      - arn:aws:iam::aws:policy/AmazonS3FullAccess
+                      - arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess
+                      - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+                      - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+              # 배포 Role 자신은 수정할 수 없다
+              - Sid: DenySelfModification
+                Effect: Deny
+                Action: iam:*
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/wga-github-deploy-*'
+
+Outputs:
+  DeployRoleArn:
+    Description: GitHub 저장소 변수 AWS_DEPLOY_ROLE_ARN_<ENV>에 넣을 값
+    Value: !GetAtt GitHubDeployRole.Arn

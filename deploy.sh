@@ -8,7 +8,8 @@ set -e
 ENV=${1:-dev}  # 기본값: dev
 ALARM_EMAIL=${ALARM_EMAIL:-}  # CloudWatch 알람 수신 이메일 (선택, 예: ALARM_EMAIL=me@example.com ./deploy.sh dev)
 ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
-REGION=$(aws configure get region)
+# CI(OIDC)에서는 ~/.aws/config가 없으므로 AWS_REGION 환경 변수를 우선 사용
+REGION=${AWS_REGION:-$(aws configure get region)}
 MCP_IMAGE_URI="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/wga-mcp-$ENV:latest"
 
 # ENV 값 검증
