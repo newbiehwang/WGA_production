@@ -15,6 +15,8 @@ interface AuthState {
 }
 
 const AUTH_TOKENS_KEY = 'wga_auth_tokens';
+// Cognito Hosted UI 도메인의 리전 (배포 리전과 같음, deploy.sh가 AWS_REGION으로 기록)
+const COGNITO_REGION = import.meta.env.AWS_REGION || 'ap-northeast-2';
 const AUTH_USER_KEY = 'wga_auth_user';
 
 export const useAuthStore = defineStore('auth', {
@@ -89,7 +91,7 @@ export const useAuthStore = defineStore('auth', {
                 const cognitoDomain = import.meta.env.COGNITO_DOMAIN;
                 const clientId = import.meta.env.COGNITO_CLIENT_ID;
 
-                const tokenEndpoint = `https://${cognitoDomain}.auth.us-east-1.amazoncognito.com/oauth2/token`;
+                const tokenEndpoint = `https://${cognitoDomain}.auth.${COGNITO_REGION}.amazoncognito.com/oauth2/token`;
 
                 const params = new URLSearchParams();
                 params.append('grant_type', 'refresh_token');
@@ -140,7 +142,7 @@ export const useAuthStore = defineStore('auth', {
                     );
                 }
 
-                const authUrl = `https://${cognitoDomain}.auth.us-east-1.amazoncognito.com/login?response_type=${responseType}&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
+                const authUrl = `https://${cognitoDomain}.auth.${COGNITO_REGION}.amazoncognito.com/login?response_type=${responseType}&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
 
                 localStorage.setItem('auth_redirect_path', window.location.pathname);
 
@@ -169,7 +171,7 @@ export const useAuthStore = defineStore('auth', {
                     );
                 }
 
-                const tokenEndpoint = `https://${cognitoDomain}.auth.us-east-1.amazoncognito.com/oauth2/token`;
+                const tokenEndpoint = `https://${cognitoDomain}.auth.${COGNITO_REGION}.amazoncognito.com/oauth2/token`;
 
                 const headers: Record<string, string> = {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -251,7 +253,7 @@ export const useAuthStore = defineStore('auth', {
                     return;
                 }
 
-                const logoutUrl = `https://${cognitoDomain}.auth.us-east-1.amazoncognito.com/logout?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}`;
+                const logoutUrl = `https://${cognitoDomain}.auth.${COGNITO_REGION}.amazoncognito.com/logout?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}`;
                 window.location.href = logoutUrl;
             } catch (error) {
                 console.error('로그아웃 중 오류 발생:', error);

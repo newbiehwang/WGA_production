@@ -8,8 +8,10 @@ set -e
 ENV=${1:-dev}  # 기본값: dev
 ALARM_EMAIL=${ALARM_EMAIL:-}  # CloudWatch 알람 수신 이메일 (선택, 예: ALARM_EMAIL=me@example.com ./deploy.sh dev)
 ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
-# CI(OIDC)에서는 ~/.aws/config가 없으므로 AWS_REGION 환경 변수를 우선 사용
-REGION=${AWS_REGION:-$(aws configure get region)}
+# 리전 우선순위: AWS_REGION 환경 변수(CI의 OIDC 포함) → CLI 프로필 설정 → 기본값 서울(ap-northeast-2)
+REGION=${AWS_REGION:-$(aws configure get region || true)}
+REGION=${REGION:-ap-northeast-2}
+export AWS_REGION=$REGION AWS_DEFAULT_REGION=$REGION
 MCP_IMAGE_URI="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/wga-mcp-$ENV:latest"
 
 # ENV 값 검증
@@ -186,7 +188,7 @@ if aws cloudformation describe-stacks --stack-name "$BASE_STACK_NAME" > /dev/nul
     # 도메인·MCP URL은 이후 단계에서 실제 값으로 갱신되므로 여기서는 기존 값을 유지한다
     # (placeholder를 넣으면 배포 도중 Cognito 콜백 URL이 잠시 잘못된 값이 된다)
     cfn_update $BASE_STACK_NAME \
-        --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/base.yaml" \
+        --template-url "https://$CLOUDFORMATION_BUCKET.s3.$REGION.amazonaws.com/base.yaml" \
         --parameters ParameterKey=Environment,ParameterValue=$ENV \
                     ParameterKey=BucketExists,ParameterValue=$BUCKET_EXISTS \
                     ParameterKey=OutputBucketExists,ParameterValue=$OUTPUT_BUCKET_EXISTS \
@@ -205,7 +207,7 @@ else
     echo "새 스택 생성 중: $BASE_STACK_NAME"
     aws cloudformation create-stack \
         --stack-name $BASE_STACK_NAME \
-        --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/base.yaml" \
+        --template-url "https://$CLOUDFORMATION_BUCKET.s3.$REGION.amazonaws.com/base.yaml" \
         --parameters ParameterKey=Environment,ParameterValue=$ENV \
                     ParameterKey=BucketExists,ParameterValue=$BUCKET_EXISTS \
                     ParameterKey=OutputBucketExists,ParameterValue=$OUTPUT_BUCKET_EXISTS \
@@ -254,7 +256,7 @@ if aws cloudformation describe-stacks --stack-name $FRONTEND_STACK_NAME > /dev/n
     # 스택이 존재하면 업데이트
     echo "기존 프론트엔드 스택 업데이트 중: $FRONTEND_STACK_NAME"
     cfn_update $FRONTEND_STACK_NAME \
-        --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/frontend.yaml" \
+        --template-url "https://$CLOUDFORMATION_BUCKET.s3.$REGION.amazonaws.com/frontend.yaml" \
         --parameters \
             ParameterKey=Environment,ParameterValue=$ENV \
             ParameterKey=DomainName,ParameterValue=$DOMAIN_NAME \
@@ -268,7 +270,7 @@ else
     echo "새 프론트엔드 스택 생성 중: $FRONTEND_STACK_NAME"
     aws cloudformation create-stack \
         --stack-name $FRONTEND_STACK_NAME \
-        --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/frontend.yaml" \
+        --template-url "https://$CLOUDFORMATION_BUCKET.s3.$REGION.amazonaws.com/frontend.yaml" \
         --parameters \
             ParameterKey=Environment,ParameterValue=$ENV \
             ParameterKey=DomainName,ParameterValue=$DOMAIN_NAME \
@@ -308,7 +310,7 @@ echo "Callback Domain: ${CALLBACK_DOMAIN}"
 # SSM 파라미터 변경 후 base 스택 업데이트 (SSM 파라미터가 CloudFormation에 의해 생성되기 때문)
 echo "FrontendRedirectDomain 및 Callback URL 업데이트를 위해 base 스택 업데이트 중..."
 cfn_update $BASE_STACK_NAME \
-    --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/base.yaml" \
+    --template-url "https://$CLOUDFORMATION_BUCKET.s3.$REGION.amazonaws.com/base.yaml" \
     --parameters ParameterKey=Environment,ParameterValue=$ENV \
                 ParameterKey=BucketExists,ParameterValue=true \
                 ParameterKey=OutputBucketExists,ParameterValue=true \
@@ -454,7 +456,7 @@ if aws cloudformation describe-stacks --stack-name $MCP_STACK_NAME > /dev/null 2
     # 스택이 존재하면 업데이트
     echo "기존 스택 업데이트 중: $MCP_STACK_NAME"
     cfn_update $MCP_STACK_NAME \
-        --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/mcp.yaml" \
+        --template-url "https://$CLOUDFORMATION_BUCKET.s3.$REGION.amazonaws.com/mcp.yaml" \
         --parameters \
             ParameterKey=Environment,ParameterValue=$ENV \
             ParameterKey=DockerBuildBucketName,ParameterValue="$DOCKER_BUILD_BUCKET" \
@@ -465,7 +467,7 @@ else
     echo "새 스택 생성 중: $MCP_STACK_NAME"
     aws cloudformation create-stack \
         --stack-name $MCP_STACK_NAME \
-        --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/mcp.yaml" \
+        --template-url "https://$CLOUDFORMATION_BUCKET.s3.$REGION.amazonaws.com/mcp.yaml" \
         --parameters \
             ParameterKey=Environment,ParameterValue=$ENV \
             ParameterKey=DockerBuildBucketName,ParameterValue="$DOCKER_BUILD_BUCKET" \
@@ -527,7 +529,7 @@ if aws cloudformation describe-stacks --stack-name $MAIN_STACK_NAME > /dev/null 
     # 스택이 존재하면 업데이트
     echo "기존 스택 업데이트 중: $MAIN_STACK_NAME"
     cfn_update $MAIN_STACK_NAME \
-        --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/main.yaml" \
+        --template-url "https://$CLOUDFORMATION_BUCKET.s3.$REGION.amazonaws.com/main.yaml" \
         --parameters \
             ParameterKey=Environment,ParameterValue=$ENV \
             ParameterKey=DeveloperMode,ParameterValue=$DEVELOPER_MODE \
@@ -552,7 +554,7 @@ else
     echo "새 스택 생성 중: $MAIN_STACK_NAME"
     aws cloudformation create-stack \
         --stack-name $MAIN_STACK_NAME \
-        --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/main.yaml" \
+        --template-url "https://$CLOUDFORMATION_BUCKET.s3.$REGION.amazonaws.com/main.yaml" \
         --parameters \
             ParameterKey=Environment,ParameterValue=$ENV \
             ParameterKey=DeveloperMode,ParameterValue=$DEVELOPER_MODE \
@@ -701,7 +703,7 @@ McpFunctionUrl=$(aws lambda get-function-url-config \
 echo "McpFunctionUrl: $McpFunctionUrl"
 echo "McpFunctionUrl 업데이트를 위해 base 스택 업데이트 중..."
 cfn_update $BASE_STACK_NAME \
-    --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/base.yaml" \
+    --template-url "https://$CLOUDFORMATION_BUCKET.s3.$REGION.amazonaws.com/base.yaml" \
     --parameters ParameterKey=Environment,ParameterValue=$ENV \
                 ParameterKey=BucketExists,ParameterValue=true \
                 ParameterKey=OutputBucketExists,ParameterValue=true \
@@ -735,20 +737,23 @@ if [ "$SKIP_FRONTEND" != "true" ]; then
 else
     echo "프론트엔드 배포 상태: 스킵됨"
 fi
-# CloudTrail 항목 추가
-aws dynamodb put-item --table-name AthenaTableRegistry-dev --item '{
+# Athena 테이블 레지스트리 초기값 (CloudTrail·GuardDuty 로그를 저장하는 버킷은 계정마다 다르므로 환경 변수로 지정)
+CLOUDTRAIL_LOG_BUCKET=${CLOUDTRAIL_LOG_BUCKET:-wga-cloudtrail-$ACCOUNT_ID}
+GUARDDUTY_LOG_BUCKET=${GUARDDUTY_LOG_BUCKET:-wga-guardduty-logs-$ACCOUNT_ID}
+REGISTRY_UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+aws dynamodb put-item --table-name "AthenaTableRegistry-$ENV" --item '{
   "log_type": {"S": "cloudtrail"},
   "table_name": {"S": "cloudtrail_logs"},
-  "s3_path": {"S": "s3://wga-cloudtrail-2/AWSLogs/339712974607/CloudTrail/us-east-1/"},
-  "updated_at": {"S": "2025-05-08T00:00:00Z"}
+  "s3_path": {"S": "s3://'"$CLOUDTRAIL_LOG_BUCKET"'/AWSLogs/'"$ACCOUNT_ID"'/CloudTrail/'"$REGION"'/"},
+  "updated_at": {"S": "'"$REGISTRY_UPDATED_AT"'"}
 }'
 
-# GuardDuty 항목 추가
-aws dynamodb put-item --table-name AthenaTableRegistry-dev --item '{
+aws dynamodb put-item --table-name "AthenaTableRegistry-$ENV" --item '{
   "log_type": {"S": "guardduty"},
   "table_name": {"S": "guardduty_logs"},
-  "s3_path": {"S": "s3://wga-guardduty-logs/guardduty-logs/"},
-  "updated_at": {"S": "2025-05-08T00:00:00Z"}
+  "s3_path": {"S": "s3://'"$GUARDDUTY_LOG_BUCKET"'/guardduty-logs/"},
+  "updated_at": {"S": "'"$REGISTRY_UPDATED_AT"'"}
 }'
 # SSM 파라미터 요약 출력
 echo "====== SSM 파라미터 요약 ======"

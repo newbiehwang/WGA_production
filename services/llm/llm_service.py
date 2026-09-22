@@ -170,7 +170,7 @@ def get_client(model_id: str = None):
         else:
             # Bedrock 설정
             mcp_token = os.environ.get('MCP_TOKEN', '')
-            region = os.environ.get('AWS_REGION', 'us-east-1')
+            region = os.environ.get('AWS_REGION', 'ap-northeast-2')
 
             # Bedrock 클라이언트 초기화
             from mcp_bedrock_client import BedrockMCPClient
