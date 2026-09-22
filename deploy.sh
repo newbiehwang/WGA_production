@@ -51,6 +51,35 @@ fi
 # SSM 파라미터 경로 기본 prefix 설정
 SSM_PATH_PREFIX="/wga/$ENV"
 
+# 코드 버전: Lambda zip의 S3 키와 MCP 이미지 태그에 붙인다.
+# 키가 매번 같으면 CloudFormation이 변경을 감지하지 못해 새 코드가 반영되지 않으므로 배포마다 달라져야 한다.
+if GIT_SHA=$(git rev-parse --short=12 HEAD 2>/dev/null); then
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        CODE_VERSION="${GIT_SHA}-dirty-$(date +%Y%m%d%H%M%S)"   # 커밋하지 않은 변경도 새 버전으로 배포
+    else
+        CODE_VERSION="$GIT_SHA"
+    fi
+else
+    CODE_VERSION="build-$(date +%Y%m%d%H%M%S)"
+fi
+echo "코드 버전: $CODE_VERSION"
+
+# 스택 업데이트 후 완료까지 대기한다. 변경 사항이 없으면 CloudFormation이 오류를 반환하는데,
+# set -e 때문에 배포가 중단되지 않도록 정상으로 처리한다.
+cfn_update() {
+    local stack=$1; shift
+    local out
+    if out=$(aws cloudformation update-stack --stack-name "$stack" "$@" 2>&1); then
+        echo "스택 업데이트 완료 대기 중: $stack"
+        aws cloudformation wait stack-update-complete --stack-name "$stack"
+    elif grep -q "No updates are to be performed" <<< "$out"; then
+        echo "변경 사항 없음: $stack (업데이트 건너뜀)"
+    else
+        echo "$out" >&2
+        return 1
+    fi
+}
+
 #################################################
 # 1. CloudFormation 버킷 확인 및 템플릿 업로드
 #################################################
@@ -88,8 +117,6 @@ echo "====== 2. 기본 스택 배포 시작 ======"
 if aws s3 ls "s3://$DEPLOYMENT_BUCKET" > /dev/null 2>&1; then
     echo "배포 버킷($DEPLOYMENT_BUCKET)이 이미 존재합니다. 이 버킷을 재사용합니다."
     BUCKET_EXISTS="true"
-    echo "$DEPLOYMENT_BUCKET 버킷 내용을 정리합니다..."
-    aws s3 rm "s3://$DEPLOYMENT_BUCKET" --recursive
 else
     echo "배포 버킷($DEPLOYMENT_BUCKET)이 존재하지 않습니다. 새로 생성합니다."
     BUCKET_EXISTS="false"
@@ -99,8 +126,6 @@ fi
 if aws s3 ls "s3://$OUTPUT_BUCKET_NAME" > /dev/null 2>&1; then
     echo "출력 버킷($OUTPUT_BUCKET_NAME)이 이미 존재합니다. 이 버킷을 재사용합니다."
     OUTPUT_BUCKET_EXISTS="true"
-    echo "$OUTPUT_BUCKET_NAME 버킷 내용을 정리합니다..."
-    aws s3 rm "s3://$OUTPUT_BUCKET_NAME" --recursive
 else
     echo "출력 버킷($OUTPUT_BUCKET_NAME)이 존재하지 않습니다. 새로 생성합니다."
     OUTPUT_BUCKET_EXISTS="false"
@@ -110,8 +135,6 @@ fi
 if aws s3 ls "s3://$ATHENA_OUTPUT_BUCKET_NAME" > /dev/null 2>&1; then
     echo "출력 버킷($ATHENA_OUTPUT_BUCKET_NAME)이 이미 존재합니다. 이 버킷을 재사용합니다."
     ATHENA_OUTPUT_BUCKET_EXISTS="true"
-    echo "$ATHENA_OUTPUT_BUCKET_NAME 버킷 내용을 정리합니다..."
-    aws s3 rm "s3://$ATHENA_OUTPUT_BUCKET_NAME" --recursive
 else
     echo "출력 버킷($ATHENA_OUTPUT_BUCKET_NAME)이 존재하지 않습니다. 새로 생성합니다."
     ATHENA_OUTPUT_BUCKET_EXISTS="false"
@@ -121,8 +144,6 @@ fi
 if aws s3 ls "s3://$GUARDDUTY_EXPORT_BUCKET_NAME" > /dev/null 2>&1; then
     echo "출력 버킷($GUARDDUTY_EXPORT_BUCKET_NAME)이 이미 존재합니다. 이 버킷을 재사용합니다."
     GUARDDUTY_EXPORT_BUCKET_EXISTS="true"
-    echo "$GUARDDUTY_EXPORT_BUCKET_NAME 버킷 내용을 정리합니다..."
-    aws s3 rm "s3://$GUARDDUTY_EXPORT_BUCKET_NAME" --recursive
 else
     echo "출력 버킷($GUARDDUTY_EXPORT_BUCKET_NAME)이 존재하지 않습니다. 새로 생성합니다."
     GUARDDUTY_EXPORT_BUCKET_EXISTS="false"
@@ -132,8 +153,6 @@ fi
 if aws s3 ls "s3://$DOCKER_BUILD_BUCKET_NAME" > /dev/null 2>&1; then
     echo "출력 버킷($DOCKER_BUILD_BUCKET_NAME)이 이미 존재합니다. 이 버킷을 재사용합니다."
     DOCKER_BUILD_BUCKET_EXISTS="true"
-    echo "$DOCKER_BUILD_BUCKET_NAME 버킷 내용을 정리합니다..."
-    aws s3 rm "s3://$DOCKER_BUILD_BUCKET_NAME" --recursive
 else
     echo "출력 버킷($DOCKER_BUILD_BUCKET_NAME)이 존재하지 않습니다. 새로 생성합니다."
     DOCKER_BUILD_BUCKET_EXISTS="false"
@@ -143,8 +162,6 @@ fi
 if aws s3 ls "s3://$FRONTEND_BUCKET" > /dev/null 2>&1; then
     echo "출력 버킷($FRONTEND_BUCKET)이 이미 존재합니다. 이 버킷을 재사용합니다."
     FRONTEND_BUCKET_EXISTS="true"
-    echo "$FRONTEND_BUCKET 버킷 내용을 정리합니다..."
-    aws s3 rm "s3://$FRONTEND_BUCKET" --recursive
 else
     echo "출력 버킷($FRONTEND_BUCKET)이 존재하지 않습니다. 새로 생성합니다."
     FRONTEND_BUCKET_EXISTS="false"
@@ -154,8 +171,6 @@ fi
 if aws s3 ls "s3://$DIAGRAM_BUCKET_NAME" > /dev/null 2>&1; then
     echo "다이어그램 버킷($DIAGRAM_BUCKET_NAME)이 이미 존재합니다. 이 버킷을 재사용합니다."
     DIAGRAM_BUCKET_EXISTS="true"
-    echo "$DIAGRAM_BUCKET_NAME 버킷 내용을 정리합니다..."
-    aws s3 rm "s3://$DIAGRAM_BUCKET_NAME" --recursive
 else
     echo "다이어그램 버킷($DIAGRAM_BUCKET_NAME)이 존재하지 않습니다. 새로 생성합니다."
     DIAGRAM_BUCKET_EXISTS="false"
@@ -167,8 +182,9 @@ echo "기본 인프라 스택 배포 중: $BASE_STACK_NAME..."
 if aws cloudformation describe-stacks --stack-name "$BASE_STACK_NAME" > /dev/null 2>&1; then
     # 스택이 존재하면 업데이트
     echo "기존 스택 업데이트 중: $BASE_STACK_NAME"
-    aws cloudformation update-stack \
-        --stack-name $BASE_STACK_NAME \
+    # 도메인·MCP URL은 이후 단계에서 실제 값으로 갱신되므로 여기서는 기존 값을 유지한다
+    # (placeholder를 넣으면 배포 도중 Cognito 콜백 URL이 잠시 잘못된 값이 된다)
+    cfn_update $BASE_STACK_NAME \
         --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/base.yaml" \
         --parameters ParameterKey=Environment,ParameterValue=$ENV \
                     ParameterKey=BucketExists,ParameterValue=$BUCKET_EXISTS \
@@ -178,14 +194,11 @@ if aws cloudformation describe-stacks --stack-name "$BASE_STACK_NAME" > /dev/nul
                     ParameterKey=DockerBuildBucketExists,ParameterValue=$DOCKER_BUILD_BUCKET_EXISTS \
                     ParameterKey=FrontendBucketExists,ParameterValue=$FRONTEND_BUCKET_EXISTS \
                     ParameterKey=DiagramBucketExists,ParameterValue=$DIAGRAM_BUCKET_EXISTS \
-                    ParameterKey=FrontendRedirectDomain,ParameterValue=placeholder.example.com \
-                    ParameterKey=CallbackDomain,ParameterValue=placeholder.example.com \
+                    ParameterKey=FrontendRedirectDomain,UsePreviousValue=true \
+                    ParameterKey=CallbackDomain,UsePreviousValue=true \
+                    ParameterKey=McpFunctionUrl,UsePreviousValue=true \
         --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
         --capabilities CAPABILITY_NAMED_IAM
-
-    # 스택 업데이트 완료 대기
-    echo "스택 업데이트 완료 대기 중: $BASE_STACK_NAME"
-    aws cloudformation wait stack-update-complete --stack-name $BASE_STACK_NAME
 else
     # 스택이 존재하지 않으면 생성
     echo "새 스택 생성 중: $BASE_STACK_NAME"
@@ -239,8 +252,7 @@ fi
 if aws cloudformation describe-stacks --stack-name $FRONTEND_STACK_NAME > /dev/null 2>&1; then
     # 스택이 존재하면 업데이트
     echo "기존 프론트엔드 스택 업데이트 중: $FRONTEND_STACK_NAME"
-    aws cloudformation update-stack \
-        --stack-name $FRONTEND_STACK_NAME \
+    cfn_update $FRONTEND_STACK_NAME \
         --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/frontend.yaml" \
         --parameters \
             ParameterKey=Environment,ParameterValue=$ENV \
@@ -250,10 +262,6 @@ if aws cloudformation describe-stacks --stack-name $FRONTEND_STACK_NAME > /dev/n
             ParameterKey=FrontendBucketName,ParameterValue=$FRONTEND_BUCKET \
         --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
         --capabilities CAPABILITY_NAMED_IAM
-
-    # 스택 업데이트 완료 대기
-    echo "프론트엔드 스택 업데이트 완료 대기 중: $FRONTEND_STACK_NAME"
-    aws cloudformation wait stack-update-complete --stack-name $FRONTEND_STACK_NAME
 else
     # 스택이 존재하지 않으면 생성
     echo "새 프론트엔드 스택 생성 중: $FRONTEND_STACK_NAME"
@@ -298,8 +306,7 @@ CALLBACK_DOMAIN="${API_GATEWAY_ID}.execute-api.${REGION}.amazonaws.com/${ENV}/ca
 echo "Callback Domain: ${CALLBACK_DOMAIN}"
 # SSM 파라미터 변경 후 base 스택 업데이트 (SSM 파라미터가 CloudFormation에 의해 생성되기 때문)
 echo "FrontendRedirectDomain 및 Callback URL 업데이트를 위해 base 스택 업데이트 중..."
-aws cloudformation update-stack \
-    --stack-name $BASE_STACK_NAME \
+cfn_update $BASE_STACK_NAME \
     --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/base.yaml" \
     --parameters ParameterKey=Environment,ParameterValue=$ENV \
                 ParameterKey=BucketExists,ParameterValue=true \
@@ -311,10 +318,9 @@ aws cloudformation update-stack \
                 ParameterKey=DiagramBucketExists,ParameterValue=true \
                 ParameterKey=FrontendRedirectDomain,ParameterValue=$FRONTEND_URL \
                 ParameterKey=CallbackDomain,ParameterValue=$CALLBACK_DOMAIN \
+                ParameterKey=McpFunctionUrl,UsePreviousValue=true \
     --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
     --capabilities CAPABILITY_NAMED_IAM
-
-aws cloudformation wait stack-update-complete --stack-name $BASE_STACK_NAME
 echo "FrontendRedirectDomain 업데이트 완료"
 
 echo "====== Layer 및 Lambda 함수 패키징 ======"
@@ -369,7 +375,7 @@ else
 fi
 
 echo "Common 레이어 업로드 중..."
-aws s3 cp build/layers/common-layer-$ENV.zip "s3://$DEPLOYMENT_BUCKET/layers/common-layer-$ENV.zip"
+aws s3 cp build/layers/common-layer-$ENV.zip "s3://$DEPLOYMENT_BUCKET/layers/common-layer-$ENV-$CODE_VERSION.zip"
 # Athena Utility Lambda 패키징 및 업로드
 if [ -d "services/db" ]; then
     echo "Athena Utility Lambda 패키징 중..."
@@ -381,7 +387,7 @@ if [ -d "services/db" ]; then
     cd ../..
 
     echo "Athena Utility Lambda 업로드 중..."
-    aws s3 cp build/db/athena-utility-lambda-$ENV.zip "s3://$DEPLOYMENT_BUCKET/db/athena-utility-lambda-$ENV.zip"
+    aws s3 cp build/db/athena-utility-lambda-$ENV.zip "s3://$DEPLOYMENT_BUCKET/db/athena-utility-lambda-$ENV-$CODE_VERSION.zip"
 fi
 
 if [ -d "services/llm" ]; then
@@ -394,7 +400,7 @@ if [ -d "services/llm" ]; then
     cd ../..
 
     echo "LLM 업로드 중..."
-    aws s3 cp build/llm/llm-lambda-$ENV.zip "s3://$DEPLOYMENT_BUCKET/llm/llm-lambda-$ENV.zip"
+    aws s3 cp build/llm/llm-lambda-$ENV.zip "s3://$DEPLOYMENT_BUCKET/llm/llm-lambda-$ENV-$CODE_VERSION.zip"
 fi
 
 # Slackbot Lambda 패키징 및 업로드 (존재하는 경우)
@@ -408,7 +414,7 @@ if [ -d "services/slackbot" ]; then
     cd ../..
 
     echo "Slackbot 업로드 중..."
-    aws s3 cp build/slackbot/slackbot-lambda-$ENV.zip "s3://$DEPLOYMENT_BUCKET/slackbot/slackbot-lambda-$ENV.zip"
+    aws s3 cp build/slackbot/slackbot-lambda-$ENV.zip "s3://$DEPLOYMENT_BUCKET/slackbot/slackbot-lambda-$ENV-$CODE_VERSION.zip"
 fi
 
 # Chat History Lambda 패키징 및 업로드
@@ -422,7 +428,7 @@ if [ -d "services/chat-history" ]; then
     cd ../..
 
     echo "Chat History Lambda 업로드 중..."
-    aws s3 cp build/chat-history/chat-history-lambda-$ENV.zip "s3://$DEPLOYMENT_BUCKET/chat-history/chat-history-lambda-$ENV.zip"
+    aws s3 cp build/chat-history/chat-history-lambda-$ENV.zip "s3://$DEPLOYMENT_BUCKET/chat-history/chat-history-lambda-$ENV-$CODE_VERSION.zip"
 fi
 
 # MCP 패키징 및 업로드 (존재하는 경우)
@@ -446,18 +452,13 @@ echo "도커 빌드 버킷: $DOCKER_BUILD_BUCKET"
 if aws cloudformation describe-stacks --stack-name $MCP_STACK_NAME > /dev/null 2>&1; then
     # 스택이 존재하면 업데이트
     echo "기존 스택 업데이트 중: $MCP_STACK_NAME"
-    aws cloudformation update-stack \
-        --stack-name $MCP_STACK_NAME \
+    cfn_update $MCP_STACK_NAME \
         --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/mcp.yaml" \
         --parameters \
             ParameterKey=Environment,ParameterValue=$ENV \
             ParameterKey=DockerBuildBucketName,ParameterValue="$DOCKER_BUILD_BUCKET" \
         --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
         --capabilities CAPABILITY_NAMED_IAM
-
-    # 스택 업데이트 완료 대기
-    echo "MCP 스택 업데이트 완료 대기 중: $MCP_STACK_NAME"
-    aws cloudformation wait stack-update-complete --stack-name $MCP_STACK_NAME
 else
     # 스택이 존재하지 않으면 생성
     echo "새 스택 생성 중: $MCP_STACK_NAME"
@@ -478,6 +479,7 @@ fi
 echo "MCP 배포 시작"
 BUILD_ID=$(aws codebuild start-build \
   --project-name wga-docker-build-$ENV \
+  --environment-variables-override name=MCP_ECR_IMAGE_TAG,value=$CODE_VERSION,type=PLAINTEXT \
   --query 'build.id' \
   --output text)
 
@@ -503,7 +505,7 @@ done
 
 # 빌드 완료 후 ECR 이미지 URI 가져오기
 ECR_REPOSITORY="wga-mcp-$ENV"
-ECR_IMAGE_TAG="latest"
+ECR_IMAGE_TAG="$CODE_VERSION"
 MCP_IMAGE_URI="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$ECR_REPOSITORY:$ECR_IMAGE_TAG"
 echo "MCP 이미지 URI: $MCP_IMAGE_URI"
 
@@ -523,8 +525,7 @@ echo "FRONTEND_REDIRECT_DOMAIN: $FRONTEND_REDIRECT_DOMAIN"
 if aws cloudformation describe-stacks --stack-name $MAIN_STACK_NAME > /dev/null 2>&1; then
     # 스택이 존재하면 업데이트
     echo "기존 스택 업데이트 중: $MAIN_STACK_NAME"
-    aws cloudformation update-stack \
-        --stack-name $MAIN_STACK_NAME \
+    cfn_update $MAIN_STACK_NAME \
         --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/main.yaml" \
         --parameters \
             ParameterKey=Environment,ParameterValue=$ENV \
@@ -542,6 +543,7 @@ if aws cloudformation describe-stacks --stack-name $MAIN_STACK_NAME > /dev/null 
             ParameterKey=KnowledgeBaseIdParameter,ParameterValue="$SSM_PATH_PREFIX/KnowledgeBaseId" \
             ParameterKey=CognitoAuthorizerIdParameter,ParameterValue="$SSM_PATH_PREFIX/CognitoAuthorizerId" \
             ParameterKey=McpImageUri,ParameterValue=$MCP_IMAGE_URI \
+            ParameterKey=CodeVersion,ParameterValue=$CODE_VERSION \
             ParameterKey=AlarmEmail,ParameterValue="$ALARM_EMAIL" \
         --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
         --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
@@ -567,6 +569,7 @@ else
             ParameterKey=KnowledgeBaseIdParameter,ParameterValue="$SSM_PATH_PREFIX/KnowledgeBaseId" \
             ParameterKey=CognitoAuthorizerIdParameter,ParameterValue="$SSM_PATH_PREFIX/CognitoAuthorizerId" \
             ParameterKey=McpImageUri,ParameterValue=$MCP_IMAGE_URI \
+            ParameterKey=CodeVersion,ParameterValue=$CODE_VERSION \
             ParameterKey=AlarmEmail,ParameterValue="$ALARM_EMAIL" \
         --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
         --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
@@ -698,8 +701,7 @@ McpFunctionUrl=$(aws lambda get-function-url-config \
   --output text)
 echo "McpFunctionUrl: $McpFunctionUrl"
 echo "McpFunctionUrl 업데이트를 위해 base 스택 업데이트 중..."
-aws cloudformation update-stack \
-    --stack-name $BASE_STACK_NAME \
+cfn_update $BASE_STACK_NAME \
     --template-url "https://s3.amazonaws.com/$CLOUDFORMATION_BUCKET/base.yaml" \
     --parameters ParameterKey=Environment,ParameterValue=$ENV \
                 ParameterKey=BucketExists,ParameterValue=true \

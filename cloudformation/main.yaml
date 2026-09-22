@@ -11,9 +11,13 @@ Parameters:
       - prod
     Description: The deployment environment
 
-  McpImageUri:  # << 이거 추가됨
+  McpImageUri:
     Type: "String"
-    Description: ECR URI for MCP Lambda Docker image
+    Description: ECR URI for MCP Lambda Docker image (코드 버전 태그 포함)
+
+  CodeVersion:
+    Type: String
+    Description: 배포 코드 버전 (deploy.sh가 git 커밋 SHA로 지정)
 
   DeveloperMode:
     Type: String
@@ -84,6 +88,7 @@ Resources:
       TemplateURL: !Sub "https://s3.amazonaws.com/wga-cloudformation-${AWS::AccountId}/llm.yaml"
       Parameters:
         Environment: !Ref Environment
+        CodeVersion: !Ref CodeVersion
         ApiGatewayId: !Ref ApiGatewayIdParameter
         ApiGatewayRootResourceId: !Ref ApiGatewayRootResourceIdParameter
         FrontendRedirectDomain: !Ref FrontendRedirectDomainParameter
@@ -100,6 +105,7 @@ Resources:
       TemplateURL: !Sub "https://s3.amazonaws.com/wga-cloudformation-${AWS::AccountId}/logs.yaml"
       Parameters:
         Environment: !Ref Environment
+        CodeVersion: !Ref CodeVersion
         ApiGatewayId: !Ref ApiGatewayIdParameter
         ApiGatewayRootResourceId: !Ref ApiGatewayRootResourceIdParameter
         FrontendRedirectDomain: !Ref FrontendRedirectDomainParameter
@@ -114,6 +120,7 @@ Resources:
       TemplateURL: !Sub "https://s3.amazonaws.com/wga-cloudformation-${AWS::AccountId}/slackbot.yaml"
       Parameters:
         Environment: !Ref Environment
+        CodeVersion: !Ref CodeVersion
         ApiGatewayId: !Ref ApiGatewayIdParameter
         ApiGatewayRootResourceId: !Ref ApiGatewayRootResourceIdParameter
         ApiEndpointParameter: !Ref ApiEndpointParameter
@@ -130,6 +137,7 @@ Resources:
       TemplateURL: !Sub "https://s3.amazonaws.com/wga-cloudformation-${AWS::AccountId}/chat-history.yaml"
       Parameters:
         Environment: !Ref Environment
+        CodeVersion: !Ref CodeVersion
         ApiGatewayId: !Ref ApiGatewayIdParameter
         ApiGatewayRootResourceId: !Ref ApiGatewayRootResourceIdParameter
         FrontendRedirectDomain: !Ref FrontendRedirectDomainParameter

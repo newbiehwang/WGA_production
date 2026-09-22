@@ -170,6 +170,11 @@ aws ssm put-parameter --name "/wga/${Environment}/ANTHROPIC_API_KEY" --value "yo
 ALARM_EMAIL=you@example.com ./deploy.sh dev
 ```
 
+재배포 동작:
+- **코드 버전**: Lambda zip의 S3 키와 MCP 이미지 태그에 git 커밋 SHA를 붙여, 코드를 바꾸면 CloudFormation이 변경을 감지해 새 코드를 배포합니다. 커밋하지 않은 변경이 있으면 `-dirty-<시각>`이 붙습니다.
+- **데이터 보존**: 버킷 내용을 지우지 않습니다. 모든 버킷이 `DeletionPolicy: Retain`이라 내용물이 있어도 스택 업데이트·롤백에 영향이 없습니다. 배포 버킷의 오래된 빌드 산출물은 수명 주기 규칙(90일)으로 정리됩니다.
+- **변경 없는 스택**: 바뀐 것이 없는 스택은 오류 없이 건너뜁니다.
+
 모든 스택에 `Project=WGA`, `Environment={env}` 태그가 붙어 하위 리소스까지 전파됩니다. Cost Explorer에서 두 태그를 비용 할당 태그로 활성화하면 프로젝트·환경별 비용을 볼 수 있습니다.
 
 ### 3단계: 배포 확인

@@ -30,6 +30,10 @@ Parameters:
     Type: String
     Description: API Gateway Cognito User Pool Authorizer ID
 
+  CodeVersion:
+    Type: String
+    Description: 배포 코드 버전 (Lambda zip S3 키에 포함되어 배포마다 새 코드가 반영되게 함)
+
 Resources:
   McpLambdaFunction:
     Type: AWS::Lambda::Function
@@ -195,7 +199,7 @@ Resources:
       Description: Common Python dependencies
       Content:
         S3Bucket: !Sub 'wga-deployment-${AWS::AccountId}-${Environment}'
-        S3Key: !Sub 'layers/common-layer-${Environment}.zip'
+        S3Key: !Sub 'layers/common-layer-${Environment}-${CodeVersion}.zip'
       CompatibleRuntimes:
         - python3.12
 
@@ -207,7 +211,7 @@ Resources:
       Handler: lambda_function.lambda_handler
       Code:
         S3Bucket: !Sub 'wga-deployment-${AWS::AccountId}-${Environment}'
-        S3Key: !Sub 'llm/llm-lambda-${Environment}.zip'
+        S3Key: !Sub 'llm/llm-lambda-${Environment}-${CodeVersion}.zip'
       Timeout: 180
       MemorySize: 256
       Role: !GetAtt LlmLambdaExecutionRole.Arn
