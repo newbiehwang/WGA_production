@@ -10,6 +10,8 @@ installer/core/wga-installer check --profile wga-dev   # 기존 AWS CLI 프로�
 installer/core/wga-installer setup                     # 할당량 요청, SSM 비밀 값 등록
 installer/core/wga-installer deploy --alarm-email me@example.com
 installer/core/wga-installer verify                    # 배포 검증
+installer/core/wga-installer oidc --env dev --block-test   # GitHub Actions 자동 배포 설정
+installer/core/wga-installer teardown --env dev            # 정리 (되돌릴 수 없음)
 ```
 
 | 명령 | 하는 일 | 바꾸는 것 |
@@ -18,13 +20,16 @@ installer/core/wga-installer verify                    # 배포 검증
 | `setup` | ① API Gateway 통합 타임아웃 할당량을 120000ms로 요청(자동 승인되는 최댓값) ② `/wga/<env>/ANTHROPIC_API_KEY`·`SlackbotToken`·`SlackSigningSecret`을 SecureString으로 등록 | 할당량 요청, SSM 파라미터 |
 | `deploy` | 사전 확인(필수 SSM 값, 할당량) 후 `./deploy.sh <env>` 실행, 진행 표시, 실패 원인 요약 | AWS 리소스 전체 |
 | `verify` | 스택 상태, 인증 없는 API 호출 차단, `/health`, AccessDenied 로그, 프론트엔드, 대시보드 | 없음 |
-
-`oidc`·`teardown`은 다음 마일스톤에서 추가합니다.
+| `oidc` | 배포 Role 스택(`wga-github-oidc-<env>`), GitHub Environment(main 브랜치로 제한, prod는 본인 승인), 저장소 변수 등록. 선택: `--test-run`(시험 배포), `--block-test`(다른 브랜치 차단 확인) | IAM Role, GitHub 설정 |
+| `teardown` | 한 환경의 스택·ECR·버킷(모든 버전)·로그 그룹·SSM 값·GitHub 변수와 Environment 삭제 | 전부 삭제 |
 
 ### 알아 둘 동작
 - **할당량이 먼저입니다.** `cloudformation/llm.yaml`이 통합 타임아웃을 120000ms로 설정하므로 할당량이 오르기 전에는 스택 생성이 실패합니다. `deploy`는 할당량이 부족하면 배포를 시작하지 않고 멈춥니다.
 - **Slack 값은 비워 둘 수 있습니다.** 비워 두면 등록하지 않고 건너뜁니다. Signing Secret이 없으면 Slack 요청은 모두 거부됩니다.
 - **이미 있는 SSM 값은 읽지 않습니다.** 이름과 형식만 확인하고(`describe-parameters`), 유지할지 덮어쓸지 묻습니다. 기본은 유지입니다.
+- **oidc는 dev·prod만** 설정합니다 (`deploy.yml`에 두 환경의 작업만 있음). Role 변수(`AWS_DEPLOY_ROLE_ARN_<ENV>`)는 등록되는 순간부터 main push가 배포를 일으키므로 가장 마지막에 등록합니다.
+- **OIDC 공급자는 계정에 하나이고 환경들이 함께 씁니다.** 공급자를 가진 스택에는 기존 ARN을 넘기지 않습니다(넘기면 CloudFormation이 공급자를 지움). teardown은 다른 환경이 쓰는 동안 공급자를 가진 OIDC 스택을 남깁니다.
+- **teardown 안전장치:** prod는 `--allow-prod`가 필요합니다. 지울 대상을 먼저 모두 보여 주고, 환경 이름을 직접 입력해야 진행하며, 단계마다 다시 승인받습니다(`--yes` 무시). 다른 환경이 남아 있으면 공유 버킷 `wga-cloudformation-<계정ID>`는 남깁니다.
 - **취소:** `deploy` 도중 Ctrl+C(또는 앱이 SIGINT·SIGTERM을 보냄)를 하면 deploy.sh와 그 자식 프로세스 전체에 중단 신호를 보내고, 최대 60초 기다린 뒤 강제 종료합니다. 스택이 업데이트 도중 상태로 남을 수 있습니다.
 
 ## 실행기와 Python 선택
@@ -52,7 +57,10 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 설치 마법사를 실행할 수 �
 | `--region` | AWS 리전. 없으면 `AWS_REGION` → CLI 프로필의 region → `ap-northeast-2` (deploy.sh와 같은 순서) |
 | `--profile` | AWS CLI 프로필. 지정하면 환경 변수의 `AWS_ACCESS_KEY_ID` 등은 자식 명령에 넘기지 않음 |
 | `--repo` | 저장소 경로. 없으면 현재 폴더부터 상위로 `deploy.sh`와 `cloudformation/`을 찾음 |
-| `--alarm-email` | (`deploy`만) CloudWatch 알람을 받을 이메일. 구독 확인 메일의 링크를 눌러야 알람이 옵니다 |
+| `--alarm-email` | (`deploy`·`oidc`) CloudWatch 알람을 받을 이메일. `oidc`에서는 저장소 변수 `ALARM_EMAIL`로 등록 |
+| `--github-repo` | (`oidc`·`teardown`) GitHub 저장소 owner/repo. 없으면 저장소 폴더의 git remote로 알아냄 |
+| `--test-run`, `--block-test` | (`oidc`) 시험 배포 실행 / main 외 브랜치 배포가 막히는지 확인 |
+| `--allow-prod` | (`teardown`) prod 삭제 허용 |
 
 ## 앱과 주고받는 형식
 
@@ -85,7 +93,10 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 설치 마법사를 실행할 수 �
 {"type": "confirm_response", "id": "put_ssm", "approved": true}
 {"type": "secret_response", "id": "secret_ANTHROPIC_API_KEY", "value": "..."}
 {"type": "choice_response", "id": "existing_SlackbotToken", "choice": "keep"}
+{"type": "text_response", "id": "confirm_env", "value": "dev"}
 ```
+
+질문(`confirm_required`·`input_required`·`choice_required`)은 하나씩 순서대로 나오므로 앱도 받은 순서대로 한 줄씩 답합니다. 여러 명령을 한 번에 승인받을 때(teardown의 각 단계 등) `command`에는 명령이 줄바꿈으로 이어져 있습니다.
 
 응답이 없거나(stdin 닫힘) 형식이 틀리거나 `id`가 다르거나 `approved`가 정확히 `true`가 아니면 **거절**로 처리합니다.
 선택(`choice_response`)은 응답이 없거나 선택지에 없는 값이면 `default`를 씁니다. 기본값은 항상 아무것도 바꾸지 않는 쪽입니다.
