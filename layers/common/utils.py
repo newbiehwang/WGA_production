@@ -175,7 +175,7 @@ def invoke_bedrock_nova(prompt):
         retrieveAndGenerateConfiguration={
             "knowledgeBaseConfiguration": {
                 "knowledgeBaseId": kb_id,
-                "modelArn": "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0"
+                "modelArn": f"arn:aws:bedrock:{AWS_REGION}::foundation-model/amazon.nova-pro-v1:0"
             },
             "type": "KNOWLEDGE_BASE",
         }

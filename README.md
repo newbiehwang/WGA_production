@@ -136,6 +136,7 @@ WGA_production/
 
 ### 사전 요구사항
 - AWS CLI 설정 및 적절한 권한
+- 배포 리전: 기본값은 서울(`ap-northeast-2`)입니다. `AWS_REGION` 환경 변수 → CLI 프로필의 리전 → 서울 순서로 정해지며, 코드에 특정 리전을 고정하지 않습니다.
 - Service Quotas -> API Gateway -> Maximum integration timeout in milliseconds -> 180000ms로 변경 요청(자동 승인)
 - Node.js 18+ 
 - Python 3.12+
@@ -327,7 +328,7 @@ main 머지 ──▶ dev 배포 (OIDC Role: wga-github-deploy-dev) ──▶ �
 |---|---|
 | `AWS_DEPLOY_ROLE_ARN_DEV` | dev OIDC 스택의 `DeployRoleArn` |
 | `AWS_DEPLOY_ROLE_ARN_PROD` | prod OIDC 스택의 `DeployRoleArn` |
-| `AWS_REGION` | 배포 리전 (선택, 기본 `us-east-1`) |
+| `AWS_REGION` | 배포 리전 (선택, 기본 `ap-northeast-2` 서울) |
 | `ALARM_EMAIL` | CloudWatch 알람 수신 이메일 (선택) |
 
 **배포 Role 권한 범위**: `PowerUserAccess`(IAM 제외 전 서비스) + `wga-*` Role에 한정한 IAM 관리 권한입니다. 관리형 정책은 템플릿에서 쓰는 목록만 연결할 수 있고, 배포 Role 자신은 수정할 수 없습니다. Role 신뢰 정책은 이 저장소의 해당 GitHub Environment에서 실행된 작업만 허용하고(`sub` 조건), Environment의 브랜치 제한과 승인 규칙이 그 작업을 실행할 수 있는 코드와 사람을 제한합니다.

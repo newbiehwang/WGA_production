@@ -81,7 +81,7 @@ Resources:
   LlmStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "https://s3.amazonaws.com/wga-cloudformation-${AWS::AccountId}/llm.yaml"
+      TemplateURL: !Sub "https://wga-cloudformation-${AWS::AccountId}.s3.${AWS::Region}.amazonaws.com/llm.yaml"
       Parameters:
         Environment: !Ref Environment
         CodeVersion: !Ref CodeVersion
@@ -98,7 +98,7 @@ Resources:
   DBStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "https://s3.amazonaws.com/wga-cloudformation-${AWS::AccountId}/logs.yaml"
+      TemplateURL: !Sub "https://wga-cloudformation-${AWS::AccountId}.s3.${AWS::Region}.amazonaws.com/logs.yaml"
       Parameters:
         Environment: !Ref Environment
         CodeVersion: !Ref CodeVersion
@@ -113,7 +113,7 @@ Resources:
   SlackbotStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "https://s3.amazonaws.com/wga-cloudformation-${AWS::AccountId}/slackbot.yaml"
+      TemplateURL: !Sub "https://wga-cloudformation-${AWS::AccountId}.s3.${AWS::Region}.amazonaws.com/slackbot.yaml"
       Parameters:
         Environment: !Ref Environment
         CodeVersion: !Ref CodeVersion
@@ -129,7 +129,7 @@ Resources:
   ChatHistoryStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "https://s3.amazonaws.com/wga-cloudformation-${AWS::AccountId}/chat-history.yaml"
+      TemplateURL: !Sub "https://wga-cloudformation-${AWS::AccountId}.s3.${AWS::Region}.amazonaws.com/chat-history.yaml"
       Parameters:
         Environment: !Ref Environment
         CodeVersion: !Ref CodeVersion
@@ -153,7 +153,7 @@ Resources:
   MonitoringStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "https://s3.amazonaws.com/wga-cloudformation-${AWS::AccountId}/monitoring.yaml"
+      TemplateURL: !Sub "https://wga-cloudformation-${AWS::AccountId}.s3.${AWS::Region}.amazonaws.com/monitoring.yaml"
       Parameters:
         Environment: !Ref Environment
         AlarmEmail: !Ref AlarmEmail

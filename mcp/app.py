@@ -35,7 +35,7 @@ RECOMMENDATIONS_API_URL = 'https://contentrecs-api.docs.aws.amazon.com/v1/recomm
 
 # Get session table name from environment variable
 session_table = os.environ.get('MCP_SESSION_TABLE', f'wga-mcp-sessions-{os.environ.get("ENV", "dev")}')
-aws_region = os.environ.get("AWS_REGION", "us-east-1")
+aws_region = os.environ.get("AWS_REGION", "ap-northeast-2")
 
 # Create AWS service clients
 cloudwatch_client = boto3.client('cloudwatch', region_name=aws_region)

@@ -2,7 +2,7 @@ import boto3
 import os
 
 guardduty = boto3.client('guardduty')
-region = os.environ.get("AWS_REGION", "us-east-1")
+region = os.environ.get("AWS_REGION", "ap-northeast-2")
 
 def lambda_handler(event, context):
     try:

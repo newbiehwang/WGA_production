@@ -114,3 +114,24 @@ def test_stack_parameters_do_not_reference_secure_strings():
     passed_ssm_paths = set(re.findall(r'ParameterValue="\$SSM_PATH_PREFIX/([^"]+)"', DEPLOY_SH))
     assert passed_ssm_paths, "deploy.sh에서 SSM 경로 파라미터를 찾지 못했습니다"
     assert not (passed_ssm_paths & secure_names), f"SecureString을 스택 파라미터로 전달: {passed_ssm_paths & secure_names}"
+
+
+def test_region_is_not_hardcoded():
+    # 배포 리전을 바꿔도 동작하도록 코드와 템플릿에 특정 리전·전역 S3 엔드포인트를 고정하지 않는다.
+    # (전역 엔드포인트 s3.amazonaws.com은 us-east-1 외 리전 버킷의 템플릿 URL에서 실패할 수 있다)
+    targets = [ROOT / "deploy.sh", *(ROOT / "cloudformation").glob("*.yaml"),
+               *(ROOT / "frontend" / "src").rglob("*.ts"), *(ROOT / "frontend" / "src").rglob("*.vue"),
+               *(ROOT / "layers").rglob("*.py"), *(ROOT / "services").rglob("*.py"), *(ROOT / "mcp").rglob("*.py")]
+    offenders = []
+    for path in targets:
+        text = path.read_text()
+        for pattern in ("us-east-1", "https://s3.amazonaws.com/"):
+            if pattern in text:
+                offenders.append(f"{path.relative_to(ROOT)}: {pattern}")
+    assert not offenders, offenders
+
+
+def test_default_region_is_seoul():
+    assert "REGION=${REGION:-ap-northeast-2}" in DEPLOY_SH
+    workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text()
+    assert "vars.AWS_REGION || 'ap-northeast-2'" in workflow
