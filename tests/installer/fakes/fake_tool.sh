@@ -23,6 +23,16 @@ tool=${0##*/}
   printf '\n'
 } >> "$FAKE_CLI_LOG"
 
+# file://로 넘어온 파일(예: aws ssm put-parameter --cli-input-json file://...)은 실행이 끝나면 지워지므로,
+# 권한과 내용을 지금 $FAKE_CLI_CAPTURES에 복사해 둔다. 항목 구분: 줄 하나짜리 RS(0x1e)
+for arg in "$@"; do
+  if [[ "$arg" == file://* ]]; then
+    src=${arg#file://}
+    listing=$(/bin/ls -l "$src")
+    { printf '%s\n' "${listing:0:10}"; /bin/cat "$src"; printf '\n\x1e\n'; } >> "$FAKE_CLI_CAPTURES"
+  fi
+done
+
 rules="$FAKE_CLI_RULES/$tool.sh"
 [[ -f "$rules" ]] && source "$rules"
 echo "fake $tool: 규칙 없음: $*" >&2

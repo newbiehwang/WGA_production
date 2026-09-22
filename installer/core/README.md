@@ -7,9 +7,25 @@ Python 표준 라이브러리만 쓰므로 `pip install`이 필요 없습니다 
 installer/core/wga-installer check                     # 사전 점검 (터미널용 출력)
 installer/core/wga-installer check --json              # 앱용 JSON Lines 출력
 installer/core/wga-installer check --profile wga-dev   # 기존 AWS CLI 프로필 사용
+installer/core/wga-installer setup                     # 할당량 요청, SSM 비밀 값 등록
+installer/core/wga-installer deploy --alarm-email me@example.com
+installer/core/wga-installer verify                    # 배포 검증
 ```
 
-현재 구현된 명령은 `check`(사전 점검)입니다. `setup`·`deploy`·`verify`·`oidc`·`teardown`은 다음 마일스톤에서 추가합니다.
+| 명령 | 하는 일 | 바꾸는 것 |
+|---|---|---|
+| `check` | 도구·저장소·자격 증명·리전 점검 | 없음 |
+| `setup` | ① API Gateway 통합 타임아웃 할당량을 180000ms로 요청 ② `/wga/<env>/ANTHROPIC_API_KEY`·`SlackbotToken`·`SlackSigningSecret`을 SecureString으로 등록 | 할당량 요청, SSM 파라미터 |
+| `deploy` | 사전 확인(필수 SSM 값, 할당량) 후 `./deploy.sh <env>` 실행, 진행 표시, 실패 원인 요약 | AWS 리소스 전체 |
+| `verify` | 스택 상태, 인증 없는 API 호출 차단, `/health`, AccessDenied 로그, 프론트엔드, 대시보드 | 없음 |
+
+`oidc`·`teardown`은 다음 마일스톤에서 추가합니다.
+
+### 알아 둘 동작
+- **할당량이 먼저입니다.** `cloudformation/llm.yaml`이 통합 타임아웃을 180000ms로 설정하므로 할당량이 오르기 전에는 스택 생성이 실패합니다. `deploy`는 할당량이 부족하면 배포를 시작하지 않고 멈춥니다.
+- **Slack 값은 비워 둘 수 있습니다.** 비워 두면 등록하지 않고 건너뜁니다. Signing Secret이 없으면 Slack 요청은 모두 거부됩니다.
+- **이미 있는 SSM 값은 읽지 않습니다.** 이름과 형식만 확인하고(`describe-parameters`), 유지할지 덮어쓸지 묻습니다. 기본은 유지입니다.
+- **취소:** `deploy` 도중 Ctrl+C(또는 앱이 SIGINT·SIGTERM을 보냄)를 하면 deploy.sh와 그 자식 프로세스 전체에 중단 신호를 보내고, 최대 60초 기다린 뒤 강제 종료합니다. 스택이 업데이트 도중 상태로 남을 수 있습니다.
 
 ## 실행기와 Python 선택
 
@@ -36,6 +52,7 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 설치 마법사를 실행할 수 �
 | `--region` | AWS 리전. 없으면 `AWS_REGION` → CLI 프로필의 region → `ap-northeast-2` (deploy.sh와 같은 순서) |
 | `--profile` | AWS CLI 프로필. 지정하면 환경 변수의 `AWS_ACCESS_KEY_ID` 등은 자식 명령에 넘기지 않음 |
 | `--repo` | 저장소 경로. 없으면 현재 폴더부터 상위로 `deploy.sh`와 `cloudformation/`을 찾음 |
+| `--alarm-email` | (`deploy`만) CloudWatch 알람을 받을 이메일. 구독 확인 메일의 링크를 눌러야 알람이 옵니다 |
 
 ## 앱과 주고받는 형식
 
@@ -46,7 +63,9 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 설치 마법사를 실행할 수 �
 {"type": "check", "id": "aws_cli", "title": "AWS CLI", "status": "ok", "detail": "2.17.0"}
 {"type": "check", "id": "node", "title": "Node.js", "status": "fail", "detail": "16.20.2 (필요: 18.0.0 이상)", "hint": "brew upgrade node"}
 {"type": "confirm_required", "id": "put_ssm", "command": "aws ssm put-parameter ...", "reason": "SSM에 값을 저장합니다"}
-{"type": "input_required", "id": "anthropic_api_key", "prompt": "Anthropic API 키", "secret": true}
+{"type": "input_required", "id": "secret_ANTHROPIC_API_KEY", "prompt": "Anthropic API 키", "secret": true}
+{"type": "choice_required", "id": "existing_SlackbotToken", "prompt": "/wga/dev/SlackbotToken이(가) 이미 있습니다", "options": [{"id": "keep", "label": "기존 값 유지"}, {"id": "overwrite", "label": "새 값으로 덮어쓰기"}], "default": "keep"}
+{"type": "progress", "step": "deploy", "phase": "3/6", "label": "Layer 및 Lambda 함수 패키징"}
 {"type": "dry_run", "id": "put_ssm", "command": "aws ssm put-parameter ...", "reason": "SSM에 값을 저장합니다"}
 {"type": "log", "stream": "stdout", "line": "..."}
 {"type": "step_finished", "step": "check", "status": "ok", "summary": "통과 14개 · 주의 1개 · 실패 0개"}
@@ -54,6 +73,8 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 설치 마법사를 실행할 수 �
 ```
 
 - `check.status`: `ok` 통과 / `warn` 진행 가능하지만 확인 필요 / `fail` 진행 불가 / `info` 정보
+- `check.url`: 있으면 앱이 "열기" 버튼을 붙일 주소 (프론트엔드, CloudWatch 대시보드 등)
+- `progress.phase`: deploy.sh의 번호 단계 `N/6`. 번호 없는 구분 줄(예: Layer 패키징)은 직전 번호를 유지하고 `label`만 바뀝니다
 - `step_finished.status`: `ok` / `skipped`(이미 되어 있음) / `failed`
 - `log.stream`: `stdout`·`stderr`(실행한 명령의 출력) / `info`(설치 마법사의 안내)
 - 사용자가 입력한 비밀 값은 어떤 이벤트에도 그대로 나오지 않고 `***`로 가려집니다.
@@ -62,10 +83,12 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 설치 마법사를 실행할 수 �
 
 ```json
 {"type": "confirm_response", "id": "put_ssm", "approved": true}
-{"type": "secret_response", "id": "anthropic_api_key", "value": "..."}
+{"type": "secret_response", "id": "secret_ANTHROPIC_API_KEY", "value": "..."}
+{"type": "choice_response", "id": "existing_SlackbotToken", "choice": "keep"}
 ```
 
 응답이 없거나(stdin 닫힘) 형식이 틀리거나 `id`가 다르거나 `approved`가 정확히 `true`가 아니면 **거절**로 처리합니다.
+선택(`choice_response`)은 응답이 없거나 선택지에 없는 값이면 `default`를 씁니다. 기본값은 항상 아무것도 바꾸지 않는 쪽입니다.
 
 ## 종료 코드
 

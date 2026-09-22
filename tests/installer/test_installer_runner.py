@@ -183,3 +183,56 @@ def test_secret_file_is_removed_even_on_error(tmp_path):
         with secret_file({"Value": "x"}, directory=str(tmp_path)) as path:
             raise RuntimeError("명령 실패")
     assert not os.path.exists(path)
+
+
+# ---- 선택 (유지/덮어쓰기 등) ----
+
+OPTIONS = [("keep", "기존 값 유지"), ("overwrite", "덮어쓰기")]
+
+
+def choose_response(choice):
+    return json.dumps({"type": "choice_response", "id": "existing_x", "choice": choice}) + "\n"
+
+
+@pytest.mark.parametrize("stdin, expected", [
+    (choose_response("overwrite"), "overwrite"),
+    (choose_response("keep"), "keep"),
+    (choose_response("delete-everything"), "keep"),   # 선택지에 없는 값 → 기본값
+    ("", "keep"),                                      # 응답 없음 → 기본값 (오류로 알리지 않음)
+])
+def test_choose_in_json_mode(fake, stdin, expected):
+    runner, out = make_runner(fake, stdin=stdin)
+    assert runner.interaction.choose("existing_x", "이미 있습니다", OPTIONS, default="keep") == expected
+    evts = output_events(out)
+    assert evts[0] == {"type": "choice_required", "id": "existing_x", "prompt": "이미 있습니다", "default": "keep",
+                       "options": [{"id": "keep", "label": "기존 값 유지"}, {"id": "overwrite", "label": "덮어쓰기"}]}
+    assert not any(e["type"] == "error" for e in evts)
+
+
+@pytest.mark.parametrize("answer, expected", [("2\n", "overwrite"), ("\n", "keep"), ("9\n", "keep"), ("x\n", "keep")])
+def test_choose_in_text_mode(fake, answer, expected):
+    runner, out = make_runner(fake, json_mode=False, stdin=answer)
+    assert runner.interaction.choose("existing_x", "이미 있습니다", OPTIONS, default="keep") == expected
+    assert "2) 덮어쓰기" in out.getvalue() and "[기본 1]" in out.getvalue()
+
+
+def test_command_shows_extra_env(fake):
+    runner, out = make_runner(fake, dry_run=True)
+    runner.change(["./deploy.sh", "dev"], id_="deploy", reason="배포",
+                  extra_env={"AWS_REGION": "ap-northeast-2", "ALARM_EMAIL": "a b@example.com"})
+    assert output_events(out)[0]["command"] == "AWS_REGION=ap-northeast-2 ALARM_EMAIL='a b@example.com' ./deploy.sh dev"
+
+
+def test_streaming_timeout_kills_child_processes(fake, tmp_path):
+    # deploy.sh처럼 자식을 띄우는 명령이 제한 시간을 넘기면 자식까지 모두 종료한다
+    script = tmp_path / "bin" / "slow"
+    pid_file = tmp_path / "child.pid"
+    script.write_text(f"#!/bin/bash\n/bin/bash -c 'echo $$ > {pid_file}; exec /bin/sleep 30'\n")
+    script.chmod(0o755)
+    runner, out = make_runner(fake)
+    result = runner.run(["slow"], stream=True, timeout=1)
+    child = int(pid_file.read_text())
+    assert result.returncode == RC_TIMEOUT and not result.interrupted
+    with pytest.raises(ProcessLookupError):
+        os.kill(child, 0)
+    assert any("중단합니다" in e["line"] for e in output_events(out) if e["type"] == "log")
