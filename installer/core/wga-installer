@@ -1,0 +1,78 @@
+#!/bin/bash
+# WGA 설치 마법사 실행기: 알맞은 Python(3.10 이상)을 골라 `python -m wga_installer`를 실행한다.
+#
+#   installer/core/wga-installer check
+#   installer/core/wga-installer check --json      # macOS 앱도 이 스크립트로 CLI를 실행한다
+#
+# 왜 필요한가
+#   macOS 기본 /usr/bin/python3는 Command Line Tools의 3.9라서 설치 마법사를 실행할 수 없고,
+#   Command Line Tools가 없으면 실행하는 순간 "개발자 도구를 설치하시겠습니까?" 창이 뜬다.
+#   PATH의 python3도 conda·pyenv 등 무엇이든 될 수 있다. 그래서 찾는 순서를 한곳(이 파일)에 정해 두고
+#   터미널 사용자와 앱이 같은 규칙으로 Python을 고르게 한다.
+#
+# 찾는 순서 (3.10 이상인 첫 번째를 쓴다)
+#   1. WGA_PYTHON 환경 변수 — 사용자가 직접 고른 인터프리터. 3.10 미만이면 다른 후보로 넘어가지 않고 오류로 알린다
+#   2. /opt/homebrew/bin/python3 — Apple Silicon의 Homebrew
+#   3. /usr/local/bin/python3 — Intel Mac의 Homebrew, python.org 설치본
+#   4. PATH의 python3
+#   5. /usr/bin/python3 — macOS에서는 Command Line Tools가 설치된 경우에만 시도 (설치 창이 뜨지 않게)
+#
+# 종료 코드 3: 쓸 수 있는 Python을 찾지 못함 (wga_installer/__init__.py의 버전 오류와 같은 코드)
+
+set -u
+
+# 이 스크립트가 있는 폴더 (dirname 같은 외부 명령 없이 bash 문법만으로 구한다)
+script_path=${BASH_SOURCE[0]}
+[[ "$script_path" == */* ]] || script_path="./$script_path"
+SCRIPT_DIR="$(cd "${script_path%/*}" && pwd)"
+EXIT_PYTHON_TOO_OLD=3
+
+# 앱은 --json으로 실행하고 stdout의 JSON Lines만 읽으므로, 오류도 같은 형식으로 내보낸다
+json_mode=false
+for arg in "$@"; do
+  [[ "$arg" == "--json" ]] && json_mode=true
+done
+
+fail() {
+  local message=$1 hint=$2
+  if $json_mode; then
+    # message·hint에는 따옴표·역슬래시가 없는 고정 문구만 넣으므로 그대로 JSON 문자열로 써도 안전하다
+    printf '{"type": "error", "step": "python", "message": "%s", "hint": "%s"}\n' "$message" "$hint"
+  else
+    printf '오류: %s\n  → %s\n' "$message" "$hint" >&2
+  fi
+  exit "$EXIT_PYTHON_TOO_OLD"
+}
+
+# 인터프리터가 실행 가능하고 3.10 이상인지. 버전 확인 코드는 아주 오래된 Python에서도 해석되는 문법만 쓴다
+is_usable() {
+  [[ -x "$1" ]] && "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1
+}
+
+python=""
+if [[ -n "${WGA_PYTHON:-}" ]]; then
+  # 직접 지정한 값이 맞지 않는데 조용히 다른 Python을 쓰면 사용자가 원인을 찾기 어렵다
+  is_usable "$WGA_PYTHON" || fail "WGA_PYTHON에 지정한 Python을 실행할 수 없거나 3.10 미만입니다" \
+                                  "3.10 이상 Python 경로를 지정하거나 WGA_PYTHON을 비우세요"
+  python=$WGA_PYTHON
+else
+  candidates=(/opt/homebrew/bin/python3 /usr/local/bin/python3)
+  path_python=$(command -v python3 2>/dev/null || true)
+  [[ -n "$path_python" ]] && candidates+=("$path_python")
+  # /usr/bin/python3는 macOS에서 Command Line Tools가 없으면 설치 창을 띄우는 껍데기다
+  if [[ "$(uname -s)" != "Darwin" ]] || xcode-select -p >/dev/null 2>&1; then
+    candidates+=(/usr/bin/python3)
+  fi
+  for candidate in "${candidates[@]}"; do
+    if is_usable "$candidate"; then
+      python=$candidate
+      break
+    fi
+  done
+fi
+
+[[ -n "$python" ]] || fail "Python 3.10 이상을 찾지 못했습니다" "brew install python 으로 설치하세요"
+
+# wga_installer 패키지가 이 스크립트 옆에 있으므로 PYTHONPATH 앞에 이 폴더를 둔다
+export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+exec "$python" -m wga_installer "$@"
