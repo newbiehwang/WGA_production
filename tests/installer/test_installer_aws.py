@@ -34,6 +34,18 @@ def test_required_timeout_matches_llm_template():
     assert timeouts and max(timeouts) == REQUIRED_TIMEOUT_MS
 
 
+def test_latency_alarm_fires_before_integration_timeout():
+    # 응답은 통합 타임아웃에서 끊기므로, 알람 임계값이 그 이상이면 알람이 울릴 수 없다
+    threshold = int(re.search(r"ApiLatencyP95ThresholdMs:\n(?:\s+.*\n)*?\s+Default: (\d+)",
+                              TEMPLATES["monitoring.yaml"]).group(1))
+    assert threshold < REQUIRED_TIMEOUT_MS
+
+
+def test_readme_quota_matches_required_value():
+    readme = (ROOT / "README.md").read_text()
+    assert f"Maximum integration timeout in milliseconds -> {REQUIRED_TIMEOUT_MS}ms" in readme
+
+
 def test_secret_params_match_readme():
     readme = (ROOT / "README.md").read_text()
     secure = set(re.findall(r'put-parameter --name "/wga/\$\{Environment\}/([^"]+)"[^\n]*--type "SecureString"', readme))

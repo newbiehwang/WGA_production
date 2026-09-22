@@ -20,7 +20,7 @@ def quotas(value, adjustable=True):
 
 def history(*statuses):
     return json.dumps({"RequestedQuotas": [
-        {"Status": status, "DesiredValue": 180000.0, "Created": f"2026-09-{10 + i:02d}T00:00:00+00:00"}
+        {"Status": status, "DesiredValue": 120000.0, "Created": f"2026-09-{10 + i:02d}T00:00:00+00:00"}
         for i, status in enumerate(statuses)]})
 
 
@@ -80,7 +80,7 @@ def test_first_run_requests_quota_and_stores_secrets(fake):
 
     request = [c for c in mutating_calls(fake) if "request-service-quota-increase" in c]
     assert request == [["service-quotas", "request-service-quota-increase", "--service-code", "apigateway",
-                        "--quota-code", QUOTA_CODE, "--desired-value", "180000", "--output", "json"]]
+                        "--quota-code", QUOTA_CODE, "--desired-value", "120000", "--output", "json"]]
 
     stored = [json.loads(content) for _, content in fake.captures()]
     assert [(s["Name"], s["Type"], s["Overwrite"]) for s in stored] == [
@@ -104,13 +104,21 @@ def test_secrets_only_travel_in_private_temp_files(fake):
 
 def test_second_run_changes_nothing(fake):
     # 멱등성: 할당량이 이미 충분하고 파라미터가 모두 있으면 아무것도 바꾸지 않는다 (응답이 없으면 기본값 "유지")
-    account(fake, quota=180000, existing={key: "SecureString" for key in SECRETS})
+    account(fake, quota=120000, existing={key: "SecureString" for key in SECRETS})
     result = setup_json(fake)
     steps = finished(result.stdout)
     assert result.returncode == 0
     assert steps["quota"]["status"] == steps["ssm_parameters"]["status"] == "skipped"
     assert mutating_calls(fake) == []
     assert [e["type"] for e in events(result.stdout)].count("choice_required") == 3
+
+
+def test_previously_raised_higher_quota_is_enough(fake):
+    # 예전에 180000ms로 올려 둔 계정은 다시 요청하지 않는다
+    account(fake, quota=180000, existing={key: "SecureString" for key in SECRETS})
+    result = setup_json(fake)
+    assert finished(result.stdout)["quota"]["summary"] == "이미 충분합니다 (현재 180000ms)"
+    assert mutating_calls(fake) == []
 
 
 def test_pending_request_is_not_repeated(fake):
@@ -155,7 +163,7 @@ def test_quota_found_in_default_list(fake):
 
 
 def test_overwrite_existing_parameter(fake):
-    account(fake, quota=180000, existing={key: "SecureString" for key in SECRETS})
+    account(fake, quota=120000, existing={key: "SecureString" for key in SECRETS})
     result = setup_json(fake, choice("ANTHROPIC_API_KEY", "overwrite"),
                         secret("ANTHROPIC_API_KEY", "sk-ant-NEW"), confirm("put_ANTHROPIC_API_KEY"),
                         choice("SlackbotToken", "keep"), choice("SlackSigningSecret", "keep"))
@@ -166,7 +174,7 @@ def test_overwrite_existing_parameter(fake):
 
 
 def test_plain_string_parameter_is_flagged(fake):
-    account(fake, quota=180000, existing={"ANTHROPIC_API_KEY": "String", "SlackbotToken": "SecureString",
+    account(fake, quota=120000, existing={"ANTHROPIC_API_KEY": "String", "SlackbotToken": "SecureString",
                                           "SlackSigningSecret": "SecureString"})
     result = setup_json(fake)
     assert any(e["type"] == "log" and "String 형식" in e["line"] for e in events(result.stdout))
@@ -174,13 +182,13 @@ def test_plain_string_parameter_is_flagged(fake):
 
 def test_value_is_trimmed(fake):
     # 복사해 붙여 넣을 때 딸려 온 공백·줄바꿈은 지우고 저장한다
-    account(fake, quota=180000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
+    account(fake, quota=120000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
     setup_json(fake, secret("ANTHROPIC_API_KEY", "  sk-ant-TRIM \n"), confirm("put_ANTHROPIC_API_KEY"))
     assert json.loads(fake.captures()[0][1])["Value"] == "sk-ant-TRIM"
 
 
 def test_empty_slack_values_are_skipped(fake):
-    account(fake, quota=180000, existing={"ANTHROPIC_API_KEY": "SecureString"})
+    account(fake, quota=120000, existing={"ANTHROPIC_API_KEY": "SecureString"})
     result = setup_json(fake, choice("ANTHROPIC_API_KEY", "keep"),
                         secret("SlackbotToken", ""), secret("SlackSigningSecret", ""))
     assert result.returncode == 0
@@ -189,14 +197,14 @@ def test_empty_slack_values_are_skipped(fake):
 
 
 def test_empty_anthropic_key_fails(fake):
-    account(fake, quota=180000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
+    account(fake, quota=120000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
     result = setup_json(fake, secret("ANTHROPIC_API_KEY", ""))
     assert result.returncode == 1 and mutating_calls(fake) == []
     assert finished(result.stdout)["ssm_parameters"]["status"] == "failed"
 
 
 def test_declined_put_is_not_executed(fake):
-    account(fake, quota=180000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
+    account(fake, quota=120000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
     result = setup_json(fake, secret("ANTHROPIC_API_KEY", "sk-ant-x"), confirm("put_ANTHROPIC_API_KEY", False))
     assert mutating_calls(fake) == [] and list(fake.tmp.iterdir()) == []
     assert "건너뜀 1개" in finished(result.stdout)["ssm_parameters"]["summary"]
@@ -205,7 +213,7 @@ def test_declined_put_is_not_executed(fake):
 def test_put_failure_is_reported(fake):
     fake.add("aws", "put-parameter", stderr="An error occurred (AccessDeniedException) when calling the "
                                             "PutParameter operation\n", exit=254)
-    account(fake, quota=180000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
+    account(fake, quota=120000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
     result = setup_json(fake, secret("ANTHROPIC_API_KEY", "sk-ant-x"), confirm("put_ANTHROPIC_API_KEY"))
     assert result.returncode == 1
     assert finished(result.stdout)["ssm_parameters"]["status"] == "failed"
@@ -224,7 +232,7 @@ def test_dry_run_asks_no_secrets_and_changes_nothing(fake):
 @pytest.mark.parametrize("answer, expected_calls", [("y\n", 1), ("n\n", 0)])
 def test_text_mode(fake, answer, expected_calls):
     # 터미널에서는 y/N 질문, 번호 선택, 보이지 않는 입력(파이프일 때는 한 줄 읽기)을 쓴다
-    account(fake, quota=180000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
+    account(fake, quota=120000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
     result = run_cli(fake, "setup", "--region", "ap-northeast-2", input=f"sk-ant-TEXT\n{answer}\n\n")
     assert "[y/N]" in result.stdout and "번호를 입력하세요" in result.stdout
     assert "sk-ant-TEXT" not in result.stdout

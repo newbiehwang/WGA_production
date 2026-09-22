@@ -1,6 +1,6 @@
 """setup: 배포 전에 한 번 해 두어야 하는 계정 설정 (계획서 4.2절)
 
-1. quota           API Gateway 통합 타임아웃 할당량을 180000ms로 올려 달라고 요청한다.
+1. quota           API Gateway 통합 타임아웃 할당량을 120000ms로 올려 달라고 요청한다 (이 값까지는 자동 승인).
 2. ssm_parameters  Anthropic API 키와 Slack 값을 SSM Parameter Store에 SecureString으로 저장한다.
 
 두 작업 모두 "현재 상태 확인 → 이미 되어 있으면 skipped → 할 일을 보여 주고 승인 → 실행" 순서를 따른다.
@@ -70,7 +70,7 @@ def _request_quota(ctx: Context, runner: Runner, emitter: Emitter) -> bool:
     if history and history[0].get("Status") in QUOTA_REJECTED_STATUSES:
         emitter.log(f"가장 최근 요청이 거절되었습니다 (상태 {history[0]['Status']}). 다시 요청합니다", stream="info")
 
-    emitter.log(f"현재 {current}ms입니다. WGA는 LLM 응답을 최대 180초 기다리도록 통합 타임아웃을 "
+    emitter.log(f"현재 {current}ms입니다. WGA는 LLM 응답을 최대 {REQUIRED_TIMEOUT_MS // 1000}초 기다리도록 통합 타임아웃을 "
                 f"{REQUIRED_TIMEOUT_MS}ms로 설정하므로, 할당량이 오르기 전에는 배포가 실패합니다", stream="info")
     emitter.log("보통 자동으로 승인되지만, 무료 플랜 계정은 거절될 수 있습니다", stream="info")
     result = runner.change(

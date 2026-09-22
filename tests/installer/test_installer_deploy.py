@@ -90,7 +90,7 @@ echo "====== 배포 완료! ======"
 """
 
 
-def ready_account(fake, *, quota=180000, anthropic=True):
+def ready_account(fake, *, quota=120000, anthropic=True):
     params = [{"Name": "/wga/dev/ANTHROPIC_API_KEY", "Type": "SecureString"}] if anthropic else []
     fake.add("aws", "describe-parameters", json.dumps({"Parameters": params}))
     fake.add("aws", "list-service-quotas", json.dumps({"Quotas": [
@@ -140,7 +140,7 @@ def test_missing_anthropic_key_stops_before_deploy(fake, repo):
 
 
 def test_low_quota_stops_before_deploy(fake, repo):
-    # llm.yaml이 180000ms를 쓰므로 할당량이 낮으면 스택이 실패한다 → 20~40분 기다리기 전에 멈춘다
+    # llm.yaml이 120000ms를 쓰므로 할당량이 낮으면 스택이 실패한다 → 20~40분 기다리기 전에 멈춘다
     write_deploy(repo, SUCCESS_SCRIPT)
     ready_account(fake, quota=29000)
     result = deploy_cli(fake, repo, input=approve_deploy())

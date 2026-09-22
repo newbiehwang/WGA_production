@@ -14,8 +14,8 @@ Parameters:
 
   ApiLatencyP95ThresholdMs:
     Type: Number
-    Default: 150000
-    Description: API Gateway Latency p95 알람 임계값(ms). 통합 타임아웃 180초에 근접하면 알린다
+    Default: 100000
+    Description: API Gateway Latency p95 알람 임계값(ms). 통합 타임아웃 120초에 근접하면 알린다
 
 Conditions:
   HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
@@ -212,7 +212,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub 'wga-${Environment}-api-latency-p95'
-      AlarmDescription: API Gateway 응답 시간 p95가 통합 타임아웃(180초)에 근접
+      AlarmDescription: API Gateway 응답 시간 p95가 통합 타임아웃(120초)에 근접
       Namespace: AWS/ApiGateway
       MetricName: Latency
       Dimensions:

@@ -3,7 +3,7 @@
 흐름
 1. 사전 확인 (읽기 전용): 저장소, 필수 SSM 파라미터, API Gateway 통합 타임아웃 할당량.
    20~40분 걸리는 배포를 시작했다가 중간에 실패하지 않도록, 결과가 뻔한 실패는 먼저 걸러 낸다.
-   특히 할당량: cloudformation/llm.yaml이 통합 타임아웃을 180000ms로 설정하므로 할당량이 그보다 작으면
+   특히 할당량: cloudformation/llm.yaml이 통합 타임아웃을 120000ms로 설정하므로 할당량이 그보다 작으면
    LLM 스택 생성·업데이트가 실패한다.
 2. 승인 후 `AWS_REGION=<리전> [ALARM_EMAIL=<이메일>] ./deploy.sh <env>`를 저장소 루트에서 실행.
    출력은 한 줄씩 log 이벤트로 내보내고, 구분 줄은 progress 이벤트로 바꾼다 (ProgressParser).

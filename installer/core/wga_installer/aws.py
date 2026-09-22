@@ -19,7 +19,8 @@ QUOTA_SERVICE = "apigateway"
 QUOTA_NAME = "Maximum integration timeout in milliseconds"
 # cloudformation/llm.yaml의 TimeoutInMillis와 같아야 한다. 할당량이 이보다 작으면
 # API Gateway가 이 타임아웃 값을 받아들이지 않아 스택 생성·업데이트가 실패한다.
-REQUIRED_TIMEOUT_MS = 180000
+# 120000ms까지는 요청하면 자동으로 승인되고, 그보다 큰 값은 추가 승인(검토)이 필요해 120000ms로 정했다.
+REQUIRED_TIMEOUT_MS = 120000
 # 아직 처리 중인 할당량 요청 상태 (이 상태면 새로 요청하지 않고 기다린다)
 QUOTA_PENDING_STATUSES = ("PENDING", "CASE_OPENED")
 QUOTA_REJECTED_STATUSES = ("DENIED", "NOT_APPROVED", "INVALID_REQUEST")
