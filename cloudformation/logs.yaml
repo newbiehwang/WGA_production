@@ -22,6 +22,10 @@ Parameters:
     Type: String
     Description: SSM parameter for Athena query result S3 bucket
 
+  CodeVersion:
+    Type: String
+    Description: 배포 코드 버전 (Lambda zip S3 키에 포함되어 배포마다 새 코드가 반영되게 함)
+
 Resources:
   AthenaUtilityLambdaRole:
     Type: AWS::IAM::Role
@@ -64,7 +68,7 @@ Resources:
       Description: Common Python dependencies
       Content:
         S3Bucket: !Sub 'wga-deployment-${AWS::AccountId}-${Environment}'
-        S3Key: !Sub 'layers/common-layer-${Environment}.zip'
+        S3Key: !Sub 'layers/common-layer-${Environment}-${CodeVersion}.zip'
       CompatibleRuntimes:
         - python3.12
 
@@ -93,7 +97,7 @@ Resources:
           ENV: !Ref Environment
       Code:
         S3Bucket: !Sub 'wga-deployment-${AWS::AccountId}-${Environment}'
-        S3Key: !Sub 'db/athena-utility-lambda-${Environment}.zip'
+        S3Key: !Sub 'db/athena-utility-lambda-${Environment}-${CodeVersion}.zip'
 
   ExecuteQueryApiResource:
     Type: AWS::ApiGateway::Resource

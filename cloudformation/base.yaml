@@ -111,6 +111,15 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      # 배포마다 코드 버전별 zip이 새로 올라오므로 오래된 빌드 산출물은 자동 정리한다
+      # (롤백에 필요한 최근 산출물은 남기도록 90일 보관)
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldBuildArtifacts
+            Status: Enabled
+            ExpirationInDays: 90
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
       Tags:
         - Key: Environment
           Value: !Ref Environment
