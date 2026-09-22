@@ -102,3 +102,15 @@ def test_uploaded_lambda_keys_match_template_keys():
 def test_mcp_image_uses_code_version_tag():
     assert 'ECR_IMAGE_TAG="$CODE_VERSION"' in DEPLOY_SH
     assert "name=MCP_ECR_IMAGE_TAG,value=$CODE_VERSION" in DEPLOY_SH
+
+
+def test_stack_parameters_do_not_reference_secure_strings():
+    # CloudFormation 템플릿 파라미터(AWS::SSM::Parameter::Value<String>)는 SecureString을 지원하지 않으므로,
+    # README가 SecureString으로 만들라고 안내하는 비밀 값을 스택 파라미터로 넘기면 스택 생성이 실패한다.
+    readme = (ROOT / "README.md").read_text()
+    secure_names = set(re.findall(r'put-parameter --name "/wga/\$\{Environment\}/([^"]+)"[^\n]*--type "SecureString"', readme))
+    assert {"SlackbotToken", "SlackSigningSecret", "ANTHROPIC_API_KEY"} <= secure_names
+
+    passed_ssm_paths = set(re.findall(r'ParameterValue="\$SSM_PATH_PREFIX/([^"]+)"', DEPLOY_SH))
+    assert passed_ssm_paths, "deploy.sh에서 SSM 경로 파라미터를 찾지 못했습니다"
+    assert not (passed_ssm_paths & secure_names), f"SecureString을 스택 파라미터로 전달: {passed_ssm_paths & secure_names}"

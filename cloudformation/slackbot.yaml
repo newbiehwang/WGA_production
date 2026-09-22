@@ -18,10 +18,6 @@ Parameters:
         Type: String
         Description: API Gateway Root Resource ID
 
-    SlackBotTokenSSMPath:
-        Type: String
-        Description: Path to the Slack Bot Token in SSM Parameter Store
-
     CognitoClientIdSSMPath:
         Type: String
         Description: ID of the Cognito User Pool Client

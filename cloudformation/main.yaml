@@ -60,10 +60,6 @@ Parameters:
     Type: "AWS::SSM::Parameter::Value<String>"
     Description: Frontend redirect domain
 
-  SlackBotTokenSSMPathParameter:
-    Type: "AWS::SSM::Parameter::Value<String>"
-    Description: Path to the Slack Bot Token in SSM
-
   AthenaOutputBucketParameter:
     Type: "AWS::SSM::Parameter::Value<String>"
     Description: Athena Output Bucket Parameter
@@ -124,7 +120,6 @@ Resources:
         ApiGatewayId: !Ref ApiGatewayIdParameter
         ApiGatewayRootResourceId: !Ref ApiGatewayRootResourceIdParameter
         ApiEndpointParameter: !Ref ApiEndpointParameter
-        SlackBotTokenSSMPath: !Ref SlackBotTokenSSMPathParameter
         CognitoClientIdSSMPath: !Ref UserPoolClientId
         CognitoDomainSSMPath: !Ref UserPoolDomain
       Tags:
