@@ -4,6 +4,8 @@ name: Deploy
 # 수동 실행도 입력값 없이 같은 경로를 따른다 (입력값에 따라 배포 결과가 달라지지 않도록).
 # 저장소 변수 AWS_DEPLOY_ROLE_ARN_DEV / AWS_DEPLOY_ROLE_ARN_PROD가 없으면 해당 작업은 건너뛴다
 # (cloudformation/github-oidc.yaml로 Role을 만든 뒤 변수를 등록해야 배포가 시작된다).
+# dev/prod Environment는 배포 브랜치를 main으로 제한해야 한다. 수동 실행은 브랜치를 고를 수 있으므로
+# 제한이 없으면 리뷰받지 않은 브랜치의 코드도 OIDC 신뢰 정책(environment:<env>)을 통과한다.
 on:
   push:
     branches: [main]
