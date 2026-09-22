@@ -49,6 +49,9 @@ targets:
       properties:
         CFBundleDisplayName: WGA Installer
         CFBundleName: WGA Installer
+        # 버전은 위의 MARKETING_VERSION·CURRENT_PROJECT_VERSION 한곳에서 정한다 (make-dmg.sh가 파일 이름에 쓴다)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: "13.0"
         LSApplicationCategoryType: public.app-category.developer-tools
     entitlements:

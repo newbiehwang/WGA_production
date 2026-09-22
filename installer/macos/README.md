@@ -24,6 +24,18 @@ xcodebuild -project WGAInstaller.xcodeproj -scheme WGAInstaller test
 cd installer/macos/WGAInstallerKit && swift test
 ```
 
+## 배포용 디스크 이미지 (.dmg)
+
+```bash
+installer/macos/make-dmg.sh            # → installer/macos/build/WGA-Installer-<버전>.dmg (+ .sha256)
+```
+
+Release로 빌드하고 번들을 검사(core·헬퍼 포함, `__pycache__` 없음, 서명 검증)한 뒤 `hdiutil`로 압축 이미지를 만듭니다. 이미지에는 앱, Applications 바로가기, `처음 실행하기.txt`가 들어갑니다. 버전은 `project.yml`의 `MARKETING_VERSION`에서 가져옵니다.
+
+- **Gatekeeper:** ad-hoc 서명이라 받은 사람의 Mac에서는 "확인되지 않은 개발자"로 막힙니다(`spctl` 결과 rejected). 여는 방법은 `dmg/처음 실행하기.txt`에 있습니다. macOS 15부터는 Control-클릭 → 열기가 통하지 않고, 시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기"를 눌러야 합니다.
+- **저장소는 들어 있지 않습니다:** 앱은 WGA 저장소의 `deploy.sh`로 배포하므로, 받은 사람도 저장소를 clone해 설정에서 지정해야 합니다.
+- **Developer ID가 생기면:** 이 스크립트에 Developer ID 서명과 `notarytool` 공증, `stapler` 단계를 더하면 경고 없이 열립니다.
+
 처음 실행하면 ⌘, (설정)에서 **WGA 저장소 폴더**를 지정하세요. 지정하지 않으면 사전 점검의 "WGA 저장소" 항목이 실패합니다.
 
 ## 구조

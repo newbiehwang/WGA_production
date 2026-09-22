@@ -1,0 +1,30 @@
+WGA 설치 마법사 — 처음 실행하기
+================================
+
+1. 설치
+   "WGA Installer.app"을 옆의 "Applications" 폴더로 끌어다 놓으세요.
+
+2. 처음 열기 (서명·공증하지 않은 앱이라 한 번 허용이 필요합니다)
+   이 앱은 Apple 공증을 받지 않아서, 처음 열면 macOS가 "확인되지 않은 개발자"라며 막습니다.
+
+   macOS 15 (Sequoia) 이상
+     ① Applications에서 앱을 한 번 열어 경고 창을 닫습니다.
+     ② 시스템 설정 → 개인정보 보호 및 보안 → 아래쪽의 "그래도 열기"를 누릅니다.
+
+   macOS 13·14
+     Applications에서 앱을 Control-클릭(또는 우클릭) → "열기" → 경고 창에서 다시 "열기".
+
+   허용은 처음 한 번만 하면 됩니다.
+
+3. 먼저 준비할 것
+   - WGA 저장소: 이 앱은 저장소의 deploy.sh로 배포합니다. 저장소를 git clone 한 뒤,
+     앱의 설정(⌘,)에서 "WGA 저장소" 폴더로 지정하세요.
+   - 도구: Python 3.10 이상, AWS CLI v2, Node.js 18 이상, git (GitHub 자동 배포를 쓰려면 gh)
+       brew install python awscli node git gh
+     앱의 "사전 점검"이 무엇이 빠졌는지 알려 주고 설치 명령을 복사해 줍니다.
+   - AWS: IAM 사용자의 Access Key (루트 계정의 키는 쓰지 마세요).
+     키는 이 Mac의 키체인에만 저장됩니다.
+
+4. 파일 확인 (선택)
+   함께 받은 .sha256 파일로, 받은 파일이 손상되거나 바뀌지 않았는지 확인할 수 있습니다.
+       shasum -a 256 -c WGA-Installer-<버전>.dmg.sha256
