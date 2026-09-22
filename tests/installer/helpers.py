@@ -4,7 +4,7 @@
 그래서 테스트가 설치하지 않은 도구는 "설치되어 있지 않음"으로 보인다.
 
 가짜 명령은 fakes/fake_tool.sh 하나를 도구 이름으로 링크해 쓴다 (자세한 방식은 그 파일의 주석).
-tests/test_deploy_sh.py의 fake_aws처럼 규칙을 bash case 문으로 표현한다.
+규칙은 bash if 문 목록으로 표현한다 (tests/test_deploy_sh.py의 fake_aws와 같은 발상).
 """
 import json
 import subprocess
@@ -47,9 +47,10 @@ class FakeCli:
         self.rules: dict[str, list[dict]] = {}
 
     def add(self, tool: str, match: str, stdout: str = "", stderr: str = "", exit: int = 0,
-            sleep: float = 0) -> "FakeCli":
+            sleep: float = 0, times: int = 0) -> "FakeCli":
+        """times: 이 규칙을 몇 번까지 쓸지 (0이면 무제한). 다 쓰면 다음 규칙이 맞는지 본다."""
         self.rules.setdefault(tool, []).append(
-            {"match": match, "stdout": stdout, "stderr": stderr, "exit": exit, "sleep": sleep})
+            {"match": match, "stdout": stdout, "stderr": stderr, "exit": exit, "sleep": sleep, "times": times})
         self._write(tool)
         return self
 
@@ -88,17 +89,19 @@ class FakeCli:
                 "FAKE_CLI_RULES": str(self.rules_dir), "FAKE_CLI_CAPTURES": str(self.captures_path), **extra}
 
     def _write(self, tool: str) -> None:
-        """규칙을 case 문으로 옮긴 규칙 파일을 쓰고, 도구 이름의 링크를 만든다."""
-        lines = ['case "$*" in']
-        for rule in self.rules[tool]:
+        """규칙을 if 문으로 옮긴 규칙 파일을 쓰고, 도구 이름의 링크를 만든다."""
+        lines = []
+        for index, rule in enumerate(self.rules[tool]):
             body = []
             if rule["sleep"]:
                 body.append(f"/bin/sleep {rule['sleep']}")   # 제한 시간 초과를 흉내 낸다
             body.append("printf '%s' " + sh_quote(rule["stdout"]))
             body.append("printf '%s' " + sh_quote(rule["stderr"]) + " >&2")
             body.append(f"exit {rule['exit']}")
-            lines.append(f"  *{sh_quote(rule['match'])}*) " + "; ".join(body) + " ;;")
-        lines += ["esac", ""]
+            # [[ "$*" == *'match'* ]]: 인자를 이은 문자열에 match가 들어 있는지 (따옴표 안은 글자 그대로 비교)
+            lines.append(f'if [[ "$*" == *{sh_quote(rule["match"])}* ]] && _take {rule["times"]} {tool}-{index}; then '
+                         + "; ".join(body) + "; fi")
+        lines.append("")
         (self.rules_dir / f"{tool}.sh").write_text("\n".join(lines))
         link = self.bin / tool
         if not link.is_symlink():
@@ -141,3 +144,38 @@ def events(stdout: str) -> list[dict]:
 
 def checks_by_id(stdout: str) -> dict[str, dict]:
     return {e["id"]: e for e in events(stdout) if e["type"] == "check"}
+
+
+def run_step(fake: FakeCli, step_run, *, stdin: str = "", env: str = "dev", dry_run: bool = False,
+             assume_yes: bool = False, repo: Path | None = None, **options) -> tuple[int, list[dict]]:
+    """단계(run 함수)를 이 프로세스 안에서 실행하고 (종료 코드, 이벤트 목록)을 돌려준다.
+    대기 시간 상수를 monkeypatch로 줄여야 하는 단계(oidc의 워크플로 확인 등)는 이 방식으로 테스트한다."""
+    import io
+
+    from wga_installer.context import build_context
+    from wga_installer.events import JsonEmitter, Redactor
+    from wga_installer.runner import Interaction, Runner
+
+    out = io.StringIO()
+    emitter = JsonEmitter(Redactor(), out)
+    ctx = build_context(env=env, region="ap-northeast-2", profile=None, repo=str(repo) if repo else None,
+                        environ=fake.env(), cwd=fake.root, **options)
+    interaction = Interaction(emitter, json_mode=True, stdin=io.StringIO(stdin), prompt_stream=out)
+    runner = Runner(emitter, interaction, env=ctx.command_env(),
+                    cwd=str(ctx.repo_root) if ctx.repo_root else None, dry_run=dry_run, assume_yes=assume_yes)
+    code = step_run(ctx, runner, emitter)
+    return code, [json.loads(line) for line in out.getvalue().splitlines()]
+
+
+def responses(*items: tuple) -> str:
+    """앱이 stdin으로 보낼 응답 줄들. ("confirm", id[, 승인]) / ("text", id, 값) / ("choice", id, 선택)"""
+    lines = []
+    for kind, id_, *rest in items:
+        if kind == "confirm":
+            lines.append({"type": "confirm_response", "id": id_, "approved": rest[0] if rest else True})
+        elif kind == "text":
+            lines.append({"type": "text_response", "id": id_, "value": rest[0]})
+        elif kind == "choice":
+            lines.append({"type": "choice_response", "id": id_, "choice": rest[0]})
+    return "".join(json.dumps(line, ensure_ascii=False) + "\n" for line in lines)
+

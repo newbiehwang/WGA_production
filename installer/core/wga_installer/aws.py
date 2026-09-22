@@ -7,7 +7,7 @@ tests/installer/test_installer_aws.py가 deploy.sh·템플릿과 비교해 확�
 여기 있는 함수는 모두 읽기 전용이다 (Runner.run만 쓴다).
 """
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -45,6 +45,27 @@ SECRET_PARAMS = (
 def main_stacks(env: str) -> list[str]:
     """deploy.sh가 만드는 최상위 스택. deploy.sh의 배포 순서와 같다."""
     return [f"wga-base-{env}", f"wga-frontend-{env}", f"wga-mcp-{env}", f"wga-{env}"]
+
+
+def oidc_stack(env: str) -> str:
+    """GitHub Actions 배포용 OIDC Role 스택 (cloudformation/github-oidc.yaml, deploy.sh가 배포하지 않음)."""
+    return f"wga-github-oidc-{env}"
+
+
+def env_buckets(account_id: str, env: str) -> list[str]:
+    """환경마다 하나씩 있는 S3 버킷 (cloudformation/base.yaml, 모두 DeletionPolicy: Retain)."""
+    kinds = ("deployment", "frontend", "outputbucket", "athenaoutputbucket", "guarddutyexportbucket",
+             "dockerbuildbucket", "diagrambucket")
+    return [f"wga-{kind}-{account_id}-{env}" for kind in kinds]
+
+
+def shared_bucket(account_id: str) -> str:
+    """deploy.sh가 템플릿을 올리는 버킷. 모든 환경이 함께 쓴다 (deploy.sh의 CLOUDFORMATION_BUCKET)."""
+    return f"wga-cloudformation-{account_id}"
+
+
+def mcp_repository(env: str) -> str:
+    return f"wga-mcp-{env}"   # cloudformation/mcp.yaml의 MCPRepo
 
 
 # 로그 그룹 /aws/lambda/<이름>-<env>를 가진 Lambda 함수들 (cloudformation의 FunctionName)
@@ -91,6 +112,77 @@ def parse_time(value: Any) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+# ---- 스택 실패 원인 ----
+
+# 스택 이벤트를 몇 개까지 볼지. 오래된 스택은 이벤트가 수천 개라 전부 받으면 느리다.
+# 이번 작업의 이벤트는 가장 최근 것들이므로 이 정도면 충분하다.
+MAX_STACK_EVENTS = 200
+MAX_NESTED_DEPTH = 2   # 중첩 스택(wga-<env> 안의 llm, logs ...)을 몇 단계까지 따라 들어갈지
+
+
+@dataclass(frozen=True)
+class Failure:
+    stack: str
+    logical_id: str
+    resource_type: str
+    reason: str
+
+
+@dataclass
+class _Collector:
+    runner: Runner
+    since: datetime
+    seen_stacks: set[str] = field(default_factory=set)
+
+    def collect(self, stack: str, depth: int = 0) -> list[Failure]:
+        """스택 이벤트에서 since 이후 *_FAILED 이벤트를 모은다.
+
+        - "Resource creation cancelled"처럼 다른 리소스가 실패해서 딸려 취소된 것은 원인이 아니므로 뺀다.
+        - 중첩 스택 리소스가 실패했으면 그 스택 안으로 들어가 진짜 원인을 찾는다. 안에서 찾으면
+          바깥의 "Embedded stack ... was not successfully created" 같은 요약 줄은 뺀다.
+        """
+        if stack in self.seen_stacks:
+            return []
+        self.seen_stacks.add(stack)
+        data, _ = aws_json(self.runner, "cloudformation", "describe-stack-events", "--stack-name", stack,
+                           "--max-items", str(MAX_STACK_EVENTS))
+        if data is None:
+            return []   # 스택이 아직 없거나 조회 실패. 요약은 가능한 만큼만 한다
+        failures: list[Failure] = []
+        for event in data.get("StackEvents", []):
+            moment = parse_time(event.get("Timestamp"))
+            if moment is not None and moment < self.since:
+                continue
+            if not str(event.get("ResourceStatus", "")).endswith("_FAILED"):
+                continue
+            reason = event.get("ResourceStatusReason", "")
+            if "cancelled" in reason.lower():
+                continue
+            physical = event.get("PhysicalResourceId", "")
+            if physical and physical == event.get("StackId"):
+                continue   # 스택 자신에 대한 이벤트 (원인은 개별 리소스 이벤트에 있다)
+            name = event.get("StackName", stack)
+            if (event.get("ResourceType") == "AWS::CloudFormation::Stack" and physical
+                    and depth < MAX_NESTED_DEPTH):
+                nested = self.collect(physical, depth + 1)
+                if nested:
+                    failures.extend(nested)
+                    continue
+            failures.append(Failure(name, event.get("LogicalResourceId", "?"), event.get("ResourceType", "?"),
+                                    reason or "(이유 없음)"))
+        return failures
+
+
+def stack_failures(runner: Runner, stacks: list[str], since: datetime) -> list[Failure]:
+    """여러 스택에서 since 이후 실패한 리소스와 이유를 모은다 (deploy·teardown의 실패 요약).
+    같은 리소스의 실패가 여러 번 기록될 수 있으므로 한 번씩만 돌려준다."""
+    collector = _Collector(runner, since)
+    failures: list[Failure] = []
+    for stack in stacks:
+        failures.extend(collector.collect(stack))
+    return list(dict.fromkeys(failures))
 
 
 # ---- 할당량 ----

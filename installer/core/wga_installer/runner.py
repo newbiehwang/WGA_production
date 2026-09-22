@@ -12,6 +12,7 @@
       {"type": "confirm_response", "id": "<이벤트 id>", "approved": true}
       {"type": "secret_response",  "id": "<이벤트 id>", "value": "<비밀 값>"}
       {"type": "choice_response",  "id": "<이벤트 id>", "choice": "<선택지 id>"}
+      {"type": "text_response",    "id": "<이벤트 id>", "value": "<입력한 글자>"}   (비밀이 아닌 입력)
   응답이 없거나(EOF) 형식이 틀리거나 id가 다르면 "거절"로 처리한다. 모호할 때 변경하지 않는 쪽이 안전하다.
   선택(choice)은 기본값을 쓴다. 기본값은 항상 아무것도 바꾸지 않는 쪽(예: "기존 값 유지")으로 정한다.
 - 텍스트 모드(터미널): `y/N` 질문과 getpass(입력 내용이 화면에 보이지 않음)를 쓴다.
@@ -120,6 +121,17 @@ class Interaction:
         self.emitter.redactor.add(value)
         return value
 
+    def text(self, id_: str, prompt: str) -> str:
+        """비밀이 아닌 한 줄 입력 (예: 삭제 확인용 환경 이름). 응답이 없으면 빈 문자열."""
+        self.emitter.input_required(id_, prompt, secret=False)
+        if self.json_mode:
+            response = self._read_response("text_response", id_)
+            value = response.get("value") if response else None
+            return value.strip() if isinstance(value, str) else ""
+        self.prompt_stream.write(f"  {prompt}: ")
+        self.prompt_stream.flush()
+        return self.stdin.readline().strip()
+
     def choose(self, id_: str, prompt: str, options: list[tuple[str, str]], default: str) -> str:
         """선택지 (id, 설명) 중 하나를 고르게 한다. 응답이 없거나 잘못되면 default를 돌려준다."""
         valid = [option_id for option_id, _ in options]
@@ -191,21 +203,38 @@ class Runner:
         timeout 기본값이 None인 이유: 스택 배포처럼 수십 분 걸리는 작업을 중간에 끊으면 더 위험하다.
         """
         # extra_env(예: AWS_REGION, ALARM_EMAIL)도 함께 보여 줘야 무엇으로 실행되는지 정확히 알 수 있다
-        command = format_command(cmd, extra_env)
+        outcome = self.approve(id_, reason, [format_command(cmd, extra_env)], allow_assume_yes=allow_assume_yes)
+        if outcome != EXECUTED:
+            return CommandResult(0, "", "", outcome)
+        return self.run_approved(cmd, timeout=timeout, cwd=cwd, stream=stream, on_line=on_line,
+                                 extra_env=extra_env)
+
+    def approve(self, id_: str, reason: str, commands: list[str], *, allow_assume_yes: bool = True) -> str:
+        """여러 변경 명령을 한 번에 보여 주고 승인받는다. 결과: EXECUTED(승인됨) | DRY_RUN | DECLINED.
+
+        teardown처럼 한 단계에 명령이 여러 개(버킷 7개 삭제 등)일 때 하나씩 묻지 않고 목록으로 한 번 묻는다.
+        승인되면 호출한 쪽이 run_approved()로 실행한다. 목록에 없는 명령을 run_approved()로 실행하지 않는 것은
+        호출하는 단계 코드의 책임이다 (내용이 실행 중에 정해지는 명령은 목록에 규칙을 적어 보여 준다).
+        """
+        command = "\n".join(commands)
         if self.dry_run:
             self.emitter.dry_run(id_, command, reason)
-            return CommandResult(0, "", "", DRY_RUN)
-
+            return DRY_RUN
         if self.assume_yes and allow_assume_yes:
             # 승인 질문은 건너뛰지만, 무엇을 실행했는지는 기록에 남긴다
             self.emitter.log(f"--yes로 자동 승인: {reason}: {command}", stream="info")
-            approved = True
-        else:
-            approved = self.interaction.confirm(id_, command, reason)
-        if not approved:
-            self.emitter.log(f"승인하지 않아 실행하지 않았습니다: {reason}", stream="info")
-            return CommandResult(0, "", "", DECLINED)
+            return EXECUTED
+        if self.interaction.confirm(id_, command, reason):
+            return EXECUTED
+        self.emitter.log(f"승인하지 않아 실행하지 않았습니다: {reason}", stream="info")
+        return DECLINED
 
+    def run_approved(self, cmd: list[str], *, timeout: float | None = None, cwd: str | None = None,
+                     stream: bool = False, on_line: Callable[[str, str], None] | None = None,
+                     extra_env: dict[str, str] | None = None) -> CommandResult:
+        """approve()로 승인받은 변경 명령을 실행한다. dry-run이면 절대 실행하지 않는다 (이중 안전장치)."""
+        if self.dry_run:
+            return CommandResult(0, "", "", DRY_RUN)
         return self._execute(cmd, timeout=timeout, cwd=cwd, stream=stream, on_line=on_line,
                              extra_env=extra_env)
 

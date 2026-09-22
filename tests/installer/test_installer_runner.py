@@ -236,3 +236,39 @@ def test_streaming_timeout_kills_child_processes(fake, tmp_path):
     with pytest.raises(ProcessLookupError):
         os.kill(child, 0)
     assert any("중단합니다" in e["line"] for e in output_events(out) if e["type"] == "log")
+
+
+# ---- 여러 명령 한 번에 승인 (teardown 단계 등) ----
+
+def test_approve_shows_all_commands_at_once(fake):
+    runner, out = make_runner(fake, stdin=approve("delete_logs"))
+    outcome = runner.approve("delete_logs", "로그 그룹을 지웁니다", ["aws logs delete-log-group a", "aws logs delete-log-group b"])
+    assert outcome == EXECUTED
+    assert output_events(out)[0]["command"] == "aws logs delete-log-group a\naws logs delete-log-group b"
+
+
+def test_run_approved_never_runs_in_dry_run(fake):
+    # 단계 코드가 실수로 dry-run 결과를 무시하고 run_approved를 불러도 실행되지 않는다 (이중 안전장치)
+    fake.add("aws", "delete-bucket")
+    runner, _ = make_runner(fake, dry_run=True)
+    assert runner.approve("x", "삭제", ["aws s3api delete-bucket"]) == DRY_RUN
+    assert runner.run_approved(["aws", "s3api", "delete-bucket"]).outcome == DRY_RUN
+    assert fake.calls("aws") == []
+
+
+def test_approve_can_refuse_assume_yes(fake):
+    runner, _ = make_runner(fake, assume_yes=True, stdin="")
+    assert runner.approve("x", "삭제", ["rm"], allow_assume_yes=False) == DECLINED
+    assert runner.approve("y", "변경", ["change"]) == EXECUTED
+
+
+@pytest.mark.parametrize("stdin, expected", [
+    (json.dumps({"type": "text_response", "id": "confirm_env", "value": " dev "}) + "\n", "dev"),
+    ("", ""),
+    (json.dumps({"type": "text_response", "id": "other", "value": "dev"}) + "\n", ""),
+])
+def test_text_input(fake, stdin, expected):
+    runner, out = make_runner(fake, stdin=stdin)
+    assert runner.interaction.text("confirm_env", "환경 이름을 입력하세요") == expected
+    assert output_events(out)[0] == {"type": "input_required", "id": "confirm_env", "prompt": "환경 이름을 입력하세요",
+                                     "secret": False}

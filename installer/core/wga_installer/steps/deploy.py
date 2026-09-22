@@ -15,11 +15,10 @@
 (진행 표시 해석과 실패 요약은 배포 도구에 맞춰 따로 바꾼다).
 """
 import re
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from ..aws import (REQUIRED_TIMEOUT_MS, SECRET_PARAMS, aws_json, error_text, existing_parameters,
-                   find_timeout_quota, main_stacks, parse_time)
+from ..aws import (REQUIRED_TIMEOUT_MS, SECRET_PARAMS, error_text, existing_parameters, find_timeout_quota,
+                   main_stacks, stack_failures)
 from ..context import Context
 from ..events import STEP_FAILED, STEP_OK, STEP_SKIPPED, Emitter
 from ..runner import DECLINED, DRY_RUN, RC_INTERRUPTED, Runner
@@ -40,11 +39,7 @@ SUMMARY_PATTERNS = {
     "frontend_url": re.compile(r"^프론트엔드 URL: (\S+)"),
 }
 
-# 스택 이벤트를 몇 개까지 볼지. 오래된 스택은 이벤트가 수천 개라 전부 받으면 느리다.
-# 이번 배포의 이벤트는 가장 최근 것들이므로 이 정도면 충분하다.
-MAX_STACK_EVENTS = 200
 CLOCK_SKEW = timedelta(minutes=2)   # 이 컴퓨터와 AWS의 시계 차이를 감안해 시작 시각을 조금 앞당겨 본다
-MAX_NESTED_DEPTH = 2                # 중첩 스택(wga-<env> 안의 llm, logs ...)을 몇 단계까지 따라 들어갈지
 
 
 def deploy_command(ctx: Context) -> list[str]:
@@ -173,67 +168,8 @@ def _preflight(ctx: Context, runner: Runner, emitter: Emitter) -> bool:
     return ok
 
 
-@dataclass(frozen=True)
-class Failure:
-    stack: str
-    logical_id: str
-    resource_type: str
-    reason: str
-
-
-@dataclass
-class _Collector:
-    runner: Runner
-    since: datetime
-    seen_stacks: set[str] = field(default_factory=set)
-
-    def collect(self, stack: str, depth: int = 0) -> list[Failure]:
-        """스택 이벤트에서 since 이후 *_FAILED 이벤트를 모은다.
-
-        - "Resource creation cancelled"처럼 다른 리소스가 실패해서 딸려 취소된 것은 원인이 아니므로 뺀다.
-        - 중첩 스택 리소스가 실패했으면 그 스택 안으로 들어가 진짜 원인을 찾는다. 안에서 찾으면
-          바깥의 "Embedded stack ... was not successfully created" 같은 요약 줄은 뺀다.
-        """
-        if stack in self.seen_stacks:
-            return []
-        self.seen_stacks.add(stack)
-        data, _ = aws_json(self.runner, "cloudformation", "describe-stack-events", "--stack-name", stack,
-                           "--max-items", str(MAX_STACK_EVENTS))
-        if data is None:
-            return []   # 스택이 아직 없거나 조회 실패. 요약은 가능한 만큼만 한다
-        failures: list[Failure] = []
-        for event in data.get("StackEvents", []):
-            moment = parse_time(event.get("Timestamp"))
-            if moment is not None and moment < self.since:
-                continue
-            if not str(event.get("ResourceStatus", "")).endswith("_FAILED"):
-                continue
-            reason = event.get("ResourceStatusReason", "")
-            if "cancelled" in reason.lower():
-                continue
-            physical = event.get("PhysicalResourceId", "")
-            if physical and physical == event.get("StackId"):
-                continue   # 스택 자신에 대한 이벤트 (원인은 개별 리소스 이벤트에 있다)
-            name = event.get("StackName", stack)
-            if (event.get("ResourceType") == "AWS::CloudFormation::Stack" and physical
-                    and depth < MAX_NESTED_DEPTH):
-                nested = self.collect(physical, depth + 1)
-                if nested:
-                    failures.extend(nested)
-                    continue
-            failures.append(Failure(name, event.get("LogicalResourceId", "?"), event.get("ResourceType", "?"),
-                                    reason or "(이유 없음)"))
-        return failures
-
-
 def _report_failure(ctx: Context, runner: Runner, emitter: Emitter, result, *, since: datetime) -> None:
-    collector = _Collector(runner, since)
-    failures: list[Failure] = []
-    for stack in main_stacks(ctx.env):
-        failures.extend(collector.collect(stack))
-
-    # 같은 리소스의 실패가 여러 번 기록될 수 있으므로 한 번씩만 보여 준다
-    unique = list(dict.fromkeys(failures))
+    unique = stack_failures(runner, main_stacks(ctx.env), since)
     for failure in unique:
         emitter.error(STEP, f"{failure.stack}: {failure.logical_id} ({failure.resource_type}) — {failure.reason}")
     if not unique:

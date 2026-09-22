@@ -6,6 +6,8 @@
     python -m wga_installer setup              # 할당량 요청, SSM 파라미터 등록
     python -m wga_installer deploy --alarm-email me@example.com
     python -m wga_installer verify             # 배포 검증 (읽기 전용)
+    python -m wga_installer oidc --env dev --block-test   # GitHub Actions 자동 배포 설정
+    python -m wga_installer teardown --env dev # 정리 (되돌릴 수 없음, prod는 --allow-prod 필요)
 
 종료 코드
     0  성공
@@ -25,20 +27,43 @@ from typing import TextIO
 from .context import DEFAULT_ENV, ENVIRONMENTS, build_context
 from .events import Emitter, JsonEmitter, Redactor, TextEmitter
 from .runner import Interaction, Runner
-from .steps import check, deploy, setup, verify
+from .steps import check, deploy, oidc, setup, teardown, verify
 
 
-def _deploy_options(parser: argparse.ArgumentParser) -> None:
+def _alarm_email(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--alarm-email", help="CloudWatch 알람을 받을 이메일 (deploy.sh의 ALARM_EMAIL)")
 
 
-# 명령 이름 → (단계 모듈의 run 함수, 설명, 명령 전용 옵션을 추가하는 함수).
-# 다음 마일스톤에서 oidc·teardown을 추가한다
+def _github_repo(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--github-repo", help="GitHub 저장소 owner/repo (기본: 저장소 폴더의 git remote)")
+
+
+def _deploy_options(parser: argparse.ArgumentParser) -> None:
+    _alarm_email(parser)
+
+
+def _oidc_options(parser: argparse.ArgumentParser) -> None:
+    _alarm_email(parser)
+    _github_repo(parser)
+    parser.add_argument("--test-run", action="store_true",
+                        help="설정 후 main으로 배포 워크플로를 실행해 dev 배포 작업이 성공하는지 확인 (실제 배포)")
+    parser.add_argument("--block-test", action="store_true",
+                        help="임시 브랜치에서 실행해 main 외 브랜치의 배포가 막히는지 확인")
+
+
+def _teardown_options(parser: argparse.ArgumentParser) -> None:
+    _github_repo(parser)
+    parser.add_argument("--allow-prod", action="store_true", help="prod 환경 삭제를 허용")
+
+
+# 명령 이름 → (단계 모듈의 run 함수, 설명, 명령 전용 옵션을 추가하는 함수)
 COMMANDS = {
     "check": (check.run, "사전 점검 (아무것도 바꾸지 않음)", None),
     "setup": (setup.run, "API Gateway 할당량 요청과 SSM 파라미터 등록", None),
     "deploy": (deploy.run, "deploy.sh로 WGA 배포 (20~40분)", _deploy_options),
     "verify": (verify.run, "배포 검증 (아무것도 바꾸지 않음)", None),
+    "oidc": (oidc.run, "GitHub Actions 자동 배포 설정 (OIDC Role, Environment, 저장소 변수)", _oidc_options),
+    "teardown": (teardown.run, "한 환경의 WGA 리소스를 모두 삭제 (되돌릴 수 없음)", _teardown_options),
 }
 
 EXIT_INTERRUPTED = 130
@@ -87,7 +112,11 @@ def main(argv: list[str] | None = None, *, stdin: TextIO | None = None, stdout: 
     try:
         ctx = build_context(env=args.env, region=args.region, profile=args.profile, repo=args.repo,
                             environ=environ, cwd=cwd or Path.cwd(),
-                            alarm_email=getattr(args, "alarm_email", None))
+                            alarm_email=getattr(args, "alarm_email", None),
+                            github_repo=getattr(args, "github_repo", None),
+                            allow_prod=getattr(args, "allow_prod", False),
+                            test_run=getattr(args, "test_run", False),
+                            block_test=getattr(args, "block_test", False))
         interaction = Interaction(emitter, json_mode=args.json, stdin=stdin, prompt_stream=stdout)
         runner = Runner(emitter, interaction, env=ctx.command_env(),
                         cwd=str(ctx.repo_root) if ctx.repo_root else None,
