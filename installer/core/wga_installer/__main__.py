@@ -3,6 +3,9 @@
     python -m wga_installer check              # 사전 점검 (터미널용 텍스트 출력)
     python -m wga_installer check --json       # 앱용 JSON Lines 출력
     python -m wga_installer check --profile wga-dev --region ap-northeast-2
+    python -m wga_installer setup              # 할당량 요청, SSM 파라미터 등록
+    python -m wga_installer deploy --alarm-email me@example.com
+    python -m wga_installer verify             # 배포 검증 (읽기 전용)
 
 종료 코드
     0  성공
@@ -13,6 +16,7 @@
 """
 import argparse
 import os
+import signal
 import sys
 import traceback
 from pathlib import Path
@@ -21,11 +25,20 @@ from typing import TextIO
 from .context import DEFAULT_ENV, ENVIRONMENTS, build_context
 from .events import Emitter, JsonEmitter, Redactor, TextEmitter
 from .runner import Interaction, Runner
-from .steps import check
+from .steps import check, deploy, setup, verify
 
-# 명령 이름 → 단계 모듈의 run 함수. 이후 마일스톤에서 setup·deploy·verify·oidc·teardown을 추가한다
+
+def _deploy_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--alarm-email", help="CloudWatch 알람을 받을 이메일 (deploy.sh의 ALARM_EMAIL)")
+
+
+# 명령 이름 → (단계 모듈의 run 함수, 설명, 명령 전용 옵션을 추가하는 함수).
+# 다음 마일스톤에서 oidc·teardown을 추가한다
 COMMANDS = {
-    "check": (check.run, "사전 점검 (아무것도 바꾸지 않음)"),
+    "check": (check.run, "사전 점검 (아무것도 바꾸지 않음)", None),
+    "setup": (setup.run, "API Gateway 할당량 요청과 SSM 파라미터 등록", None),
+    "deploy": (deploy.run, "deploy.sh로 WGA 배포 (20~40분)", _deploy_options),
+    "verify": (verify.run, "배포 검증 (아무것도 바꾸지 않음)", None),
 }
 
 EXIT_INTERRUPTED = 130
@@ -48,9 +61,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(prog="wga_installer", description="WGA 설치 마법사 단계 엔진")
     commands = parser.add_subparsers(dest="command", required=True, metavar="<명령>")
-    for name, (_, help_text) in COMMANDS.items():
-        commands.add_parser(name, parents=[common], help=help_text, description=help_text)
+    for name, (_, help_text, add_options) in COMMANDS.items():
+        command = commands.add_parser(name, parents=[common], help=help_text, description=help_text)
+        if add_options:
+            add_options(command)
     return parser
+
+
+def _raise_interrupt(signum: int, frame) -> None:
+    # 앱이 종료하면서 SIGTERM을 보내도 Ctrl+C(SIGINT)와 똑같이 처리한다. 기본 동작(즉시 종료)대로 두면
+    # deploy.sh처럼 따로 실행 중인 자식 프로세스 그룹이 남아 배포를 계속한다 (runner.py 모듈 설명 참고)
+    raise KeyboardInterrupt
 
 
 def main(argv: list[str] | None = None, *, stdin: TextIO | None = None, stdout: TextIO | None = None,
@@ -65,12 +86,13 @@ def main(argv: list[str] | None = None, *, stdin: TextIO | None = None, stdout: 
     emitter: Emitter = (JsonEmitter if args.json else TextEmitter)(redactor, stdout)
     try:
         ctx = build_context(env=args.env, region=args.region, profile=args.profile, repo=args.repo,
-                            environ=environ, cwd=cwd or Path.cwd())
+                            environ=environ, cwd=cwd or Path.cwd(),
+                            alarm_email=getattr(args, "alarm_email", None))
         interaction = Interaction(emitter, json_mode=args.json, stdin=stdin, prompt_stream=stdout)
         runner = Runner(emitter, interaction, env=ctx.command_env(),
                         cwd=str(ctx.repo_root) if ctx.repo_root else None,
                         dry_run=args.dry_run, assume_yes=args.yes)
-        step_run, _ = COMMANDS[args.command]
+        step_run, _, _ = COMMANDS[args.command]
         return step_run(ctx, runner, emitter)
     except KeyboardInterrupt:
         emitter.error(args.command, "사용자가 중단했습니다")
@@ -85,4 +107,6 @@ def main(argv: list[str] | None = None, *, stdin: TextIO | None = None, stdout: 
 
 
 if __name__ == "__main__":
+    # 신호 처리기는 실제 실행할 때만 설치한다 (테스트에서 main()을 직접 부를 때 pytest의 처리기를 바꾸지 않도록)
+    signal.signal(signal.SIGTERM, _raise_interrupt)
     sys.exit(main())

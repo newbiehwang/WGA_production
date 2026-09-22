@@ -251,7 +251,7 @@ Resources:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
         Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LlmLambdaFunction.Arn}/invocations'
-        TimeoutInMillis: 180000
+        TimeoutInMillis: 120000
 
   LlmOptionsMethod:
     Type: AWS::ApiGateway::Method
@@ -264,7 +264,7 @@ Resources:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
         Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LlmLambdaFunction.Arn}/invocations'
-        TimeoutInMillis: 180000
+        TimeoutInMillis: 120000
 
   LlmLambdaPermissionForOptions:
     Type: AWS::Lambda::Permission

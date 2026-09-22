@@ -41,6 +41,9 @@ class FakeCli:
         self.rules_dir = root / "rules"
         self.rules_dir.mkdir()
         self.log_path = root / "calls.log"
+        self.captures_path = root / "captures.log"
+        self.tmp = root / "tmp"   # CLI의 임시 파일 폴더 (비밀 임시 파일이 남지 않는지 확인용)
+        self.tmp.mkdir()
         self.rules: dict[str, list[dict]] = {}
 
     def add(self, tool: str, match: str, stdout: str = "", stderr: str = "", exit: int = 0,
@@ -69,9 +72,20 @@ class FakeCli:
             entries.append({"tool": name, "args": args, "env": env})
         return [e for e in entries if tool is None or e["tool"] == tool]
 
+    def captures(self) -> list[tuple[str, str]]:
+        """file:// 인자로 받은 파일들: [(권한 문자열 예: '-rw-------', 내용), ...]"""
+        if not self.captures_path.exists():
+            return []
+        entries = []
+        for chunk in self.captures_path.read_text().split("\n" + RS + "\n")[:-1]:
+            mode, _, content = chunk.partition("\n")
+            entries.append((mode, content))
+        return entries
+
     def env(self, **extra: str) -> dict[str, str]:
         return {"PATH": str(self.bin), "HOME": str(self.root), "PYTHONPATH": str(CORE),
-                "FAKE_CLI_LOG": str(self.log_path), "FAKE_CLI_RULES": str(self.rules_dir), **extra}
+                "TMPDIR": str(self.tmp), "FAKE_CLI_LOG": str(self.log_path),
+                "FAKE_CLI_RULES": str(self.rules_dir), "FAKE_CLI_CAPTURES": str(self.captures_path), **extra}
 
     def _write(self, tool: str) -> None:
         """규칙을 case 문으로 옮긴 규칙 파일을 쓰고, 도구 이름의 링크를 만든다."""

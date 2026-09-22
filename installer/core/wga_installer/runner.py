@@ -11,16 +11,28 @@
   앱이 stdin으로 한 줄짜리 JSON 응답을 돌려준다.
       {"type": "confirm_response", "id": "<이벤트 id>", "approved": true}
       {"type": "secret_response",  "id": "<이벤트 id>", "value": "<비밀 값>"}
+      {"type": "choice_response",  "id": "<이벤트 id>", "choice": "<선택지 id>"}
   응답이 없거나(EOF) 형식이 틀리거나 id가 다르면 "거절"로 처리한다. 모호할 때 변경하지 않는 쪽이 안전하다.
+  선택(choice)은 기본값을 쓴다. 기본값은 항상 아무것도 바꾸지 않는 쪽(예: "기존 값 유지")으로 정한다.
 - 텍스트 모드(터미널): `y/N` 질문과 getpass(입력 내용이 화면에 보이지 않음)를 쓴다.
 
 비밀 값은 명령 인자로 넘기지 않는다. 실행 중인 프로세스의 인자는 같은 Mac의 다른 사용자도
 `ps`로 볼 수 있기 때문이다. 대신 `secret_file`로 권한 0600 임시 파일을 만들어
 `aws ... --cli-input-json file://<경로>`처럼 파일 경로만 넘기고, 끝나면 즉시 지운다.
+
+취소와 시간 초과 (스트리밍 실행)
+    deploy.sh는 aws·npm·pip 같은 자식 프로세스를 여러 개 띄운다. deploy.sh만 종료하면 자식이 남아
+    배포를 계속할 수 있으므로, 스트리밍 명령은 새 프로세스 그룹(start_new_session)으로 실행하고
+    신호를 그룹 전체에 보낸다.
+    - 취소(Ctrl+C, 또는 앱이 이 프로세스에 SIGINT/SIGTERM을 보냄): 그룹에 SIGINT를 전달하고
+      CANCEL_GRACE초 동안 정리되기를 기다린다. 그래도 남아 있거나 한 번 더 취소하면 SIGKILL.
+    - 시간 초과: 그룹에 SIGTERM, KILL_GRACE초 뒤에도 남아 있으면 SIGKILL.
+    새 그룹으로 떼어 놓으면 터미널의 Ctrl+C가 자식에게 직접 가지 않으므로, 위처럼 이 프로세스가 대신 전달한다.
 """
 import getpass
 import json
 import os
+import signal
 import subprocess
 import tempfile
 import threading
@@ -40,6 +52,10 @@ DECLINED = "declined"   # 사용자가 승인하지 않아 실행하지 않음
 RC_TIMEOUT = 124
 RC_NOT_EXECUTABLE = 126
 RC_NOT_FOUND = 127
+RC_INTERRUPTED = 130   # 128 + SIGINT
+
+CANCEL_GRACE = 60   # 취소 후 자식이 스스로 정리하기를 기다리는 시간(초). 진행 중인 aws 호출이 끝날 여유를 준다
+KILL_GRACE = 10     # 시간 초과로 SIGTERM을 보낸 뒤 SIGKILL까지 기다리는 시간(초)
 
 DEFAULT_TIMEOUT = 60   # 읽기 전용 명령의 기본 제한 시간(초). 네트워크가 멈춰도 점검이 끝없이 기다리지 않게 한다
 
@@ -50,6 +66,7 @@ class CommandResult:
     stdout: str
     stderr: str
     outcome: str = EXECUTED
+    interrupted: bool = False   # 사용자가 실행 도중 취소함 (스트리밍 실행에서만)
 
     @property
     def ok(self) -> bool:
@@ -103,11 +120,33 @@ class Interaction:
         self.emitter.redactor.add(value)
         return value
 
-    def _read_response(self, expected_type: str, id_: str) -> dict | None:
+    def choose(self, id_: str, prompt: str, options: list[tuple[str, str]], default: str) -> str:
+        """선택지 (id, 설명) 중 하나를 고르게 한다. 응답이 없거나 잘못되면 default를 돌려준다."""
+        valid = [option_id for option_id, _ in options]
+        self.emitter.choice_required(id_, prompt, options, default)
+        if self.json_mode:
+            response = self._read_response("choice_response", id_, quiet_eof=True)
+            choice = response.get("choice") if response else None
+            if choice not in valid:
+                self.emitter.log(f"{prompt}: 응답이 없어 기본값({default})을 씁니다", stream="info")
+                return default
+            return choice
+        lines = [f"  {prompt}"] + [f"    {number}) {label}" for number, (_, label) in enumerate(options, 1)]
+        default_number = valid.index(default) + 1
+        self.prompt_stream.write("\n".join(lines) + f"\n  번호를 입력하세요 [기본 {default_number}]: ")
+        self.prompt_stream.flush()
+        answer = self.stdin.readline().strip()
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return valid[int(answer) - 1]
+        return default   # 빈 입력(Enter)·잘못된 입력은 기본값
+
+    def _read_response(self, expected_type: str, id_: str, quiet_eof: bool = False) -> dict | None:
         line = self.stdin.readline()
         if not line:
-            # 앱이 stdin을 닫았다 (앱 종료 등). 사람이 답하지 않은 것이므로 거절로 처리한다
-            self.emitter.error("input", f"'{id_}'에 대한 응답을 받지 못해 진행하지 않습니다")
+            # 앱이 stdin을 닫았다 (앱 종료 등). 사람이 답하지 않은 것이므로 거절로 처리한다.
+            # quiet_eof: 선택처럼 기본값으로 계속 진행하는 경우에는 오류로 알리지 않는다
+            if not quiet_eof:
+                self.emitter.error("input", f"'{id_}'에 대한 응답을 받지 못해 진행하지 않습니다")
             return None
         try:
             response = json.loads(line)
@@ -151,7 +190,8 @@ class Runner:
         allow_assume_yes=False: `--yes`를 줘도 반드시 사람에게 묻는다 (teardown처럼 되돌릴 수 없는 작업).
         timeout 기본값이 None인 이유: 스택 배포처럼 수십 분 걸리는 작업을 중간에 끊으면 더 위험하다.
         """
-        command = format_command(cmd)
+        # extra_env(예: AWS_REGION, ALARM_EMAIL)도 함께 보여 줘야 무엇으로 실행되는지 정확히 알 수 있다
+        command = format_command(cmd, extra_env)
         if self.dry_run:
             self.emitter.dry_run(id_, command, reason)
             return CommandResult(0, "", "", DRY_RUN)
@@ -198,11 +238,14 @@ class Runner:
         """출력을 한 줄씩 `log` 이벤트로 바로 내보내며 실행한다 (deploy.sh처럼 오래 걸리는 명령용).
 
         on_line(line, stream): 줄마다 호출되는 콜백. deploy 단계가 `====== N. 제목 ======` 줄을
-        진행 표시로 바꾸는 데 쓴다 (M2).
+        진행 표시로 바꾸는 데 쓴다.
         """
         proc = subprocess.Popen(cmd, env=env, cwd=cwd, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, encoding="utf-8", errors="replace", bufsize=1)
+                                text=True, encoding="utf-8", errors="replace", bufsize=1,
+                                # 새 프로세스 그룹의 리더로 실행한다 (그룹 ID = proc.pid). 취소·시간 초과 때
+                                # os.killpg로 deploy.sh와 그 자식 전체에 신호를 보내기 위해서다 (모듈 설명 참고)
+                                start_new_session=True)
         chunks: dict[str, list[str]] = {"stdout": [], "stderr": []}
 
         def pump(pipe: TextIO, name: str) -> None:
@@ -220,15 +263,50 @@ class Runner:
                    threading.Thread(target=pump, args=(proc.stderr, "stderr"), daemon=True)]
         for thread in threads:
             thread.start()
-        try:
-            returncode = proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            returncode = RC_TIMEOUT
+        returncode, interrupted = self._wait(proc, timeout)
         for thread in threads:
             thread.join()
-        return CommandResult(returncode, "".join(chunks["stdout"]), "".join(chunks["stderr"]))
+        return CommandResult(returncode, "".join(chunks["stdout"]), "".join(chunks["stderr"]),
+                             interrupted=interrupted)
+
+    def _wait(self, proc: subprocess.Popen, timeout: float | None) -> tuple[int, bool]:
+        """(종료 코드, 취소 여부). 취소·시간 초과 때 프로세스 그룹 전체를 정리한다."""
+        try:
+            return proc.wait(timeout=timeout), False
+        except subprocess.TimeoutExpired:
+            self._info(f"{timeout:g}초 안에 끝나지 않아 중단합니다: {proc.args[0]}")
+            self._signal_group(proc, signal.SIGTERM)
+            try:
+                proc.wait(timeout=KILL_GRACE)
+            except subprocess.TimeoutExpired:
+                self._signal_group(proc, signal.SIGKILL)
+                proc.wait()
+            return RC_TIMEOUT, False
+        except KeyboardInterrupt:
+            # 취소 요청. 자식에게도 SIGINT를 전달해 스스로 정리할 기회를 준다
+            # (예: aws cloudformation wait를 멈추고 deploy.sh가 set -e로 종료)
+            self._info(f"취소 요청: 실행 중인 명령에 중단 신호를 보냈습니다. 최대 {CANCEL_GRACE}초 기다립니다")
+            self._signal_group(proc, signal.SIGINT)
+            try:
+                proc.wait(timeout=CANCEL_GRACE)
+            except (subprocess.TimeoutExpired, KeyboardInterrupt):
+                # 정리가 끝나지 않았거나 사용자가 한 번 더 취소함 → 강제 종료
+                self._info("강제 종료합니다")
+                self._signal_group(proc, signal.SIGKILL)
+                proc.wait()
+            return RC_INTERRUPTED, True
+
+    @staticmethod
+    def _signal_group(proc: subprocess.Popen, sig: int) -> None:
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            pass   # 이미 모두 끝남
+
+    def _info(self, line: str) -> None:
+        # 출력 스레드(pump)와 동시에 쓰지 않도록 같은 잠금을 쓴다
+        with self._emit_lock:
+            self.emitter.log(line, stream="info")
 
 
 # 반환 타입: (yield 값, send 값, return 값). Generator[str]처럼 줄여 쓰는 형식은 3.13부터라 전부 적는다

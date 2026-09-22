@@ -137,7 +137,7 @@ WGA_production/
 ### 사전 요구사항
 - AWS CLI 설정 및 적절한 권한
 - 배포 리전: 기본값은 서울(`ap-northeast-2`)입니다. `AWS_REGION` 환경 변수 → CLI 프로필의 리전 → 서울 순서로 정해지며, 코드에 특정 리전을 고정하지 않습니다.
-- Service Quotas -> API Gateway -> Maximum integration timeout in milliseconds -> 180000ms로 변경 요청(자동 승인)
+- Service Quotas -> API Gateway -> Maximum integration timeout in milliseconds -> 120000ms로 변경 요청(자동 승인. 120000ms를 넘는 값은 추가 승인이 필요)
 - Node.js 18+ 
 - Python 3.12+
 
@@ -197,7 +197,7 @@ ALARM_EMAIL=you@example.com ./deploy.sh dev
 | Lambda 5개 | Throttles | 5분 합계 1건 이상 | 동시성 한도 도달 감지 |
 | Lambda 5개 | Duration p95 | 함수 Timeout의 80% 초과, 2회 연속 | 타임아웃 임박 감지 (LLM·MCP 144초, Slack 봇 12초 등) |
 | API Gateway | 5XXError | 5분 합계 5건 이상 | 백엔드 장애 감지 |
-| API Gateway | Latency p95 | 150초 초과, 2회 연속 | 통합 타임아웃(180초) 임박 감지 |
+| API Gateway | Latency p95 | 100초 초과, 2회 연속 | 통합 타임아웃(120초) 임박 감지 |
 | DynamoDB 4개 | Read + Write ThrottleEvents | 5분 합계 1건 이상 | 프로비저닝 용량(5 RCU/WCU) 부족 감지 |
 
 Lambda 알람은 `Fn::ForEach`(AWS::LanguageExtensions)로 함수 목록과 임계값 매핑만 두고 한 번에 정의했습니다.

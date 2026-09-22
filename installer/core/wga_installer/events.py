@@ -7,12 +7,14 @@
 이벤트 종류 (필드는 계획서 2.1절)
     step_started      단계 시작            {step, title}
     step_finished     단계 끝              {step, status: ok|skipped|failed, summary}
-    check             점검 항목 하나의 결과  {id, title, status: ok|warn|fail|info, detail, hint?}
+    check             점검 항목 하나의 결과  {id, title, status: ok|warn|fail|info, detail, hint?, url?}
+                      (url: 앱이 "열기" 버튼을 붙일 주소. 예: 프론트엔드, CloudWatch 대시보드)
     log               출력 한 줄            {stream: stdout|stderr|info, line}
                       (stdout·stderr는 실행한 명령의 출력, info는 설치 마법사 자신의 안내)
     progress          긴 작업의 진행 단계    {step, phase, label}
     confirm_required  변경 작업 승인 요청    {id, command, reason}
     input_required    값 입력 요청          {id, prompt, secret}
+    choice_required   선택지 중 하나 요청    {id, prompt, options: [{id, label}], default}
     dry_run           dry-run이라 실행하지 않은 변경 작업 {id, command, reason}
     error             오류와 해결 안내       {step, message, hint?}
 
@@ -69,10 +71,12 @@ class Redactor:
         return value
 
 
-def format_command(cmd: list[str]) -> str:
+def format_command(cmd: list[str], env: dict[str, str] | None = None) -> str:
     """사용자에게 보여 줄 명령 문자열. 셸에 그대로 붙여 넣어도 되도록 인자를 따옴표로 감싼다.
-    (비밀 값은 이 문자열이 이벤트로 나갈 때 Redactor가 가린다)"""
-    return shlex.join(cmd)
+    env를 주면 `AWS_REGION=ap-northeast-2 ./deploy.sh dev`처럼 앞에 붙여, 명령이 어떤 설정으로
+    실행되는지 한눈에 보이게 한다. (비밀 값은 이 문자열이 이벤트로 나갈 때 Redactor가 가린다)"""
+    prefix = [f"{name}={shlex.quote(value)}" for name, value in (env or {}).items()]
+    return " ".join([*prefix, shlex.join(cmd)])
 
 
 class Emitter:
@@ -100,8 +104,9 @@ class Emitter:
     def step_finished(self, step: str, status: str, summary: str) -> None:
         self.emit("step_finished", step=step, status=status, summary=summary)
 
-    def check(self, id_: str, title: str, status: str, detail: str, hint: str | None = None) -> None:
-        self.emit("check", id=id_, title=title, status=status, detail=detail, hint=hint)
+    def check(self, id_: str, title: str, status: str, detail: str, hint: str | None = None,
+              url: str | None = None) -> None:
+        self.emit("check", id=id_, title=title, status=status, detail=detail, hint=hint, url=url)
 
     def log(self, line: str, stream: str = "stdout") -> None:
         self.emit("log", stream=stream, line=line)
@@ -114,6 +119,10 @@ class Emitter:
 
     def input_required(self, id_: str, prompt: str, secret: bool = True) -> None:
         self.emit("input_required", id=id_, prompt=prompt, secret=secret)
+
+    def choice_required(self, id_: str, prompt: str, options: list[tuple[str, str]], default: str) -> None:
+        self.emit("choice_required", id=id_, prompt=prompt, default=default,
+                  options=[{"id": option_id, "label": label} for option_id, label in options])
 
     def dry_run(self, id_: str, command: str, reason: str) -> None:
         self.emit("dry_run", id=id_, command=command, reason=reason)
@@ -152,6 +161,8 @@ class TextEmitter(Emitter):
             lines = [f"  {mark} {event['title']}: {event['detail']}"]
             if "hint" in event:
                 lines.append(f"         → {event['hint']}")
+            if "url" in event:
+                lines.append(f"         {event['url']}")
         elif kind == "log":
             prefix = {"stderr": "    ! ", "info": "  · "}.get(event["stream"], "    | ")
             lines = [prefix + event["line"]]
@@ -160,7 +171,7 @@ class TextEmitter(Emitter):
         elif kind in ("confirm_required", "dry_run"):
             title = "변경 작업" if kind == "confirm_required" else "dry-run (실행하지 않음)"
             lines = [f"  {title}: {event['reason']}", f"    $ {event['command']}"]
-        elif kind == "input_required":
+        elif kind in ("input_required", "choice_required"):
             lines = []   # 질문 문구는 입력을 받는 쪽(runner.Interaction)이 프롬프트로 직접 보여 준다
         elif kind == "error":
             lines = [f"✗ 오류 ({event['step']}): {event['message']}"]
