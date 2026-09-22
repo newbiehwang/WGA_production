@@ -73,6 +73,10 @@ def test_first_run_requests_quota_and_stores_secrets(fake):
     account(fake)
     result = setup_json(fake, *FIRST_RUN)
     assert result.returncode == 0, result.stdout + result.stderr
+    evts = events(result.stdout)
+    # 명령 전체의 시작·끝도 알린다 (앱이 제목과 결과 요약을 보여 주는 데 쓴다)
+    assert evts[0] == {"type": "step_started", "step": "setup", "title": "사전 설정 (dev, ap-northeast-2)"}
+    assert evts[-1]["type"] == "step_finished" and evts[-1]["step"] == "setup" and evts[-1]["status"] == "ok"
     steps = finished(result.stdout)
     assert steps["quota"]["status"] == "ok" and "PENDING" in steps["quota"]["summary"]
     assert steps["ssm_parameters"] == {"type": "step_finished", "step": "ssm_parameters", "status": "ok",
@@ -142,6 +146,7 @@ def test_unadjustable_quota_fails_but_ssm_still_runs(fake):
     steps = finished(result.stdout)
     assert result.returncode == 1
     assert steps["quota"]["status"] == "failed" and steps["ssm_parameters"]["status"] == "skipped"
+    assert steps["setup"]["status"] == "failed"
 
 
 def test_quota_lookup_error_is_reported(fake):

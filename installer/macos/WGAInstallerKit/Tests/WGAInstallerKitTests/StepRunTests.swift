@@ -84,4 +84,20 @@ final class StepRunTests: XCTestCase {
         XCTAssertEqual(state.dryRuns.map(\.command), ["./deploy.sh dev"])
         XCTAssertEqual(state.errors, [ErrorItem(step: "deploy", message: "실패", hint: "setup 먼저")])
     }
+
+    func testProgressFraction() {
+        XCTAssertNil(StepRun(command: "deploy").progressFraction)
+        XCTAssertEqual(run("deploy", [.progress(step: "deploy", phase: "3/6", label: "x")]).progressFraction, 0.5)
+        XCTAssertEqual(run("deploy", [.progress(step: "deploy", phase: "0/6", label: "x")]).progressFraction, 0)
+        XCTAssertNil(run("oidc", [.progress(step: "workflow_test", phase: "", label: "dev 배포: queued")]).progressFraction)
+    }
+
+    func testLogSearchAndCopy() {
+        let state = run("deploy", [.log(stream: "stdout", line: "Uploading Lambda"),
+                                   .log(stream: "stderr", line: "WARNING: lambda slow"),
+                                   .log(stream: "info", line: "배포 시작")])
+        XCTAssertEqual(state.logs(matching: "LAMBDA").map(\.text), ["Uploading Lambda", "WARNING: lambda slow"])
+        XCTAssertEqual(state.logs(matching: "  ").count, 3)
+        XCTAssertEqual(state.logText, "Uploading Lambda\n! WARNING: lambda slow\n배포 시작")
+    }
 }

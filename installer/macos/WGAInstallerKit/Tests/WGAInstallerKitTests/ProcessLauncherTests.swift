@@ -146,4 +146,44 @@ final class RealCoreTests: XCTestCase {
         XCTAssertNotNil(run.summary)
         print("실제 CLI 점검 결과:", run.checks.map { "\($0.id)=\($0.status.rawValue)" }.joined(separator: ", "))
     }
+
+    /// dry-run으로 전 과정(사전 설정 → 배포 → 검증 → GitHub 자동 배포 → 정리)을 실제 CLI로 실행한다.
+    /// 이 Mac의 자격 증명 상태에 따라 단계가 사전 확인에서 실패할 수는 있지만, 어느 단계도 변경 승인을
+    /// 묻지 않아야 한다 (dry-run은 아무것도 바꾸지 않으므로 승인할 일이 없다).
+    func testWholeFlowInDryRunNeverAsksToChangeAnything() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["WGA_CORE_E2E"] == "1", "WGA_CORE_E2E=1일 때만 실행")
+        ProcessSignals.ignoreBrokenPipe()
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../../../..").standardizedFileURL
+        let launcher = ProcessLauncher(location: InstallerLocation(
+            coreDirectory: repo.appendingPathComponent("installer/core"), helperExecutable: URL(fileURLWithPath: "/dev/null")))
+
+        for command in ["setup", "deploy", "verify", "oidc", "teardown"] {
+            let collector = ProcessLauncherTests.Collector()
+            var session: CLISession?
+            session = try launcher.launch(command: command, arguments: ["--dry-run", "--repo", repo.path],
+                                          onEvent: { event in
+                                              collector.add(event)
+                                              // 혹시 질문이 오면 바꾸지 않는 쪽으로 답해 멈추지 않게 한다
+                                              switch event {
+                                              case let .confirmRequired(id, _, _): session?.respond(.confirm(id: id, approved: false))
+                                              case let .choiceRequired(id, _, _, choice): session?.respond(.choice(id: id, choice: choice))
+                                              case let .inputRequired(id, _, _): session?.respond(.text(id: id, value: ""))
+                                              default: break
+                                              }
+                                          },
+                                          onExit: { code in collector.code = code; collector.exited.fulfill() })
+            wait(for: [collector.exited], timeout: 180)
+            var run = StepRun(command: command)
+            collector.events.forEach { run.apply($0) }
+            run.finish(exitCode: collector.code)
+
+            XCTAssertTrue([0, 1].contains(collector.code), "\(command) 종료 코드 \(collector.code)")
+            XCTAssertNotNil(run.title, "\(command)가 시작 이벤트를 보내지 않았습니다")
+            let asked = collector.events.filter { if case .confirmRequired = $0 { return true }; return false }
+            XCTAssertTrue(asked.isEmpty, "\(command)가 dry-run에서 변경 승인을 물었습니다: \(asked)")
+            print("dry-run \(command): 종료 코드 \(collector.code), 실행하지 않은 명령 \(run.dryRuns.count)개, "
+                  + "오류 \(run.errors.map(\.message).prefix(2))")
+        }
+    }
 }
