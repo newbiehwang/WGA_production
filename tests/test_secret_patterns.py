@@ -2,7 +2,7 @@
 
 이 저장소는 공개 저장소라, 키 모양 문자열이 한 번이라도 푸시되면 GitHub 비밀 값 스캔이 "공개 유출" 알림을 연다.
 테스트용 가짜 값이라도 실제 형식과 같으면 감지된다 (예: AWS 문서 예시 키의 앞 네 글자를 ASIA로 바꾼 값).
-테스트에서 이런 값이 필요하면 실행할 때 조각을 이어 붙여 만든다 (installer/macos/WGAInstallerKit/Tests/*/TestKeys.swift).
+테스트에서 이런 값이 필요하면 실행할 때 조각을 이어 붙여 만든다 (키 모양 문자열을 파일에 남기지 않는다).
 """
 import re
 import subprocess

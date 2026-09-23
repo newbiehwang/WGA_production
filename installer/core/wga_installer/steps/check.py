@@ -1,7 +1,7 @@
 """check: 사전 점검. 아무것도 바꾸지 않는다 (읽기 전용 명령만 실행하므로 --dry-run과 결과가 같다).
 
 점검 항목은 계획서 4.1절을 따른다. 항목마다 `check` 이벤트를 하나씩 바로 내보내므로
-앱은 점검이 끝나기 전부터 목록을 채워 나갈 수 있다.
+읽는 쪽은 점검이 끝나기 전부터 목록을 채워 나갈 수 있다.
 
 상태 판단 기준
 - fail: 이 상태로는 배포할 수 없다 (필수 도구 없음, 자격 증명 없음, 저장소 없음 등). 종료 코드 1.
@@ -24,7 +24,6 @@ from ..events import (CHECK_FAIL, CHECK_INFO, CHECK_OK, CHECK_WARN, STEP_FAILED,
 from ..runner import RC_NOT_EXECUTABLE, RC_NOT_FOUND, RC_TIMEOUT, Runner
 
 STEP = "check"
-MIN_MACOS_MAJOR = 13   # 앱(SwiftUI)이 지원하는 최소 macOS 버전
 TOOL_TIMEOUT = 30      # `--version` 같은 로컬 명령의 제한 시간(초)
 AWS_TIMEOUT = 30       # STS 호출의 제한 시간(초). 네트워크 문제로 멈추면 이 시간 뒤 실패로 보고한다
 
@@ -108,7 +107,8 @@ def _version_text(version: tuple[int, ...]) -> str:
 
 
 def _check_system(runner: Runner, report) -> None:
-    """운영체제와 CPU. 앱은 macOS 13 이상 전용이지만 CLI는 다른 OS에서도 돌아가므로 fail이 아닌 warn."""
+    """운영체제와 CPU. 어떤 OS에서도 동작하므로 막지 않고 무엇으로 실행 중인지만 알린다
+    (문제가 생겼을 때 어떤 환경이었는지 알 수 있게 남긴다)."""
     system = runner.run(["uname", "-s"], timeout=TOOL_TIMEOUT)
     machine = runner.run(["uname", "-m"], timeout=TOOL_TIMEOUT)
     if not system.ok:
@@ -117,18 +117,12 @@ def _check_system(runner: Runner, report) -> None:
     arch = machine.stdout.strip() if machine.ok else "알 수 없음"
     arch_label = {"arm64": "Apple Silicon", "x86_64": "Intel"}.get(arch, arch)
     if system.stdout.strip() != "Darwin":
-        report("system", "운영체제", CHECK_WARN, f"{system.stdout.strip()} ({arch})",
-               "macOS가 아닙니다. 터미널 CLI는 쓸 수 있지만 설치 마법사 앱은 macOS 전용입니다")
+        # macOS 밖에서도 쓸 수 있다. deploy.sh는 bash와 아래 도구들만 쓰고, 그 도구들은 따로 점검한다
+        report("system", "운영체제", CHECK_INFO, f"{system.stdout.strip()} ({arch})")
         return
     version = runner.run(["sw_vers", "-productVersion"], timeout=TOOL_TIMEOUT)
     version_text = version.stdout.strip() if version.ok else "버전 알 수 없음"
-    detail = f"macOS {version_text} · {arch_label} ({arch})"
-    match = re.match(r"(\d+)", version_text)
-    if match and int(match.group(1)) < MIN_MACOS_MAJOR:
-        report("system", "운영체제", CHECK_WARN, detail,
-               f"설치 마법사 앱은 macOS {MIN_MACOS_MAJOR} 이상에서 동작합니다. 터미널 CLI는 쓸 수 있습니다")
-        return
-    report("system", "운영체제", CHECK_OK, detail)
+    report("system", "운영체제", CHECK_OK, f"macOS {version_text} · {arch_label} ({arch})")
 
 
 def _check_tool(runner: Runner, tool: Tool, report) -> None:
@@ -225,7 +219,7 @@ def _check_repo(ctx: Context, runner: Runner, report) -> None:
 _AWS_ERRORS = (
     (("Unable to locate credentials", "NoCredentialProviders"),
      "자격 증명이 설정되어 있지 않습니다",
-     "앱의 'AWS 연결'에서 Access Key를 입력하거나, --profile <이름>으로 기존 프로필을 지정하세요"),
+     "aws configure로 자격 증명을 설정하거나, --profile <이름>으로 기존 프로필을 지정하세요"),
     (("could not be found",),
      "지정한 AWS 프로필이 없습니다",
      "aws configure list-profiles로 프로필 이름을 확인하세요"),

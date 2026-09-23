@@ -1,14 +1,14 @@
-"""이벤트 출력: 단계 엔진이 지금 무엇을 하는지 앱 또는 터미널에 알린다.
+"""이벤트 출력: 단계 엔진이 지금 무엇을 하는지 터미널 또는 호출한 프로그램에 알린다.
 
 출력 형식은 두 가지이고, 단계 코드는 어느 형식인지 모른 채 같은 메서드를 호출한다.
-- JSON Lines (`--json`): 한 줄에 JSON 객체 하나. macOS 앱이 줄 단위로 읽어 디코딩한다.
+- JSON Lines (`--json`): 한 줄에 JSON 객체 하나. 다른 프로그램이 줄 단위로 읽어 디코딩한다.
 - 사람용 텍스트 (기본): 같은 이벤트를 터미널에서 읽기 좋은 모양으로 바꿔 출력한다.
 
 이벤트 종류 (필드는 계획서 2.1절)
     step_started      단계 시작            {step, title}
     step_finished     단계 끝              {step, status: ok|skipped|failed, summary}
     check             점검 항목 하나의 결과  {id, title, status: ok|warn|fail|info, detail, hint?, url?}
-                      (url: 앱이 "열기" 버튼을 붙일 주소. 예: 프론트엔드, CloudWatch 대시보드)
+                      (url: 사람이 열어 볼 주소. 예: 프론트엔드, CloudWatch 대시보드)
     log               출력 한 줄            {stream: stdout|stderr|info, line}
                       (stdout·stderr는 실행한 명령의 출력, info는 설치 마법사 자신의 안내)
     progress          긴 작업의 진행 단계    {step, phase, label}
@@ -87,7 +87,7 @@ class Emitter:
         self.stream = stream or sys.stdout
 
     def emit(self, type_: str, **fields: Any) -> dict:
-        # None인 선택 필드(hint 등)는 빼서 앱이 "값 없음"과 "빈 문자열"을 구분하지 않아도 되게 한다
+        # None인 선택 필드(hint 등)는 빼서 읽는 쪽이 "값 없음"과 "빈 문자열"을 구분하지 않아도 되게 한다
         event = {"type": type_, **{k: v for k, v in fields.items() if v is not None}}
         event = self.redactor.redact_obj(event)
         self._write(event)
@@ -132,11 +132,11 @@ class Emitter:
 
 
 class JsonEmitter(Emitter):
-    """앱용: 이벤트 하나를 JSON 한 줄로 쓴다."""
+    """다른 프로그램용: 이벤트 하나를 JSON 한 줄로 쓴다."""
 
     def _write(self, event: dict) -> None:
         # ensure_ascii=False: 한글을 \uXXXX로 바꾸지 않아 로그를 그대로 읽을 수 있다.
-        # flush: 파이프로 연결되면 출력이 버퍼에 쌓여 앱 화면이 늦게 갱신되므로 줄마다 내보낸다.
+        # flush: 파이프로 연결되면 출력이 버퍼에 쌓여 읽는 쪽이 늦게 받으므로 줄마다 내보낸다.
         self.stream.write(json.dumps(event, ensure_ascii=False) + "\n")
         self.stream.flush()
 

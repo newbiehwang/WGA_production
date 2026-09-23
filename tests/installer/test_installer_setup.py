@@ -74,7 +74,7 @@ def test_first_run_requests_quota_and_stores_secrets(fake):
     result = setup_json(fake, *FIRST_RUN)
     assert result.returncode == 0, result.stdout + result.stderr
     evts = events(result.stdout)
-    # 명령 전체의 시작·끝도 알린다 (앱이 제목과 결과 요약을 보여 주는 데 쓴다)
+    # 명령 전체의 시작·끝도 알린다 (읽는 쪽이 제목과 결과 요약을 보여 주는 데 쓴다)
     assert evts[0] == {"type": "step_started", "step": "setup", "title": "사전 설정 (dev, ap-northeast-2)"}
     assert evts[-1]["type"] == "step_finished" and evts[-1]["step"] == "setup" and evts[-1]["status"] == "ok"
     steps = finished(result.stdout)

@@ -138,7 +138,7 @@ def run_cli(fake: FakeCli, *args: str, input: str = "", cwd: Path | None = None,
 
 
 def events(stdout: str) -> list[dict]:
-    """JSON Lines 출력을 이벤트 목록으로 바꾼다. 한 줄이라도 JSON이 아니면 실패한다 (앱이 파싱하지 못함)."""
+    """JSON Lines 출력을 이벤트 목록으로 바꾼다. 한 줄이라도 JSON이 아니면 실패한다 (읽는 쪽이 파싱하지 못함)."""
     return [json.loads(line) for line in stdout.splitlines()]
 
 
@@ -168,7 +168,7 @@ def run_step(fake: FakeCli, step_run, *, stdin: str = "", env: str = "dev", dry_
 
 
 def responses(*items: tuple) -> str:
-    """앱이 stdin으로 보낼 응답 줄들. ("confirm", id[, 승인]) / ("text", id, 값) / ("choice", id, 선택)"""
+    """stdin으로 보낼 응답 줄들. ("confirm", id[, 승인]) / ("text", id, 값) / ("choice", id, 선택)"""
     lines = []
     for kind, id_, *rest in items:
         if kind == "confirm":
