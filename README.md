@@ -148,7 +148,7 @@ WGA_production/
 `deploy.sh`만으로는 부족한 부분 — 배포 전 할당량·비밀 값 점검, 배포 후 검증, GitHub 자동 배포 설정, 환경 정리 — 을 단계로 묶은 명령줄 도구입니다. Python 표준 라이브러리만 쓰므로 설치할 것이 없습니다(Python 3.10 이상).
 
 ```bash
-installer/core/wga-installer check --env dev      # 도구·자격 증명·리전 점검 (아무것도 바꾸지 않음)
+installer/core/wga-installer check --env dev      # 도구·자격 증명·권한·리전 점검 (아무것도 바꾸지 않음)
 installer/core/wga-installer setup --env dev      # 할당량 요청, SSM 비밀 값 등록
 installer/core/wga-installer deploy --env dev     # 사전 확인 후 deploy.sh 실행
 installer/core/wga-installer verify --env dev     # 스택·API 인증·로그·프론트엔드 확인

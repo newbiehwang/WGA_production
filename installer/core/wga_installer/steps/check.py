@@ -10,7 +10,10 @@
 - ok:   통과.
 
 항목 사이의 의존: AWS CLI가 없으면 자격 증명 확인을 건너뛰고(fail로 보고), 자격 증명이
-실패하면 루트 계정 여부는 판단하지 않는다. 앞의 결과는 `results` 딕셔너리로 넘겨 본다.
+실패하면 루트 계정 여부와 권한은 판단하지 않는다. 앞의 결과는 `results` 딕셔너리로 넘겨 본다.
+
+권한을 따로 보는 이유: `sts get-caller-identity`는 권한이 하나도 없어도 성공한다. 그래서 정책을
+붙이지 않은 IAM 사용자도 "자격 증명 OK"가 나오고, 다음 단계에서야 모든 호출이 거부된다.
 """
 import json
 import os
@@ -18,6 +21,7 @@ import re
 import sys
 from dataclasses import dataclass
 
+from ..aws import QUOTA_SERVICE, aws_json, error_text
 from ..context import REGION_PATTERN, REGION_SOURCES, Context
 from ..events import (CHECK_FAIL, CHECK_INFO, CHECK_OK, CHECK_WARN, STEP_FAILED, STEP_OK,
                       Emitter)
@@ -56,6 +60,39 @@ TOOLS = (
     Tool("unzip", "unzip", ("unzip", "-v"), r"UnZip (\d+)\.(\d+)", None, "unzip"),
 )
 
+# 이후 단계가 먼저 읽어 보는 API. 하나라도 거부되면 그 단계는 시작하자마자 실패한다.
+# 조회 결과는 쓰지 않고 "거부되는지"만 본다 (--max-items 1: 계정에 리소스가 많아도 한 번에 끝난다)
+PERMISSION_READS = (
+    ("CloudFormation", ("cloudformation", "describe-stacks", "--max-items", "1")),
+    ("SSM Parameter Store", ("ssm", "describe-parameters", "--max-items", "1")),
+    ("Service Quotas", ("service-quotas", "list-service-quotas", "--service-code", QUOTA_SERVICE,
+                        "--max-items", "1")),
+    ("S3", ("s3api", "list-buckets", "--query", "length(Buckets)")),
+)
+
+# setup·deploy가 실제로 바꾸는 작업. deploy.sh는 CloudFormation 서비스 역할을 쓰지 않으므로 스택의
+# 리소스(cloudformation/*.yaml)도 실행한 사람의 권한으로 만들어진다 → 템플릿이 만드는 리소스의 생성 권한이 모두 필요하다.
+# 실제로 만들어 보지 않고 IAM 정책 시뮬레이터로 허용 여부만 묻는다.
+# (github-oidc.yaml의 OIDC 공급자는 oidc 단계에서만 만들므로 여기서는 보지 않는다)
+PERMISSION_WRITES = (
+    "servicequotas:RequestServiceQuotaIncrease", "ssm:PutParameter",
+    "cloudformation:CreateStack", "cloudformation:UpdateStack",
+    "s3:CreateBucket", "s3:PutObject",
+    "lambda:CreateFunction", "lambda:PublishLayerVersion", "lambda:AddPermission",
+    "apigateway:POST", "dynamodb:CreateTable",
+    "cognito-idp:CreateUserPool", "cognito-identity:CreateIdentityPool",
+    "ecr:CreateRepository", "codebuild:CreateProject", "codebuild:StartBuild", "amplify:CreateApp",
+    "cloudwatch:PutMetricAlarm", "sns:CreateTopic", "logs:PutQueryDefinition",
+)
+# IAM Role은 템플릿이 모두 wga-*로 이름 짓는다. 그 이름으로 확인해야 github-oidc.yaml의 배포 Role처럼
+# wga-* Role로 좁힌 정책도 통과한다 ("*"로 물으면 좁힌 정책은 거부로 나온다)
+PERMISSION_IAM_WRITES = ("iam:CreateRole", "iam:PutRolePolicy", "iam:AttachRolePolicy", "iam:PassRole")
+PERMISSION_CHECK_ROLE = "wga-permission-check"   # 시뮬레이션에만 쓰는 이름 (실제로 만들지 않는다)
+
+# 권한 거부·서비스 미활성화를 알아보는 표시 (AWS 서비스마다 오류 이름이 조금씩 다르다)
+_DENIED_MARKERS = ("AccessDenied", "UnauthorizedOperation", "not authorized to perform")
+_NOT_ACTIVATED_MARKERS = ("OptInRequired", "SubscriptionRequired", "not subscribed")
+
 # deploy.sh가 Lambda Layer 의존성을 설치할 때 pip를 찾는 순서와 같다 (deploy.sh의 PIP_CMD 결정 부분)
 PIP_COMMANDS = (("pip", "--version"), ("pip3", "--version"), ("python3", "-m", "pip", "--version"))
 
@@ -82,6 +119,7 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
     _check_homebrew(runner, report)
     _check_repo(ctx, runner, report)
     _check_aws_identity(ctx, runner, results, report)
+    _check_aws_permissions(ctx, runner, results, report)
     _check_region(ctx, report)
     report("free_plan", "무료 플랜 제약", CHECK_INFO,
            "무료 플랜 계정은 IAM Identity Center·Organizations·GuardDuty를 쓸 수 없고, "
@@ -273,6 +311,99 @@ def _check_aws_identity(ctx: Context, runner: Runner, results: dict[str, CheckRe
         report("root_account", "루트 계정 사용 여부", CHECK_OK, "IAM 역할(임시 자격 증명)")
     else:
         report("root_account", "루트 계정 사용 여부", CHECK_OK, "IAM 사용자")
+
+
+def _permission_hint(ctx: Context) -> str:
+    """권한이 모자랄 때 어디서 무엇을 붙이면 되는지. IAM 사용자면 콘솔에서 바로 찾아갈 수 있게 이름을 넣는다."""
+    if ":user/" in ctx.caller_arn:
+        user = ctx.caller_arn.split(":user/", 1)[1].rsplit("/", 1)[-1]   # 경로(/team/...)가 있으면 이름만
+        return (f"IAM 콘솔 → 사용자 → {user} → 권한 탭 → 권한 추가에서 AdministratorAccess를 연결하세요 "
+                "(몇 초 안에 반영됩니다)")
+    return "이 자격 증명의 IAM 역할에 WGA 배포에 필요한 권한을 붙이세요"
+
+
+def _check_aws_permissions(ctx: Context, runner: Runner, results: dict[str, CheckResult], report) -> None:
+    """정책이 붙어 있는지. 읽기는 실제로 한 번씩 호출해 보고, 쓰기는 정책 시뮬레이터로 묻는다 (아무것도 만들지 않는다)."""
+    credentials = results.get("aws_credentials")
+    if credentials is None or credentials.status != CHECK_OK:
+        return   # 누구인지 모르면 권한도 판단할 수 없다 (자격 증명 항목이 이미 실패로 알렸다)
+
+    title = "AWS 권한 (조회)"
+    denied: list[str] = []
+    inactive: list[str] = []
+    other: list[str] = []
+    for label, args in PERMISSION_READS:
+        result = runner.run(["aws", *args, "--output", "json"], timeout=AWS_TIMEOUT)
+        if result.ok:
+            continue
+        if any(marker in result.output for marker in _NOT_ACTIVATED_MARKERS):
+            inactive.append(label)
+        elif any(marker in result.output for marker in _DENIED_MARKERS):
+            denied.append(label)
+        elif result.returncode == RC_TIMEOUT:
+            other.append(f"{label}: 응답 없음")
+        else:
+            other.append(f"{label}: {error_text(result)}")
+
+    if denied:
+        report("aws_permissions", title, CHECK_FAIL, "권한이 없습니다: " + ", ".join(denied),
+               _permission_hint(ctx))
+        return
+    if inactive:
+        report("aws_permissions", title, CHECK_FAIL, "아직 쓸 수 없는 서비스: " + ", ".join(inactive),
+               "새 계정은 가입 후 서비스가 활성화되기까지 최대 24시간이 걸립니다. 기다린 뒤 다시 점검하세요")
+        return
+    if other:
+        # 권한 문제인지 알 수 없는 실패 (네트워크, 일시적 오류 등). 배포를 막을 근거가 없으므로 warn
+        report("aws_permissions", title, CHECK_WARN, "확인하지 못했습니다 — " + other[0],
+               "네트워크 연결을 확인하고 다시 점검하세요")
+        return
+    report("aws_permissions", title, CHECK_OK, ", ".join(label for label, _ in PERMISSION_READS))
+    _check_deploy_permissions(ctx, runner, report)
+
+
+def _check_deploy_permissions(ctx: Context, runner: Runner, report) -> None:
+    """setup·deploy가 바꾸는 작업을 IAM 정책 시뮬레이터로 확인한다.
+    배포는 20~40분 걸리고 권한이 모자라면 중간(보통 IAM Role 생성)에서 실패해 롤백까지 기다려야 하므로 미리 본다."""
+    title = "AWS 권한 (배포)"
+    if ctx.caller_arn.endswith(":root"):
+        report("aws_deploy_permissions", title, CHECK_OK, "루트 사용자는 모든 권한을 가집니다")
+        return
+    if ":user/" not in ctx.caller_arn:
+        # 역할의 임시 자격 증명(assumed-role)은 세션 ARN이라 시뮬레이터에 그대로 넣을 수 없다
+        report("aws_deploy_permissions", title, CHECK_INFO,
+               "IAM 역할은 미리 확인하지 않습니다. 권한이 모자라면 배포 도중 실패합니다")
+        return
+
+    role_arn = f"arn:aws:iam::{ctx.account_id}:role/{PERMISSION_CHECK_ROLE}"
+    denied: list[str] = []
+    for actions, resource in ((PERMISSION_WRITES, None), (PERMISSION_IAM_WRITES, role_arn)):
+        args = ["iam", "simulate-principal-policy", "--policy-source-arn", ctx.caller_arn,
+                "--action-names", *actions]
+        if resource:
+            args += ["--resource-arns", resource]
+        data, result = aws_json(runner, *args, timeout=AWS_TIMEOUT)
+        if not isinstance(data, dict):
+            if any(marker in result.output for marker in _DENIED_MARKERS):
+                # 시뮬레이터를 쓸 권한(iam:SimulatePrincipalPolicy) 자체가 없다. 조회는 통과했으니 막지는 않는다
+                report("aws_deploy_permissions", title, CHECK_WARN,
+                       "미리 확인하지 못했습니다 (iam:SimulatePrincipalPolicy 권한 없음)",
+                       "AdministratorAccess가 붙어 있으면 무시해도 됩니다. 아니면 권한이 모자랄 때 배포 도중 실패합니다")
+            else:
+                report("aws_deploy_permissions", title, CHECK_WARN,
+                       f"미리 확인하지 못했습니다 — {error_text(result)}")
+            return
+        for item in data.get("EvaluationResults") or []:
+            if isinstance(item, dict) and item.get("EvalDecision") != "allowed":
+                denied.append(str(item.get("EvalActionName", "?")))
+
+    if denied:
+        shown = ", ".join(denied[:5]) + (f" 외 {len(denied) - 5}개" if len(denied) > 5 else "")
+        report("aws_deploy_permissions", title, CHECK_FAIL, "허용되지 않는 작업: " + shown,
+               _permission_hint(ctx))
+        return
+    report("aws_deploy_permissions", title, CHECK_OK,
+           f"배포에 필요한 작업 {len(PERMISSION_WRITES) + len(PERMISSION_IAM_WRITES)}개 모두 허용 (정책 시뮬레이터)")
 
 
 def _check_region(ctx: Context, report) -> None:
