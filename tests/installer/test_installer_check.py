@@ -7,7 +7,9 @@ from .helpers import checks_by_id, events, healthy_mac, run_cli
 
 # check가 호출해도 되는 aws·gh 명령 (모두 읽기 전용). 이 밖의 명령을 부르면 테스트가 실패한다
 READ_ONLY = {
-    "aws": ("--version", "configure get region", "sts get-caller-identity"),
+    "aws": ("--version", "configure get region", "sts get-caller-identity",
+            "cloudformation describe-stacks", "ssm describe-parameters", "service-quotas list-service-quotas",
+            "s3api list-buckets", "iam simulate-principal-policy"),
     "gh": ("--version", "auth status"),
 }
 
@@ -27,8 +29,8 @@ def test_healthy_mac_passes(fake, repo):
 
     checks = checks_by_id(result.stdout)
     assert {"system", "aws_cli", "gh_cli", "git", "node", "npm", "zip", "unzip", "pip", "python",
-            "homebrew", "repo", "aws_credentials", "root_account", "region", "free_plan",
-            "github_auth"} == checks.keys()
+            "homebrew", "repo", "aws_credentials", "root_account", "aws_permissions", "aws_deploy_permissions",
+            "region", "free_plan", "github_auth"} == checks.keys()
     assert {c["status"] for c in checks.values()} <= {"ok", "info"}
     assert checks["aws_credentials"]["detail"] == "계정 123456789012 · arn:aws:iam::123456789012:user/wga-installer"
     assert checks["region"]["detail"] == "ap-northeast-2 (기본값)"
@@ -259,3 +261,136 @@ def test_unexpected_error_becomes_error_event(fake, repo):
     assert result.returncode == 1
     assert last["type"] == "error" and last["message"].startswith("예상하지 못한 오류: AttributeError")
     assert "Traceback" in result.stderr
+
+
+# --- 권한 점검 -------------------------------------------------------------------------------------
+
+DENIED = ("An error occurred (AccessDenied) when calling the DescribeStacks operation: User: "
+          "arn:aws:iam::123456789012:user/wga-installer is not authorized to perform: cloudformation:DescribeStacks\n")
+
+
+def deny_all_reads(fake):
+    """정책이 하나도 없는 IAM 사용자: 자격 증명은 유효하지만 모든 조회가 거부된다"""
+    for match in ("cloudformation describe-stacks", "ssm describe-parameters", "service-quotas list-service-quotas",
+                  "s3api list-buckets"):
+        fake.add("aws", match, stderr=DENIED, exit=254)
+
+
+def test_user_without_policy_fails_at_check(fake, repo):
+    # 실제로 있었던 상황: 키만 만들고 정책을 붙이지 않은 사용자. sts는 권한 없이도 성공하므로
+    # 자격 증명 항목은 통과하지만, 권한 항목이 실패해 점검 단계에서 바로 알 수 있어야 한다
+    deny_all_reads(fake)
+    healthy_mac(fake)
+    result = check_json(fake, repo)
+    checks = checks_by_id(result.stdout)
+    assert result.returncode == 1
+    assert checks["aws_credentials"]["status"] == "ok"
+    perm = checks["aws_permissions"]
+    assert perm["status"] == "fail"
+    assert perm["detail"] == "권한이 없습니다: CloudFormation, SSM Parameter Store, Service Quotas, S3"
+    assert "사용자 → wga-installer → 권한 탭" in perm["hint"] and "AdministratorAccess" in perm["hint"]
+    # 조회가 막혔으면 쓰기 권한은 따로 묻지 않는다 (결과가 뻔하고 항목만 늘어난다)
+    assert "aws_deploy_permissions" not in checks
+    assert not [c for c in fake.calls("aws") if "simulate-principal-policy" in c["args"]]
+
+
+def test_service_not_activated_yet(fake, repo):
+    fake.add("aws", "service-quotas list-service-quotas", exit=254,
+             stderr="An error occurred (SubscriptionRequiredException) when calling the ListServiceQuotas operation\n")
+    healthy_mac(fake)
+    perm = checks_by_id(check_json(fake, repo).stdout)["aws_permissions"]
+    assert perm["status"] == "fail" and perm["detail"] == "아직 쓸 수 없는 서비스: Service Quotas"
+    assert "24시간" in perm["hint"]
+
+
+def test_unknown_read_error_is_only_a_warning(fake, repo):
+    fake.add("aws", "ssm describe-parameters", exit=255,
+             stderr="Could not connect to the endpoint URL: \"https://ssm.ap-northeast-2.amazonaws.com/\"\n")
+    healthy_mac(fake)
+    result = check_json(fake, repo)
+    perm = checks_by_id(result.stdout)["aws_permissions"]
+    assert result.returncode == 0
+    assert perm["status"] == "warn" and perm["detail"].startswith("확인하지 못했습니다 — SSM Parameter Store: ")
+
+
+def test_permission_checks_use_profile_and_region(fake, repo):
+    fake.add("aws", "configure get region --profile wga-installer", "ap-northeast-2\n")
+    healthy_mac(fake)
+    run_cli(fake, "check", "--json", "--repo", str(repo), "--profile", "wga-installer")
+    probe = [c for c in fake.calls("aws") if "describe-parameters" in c["args"]][0]
+    assert probe["env"]["AWS_PROFILE"] == "wga-installer" and probe["env"]["AWS_REGION"] == "ap-northeast-2"
+
+
+def test_deploy_permissions_are_simulated_for_the_caller(fake, repo):
+    healthy_mac(fake)
+    result = check_json(fake, repo)
+    checks = checks_by_id(result.stdout)
+    assert checks["aws_permissions"]["status"] == "ok"
+    assert checks["aws_deploy_permissions"]["status"] == "ok"
+
+    sims = [c["args"] for c in fake.calls("aws") if "simulate-principal-policy" in c["args"]]
+    assert len(sims) == 2
+    for args in sims:
+        assert args[args.index("--policy-source-arn") + 1] == "arn:aws:iam::123456789012:user/wga-installer"
+    general, iam = sims
+    assert "cloudformation:CreateStack" in general and "iam:CreateRole" not in general
+    assert "--resource-arns" not in general
+    # IAM 작업은 템플릿이 쓰는 wga-* Role 이름으로 묻는다 (wga-*로 좁힌 정책도 통과하도록)
+    assert "iam:CreateRole" in iam and "iam:PassRole" in iam
+    assert iam[iam.index("--resource-arns") + 1] == "arn:aws:iam::123456789012:role/wga-permission-check"
+
+
+def test_read_only_policy_fails_deploy_permissions(fake, repo):
+    # ReadOnlyAccess만 붙은 사용자: 조회는 되지만 배포는 첫 리소스를 만들 때 실패한다
+    denied = [{"EvalActionName": action, "EvalDecision": "implicitDeny"}
+              for action in ("ssm:PutParameter", "cloudformation:CreateStack", "s3:CreateBucket",
+                             "lambda:CreateFunction", "dynamodb:CreateTable", "sns:CreateTopic")]
+    # 첫 번째 시뮬레이션(IAM 밖의 작업)에만 맞는 규칙. IAM 작업 시뮬레이션은 healthy_mac의 "허용"을 받는다
+    fake.add("aws", "cloudformation:CreateStack", json.dumps({"EvaluationResults": denied}))
+    healthy_mac(fake)
+    result = check_json(fake, repo)
+    deploy = checks_by_id(result.stdout)["aws_deploy_permissions"]
+    assert result.returncode == 1
+    assert deploy["status"] == "fail"
+    assert deploy["detail"] == ("허용되지 않는 작업: ssm:PutParameter, cloudformation:CreateStack, s3:CreateBucket, "
+                                "lambda:CreateFunction, dynamodb:CreateTable 외 1개")
+    assert "AdministratorAccess" in deploy["hint"]
+
+
+def test_explicit_deny_counts_as_denied(fake, repo):
+    fake.add("aws", "iam:CreateRole", json.dumps({"EvaluationResults": [
+        {"EvalActionName": "iam:CreateRole", "EvalDecision": "explicitDeny"}]}))
+    healthy_mac(fake)
+    deploy = checks_by_id(check_json(fake, repo).stdout)["aws_deploy_permissions"]
+    assert deploy["status"] == "fail" and deploy["detail"] == "허용되지 않는 작업: iam:CreateRole"
+
+
+def test_simulator_not_allowed_is_only_a_warning(fake, repo):
+    # PowerUserAccess처럼 IAM 조회 권한이 없으면 시뮬레이터도 못 쓴다. 조회는 통과했으니 막지는 않는다
+    fake.add("aws", "iam simulate-principal-policy", exit=254,
+             stderr="An error occurred (AccessDenied) when calling the SimulatePrincipalPolicy operation: "
+                    "User is not authorized to perform: iam:SimulatePrincipalPolicy\n")
+    healthy_mac(fake)
+    result = check_json(fake, repo)
+    deploy = checks_by_id(result.stdout)["aws_deploy_permissions"]
+    assert result.returncode == 0
+    assert deploy["status"] == "warn" and "iam:SimulatePrincipalPolicy" in deploy["detail"]
+
+
+def test_assumed_role_skips_simulation(fake, repo):
+    healthy_mac(fake, identity={"Account": "123456789012", "UserId": "AROAEXAMPLE:me",
+                                "Arn": "arn:aws:sts::123456789012:assumed-role/wga-github-deploy-dev/me"})
+    checks = checks_by_id(check_json(fake, repo).stdout)
+    assert checks["aws_permissions"]["status"] == "ok"
+    assert checks["aws_deploy_permissions"]["status"] == "info"
+    assert not [c for c in fake.calls("aws") if "simulate-principal-policy" in c["args"]]
+
+
+def test_invalid_credentials_skip_permission_checks(fake, repo):
+    fake.add("aws", "sts get-caller-identity", exit=254,
+             stderr="An error occurred (InvalidClientTokenId) when calling the GetCallerIdentity operation\n")
+    healthy_mac(fake)
+    checks = checks_by_id(check_json(fake, repo).stdout)
+    assert checks["aws_credentials"]["status"] == "fail"
+    assert "aws_permissions" not in checks and "aws_deploy_permissions" not in checks
+    assert not [c for c in fake.calls("aws") if "describe-stacks" in c["args"]]

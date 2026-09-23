@@ -116,6 +116,13 @@ def healthy_mac(fake: FakeCli, identity: dict | None = None) -> FakeCli:
     fake.add("aws", "--version", "aws-cli/2.17.0 Python/3.11.8 Darwin/23.5.0 exe/arm64\n")
     fake.add("aws", "configure get region", exit=1)   # 프로필에 리전 없음 → 기본값 서울
     fake.add("aws", "sts get-caller-identity", json.dumps(identity or IDENTITY))
+    # 권한 점검: 조회는 성공, 정책 시뮬레이터는 모두 허용 (AdministratorAccess가 붙은 사용자)
+    fake.add("aws", "cloudformation describe-stacks --max-items 1", '{"Stacks": []}')
+    fake.add("aws", "ssm describe-parameters --max-items 1", '{"Parameters": []}')
+    fake.add("aws", "service-quotas list-service-quotas", '{"Quotas": []}')
+    fake.add("aws", "s3api list-buckets", "0")
+    fake.add("aws", "iam simulate-principal-policy", json.dumps({"EvaluationResults": [
+        {"EvalActionName": "ssm:PutParameter", "EvalDecision": "allowed"}]}))
     fake.add("gh", "--version", "gh version 2.50.0 (2024-06-01)\n")
     fake.add("gh", "auth status", "github.com\n  ✓ Logged in to github.com account octocat (keyring)\n")
     fake.add("git", "--version", "git version 2.45.1\n")
