@@ -272,3 +272,32 @@ def test_text_input(fake, stdin, expected):
     assert runner.interaction.text("confirm_env", "환경 이름을 입력하세요") == expected
     assert output_events(out)[0] == {"type": "input_required", "id": "confirm_env", "prompt": "환경 이름을 입력하세요",
                                      "secret": False}
+
+
+class TtyInput(io.StringIO):
+    """터미널처럼 보이는 입력 (isatty가 True)"""
+    def isatty(self):
+        return True
+
+
+def test_secret_on_terminal_is_hidden_by_default(monkeypatch):
+    asked = []
+    monkeypatch.setattr("wga_installer.runner.getpass.getpass", lambda prompt, stream: asked.append(prompt) or "v")
+    out = io.StringIO()
+    interaction = Interaction(TextEmitter(Redactor(), out), json_mode=False, stdin=TtyInput("typed\n"),
+                              prompt_stream=out)
+    assert interaction.secret("s", "비밀") == "v"
+    assert asked == ["  비밀: "]   # 보이지 않게 입력받는 getpass를 쓴다
+
+
+def test_secret_with_echo_reads_a_visible_line(monkeypatch):
+    # 붙여 넣은 긴 키가 들어갔는지 보이게 입력받는다 (getpass를 쓰지 않는다)
+    monkeypatch.setattr("wga_installer.runner.getpass.getpass",
+                        lambda *a, **k: pytest.fail("echo=True인데 getpass를 불렀습니다"))
+    out = io.StringIO()
+    redactor = Redactor()
+    interaction = Interaction(TextEmitter(redactor, out), json_mode=False, stdin=TtyInput("sk-ant-VISIBLE\n"),
+                              prompt_stream=out)
+    assert interaction.secret("s", "Anthropic API 키", echo=True) == "sk-ant-VISIBLE"
+    assert out.getvalue() == "  Anthropic API 키: "
+    assert redactor.redact("key=sk-ant-VISIBLE") == "key=***"   # 이후 출력에서는 여전히 가린다

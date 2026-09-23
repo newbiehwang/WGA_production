@@ -3,6 +3,8 @@ import json
 
 import pytest
 
+from wga_installer.steps.setup import mask_secret
+
 from .helpers import events, run_cli
 
 QUOTA_CODE = "L-E5AE38E3"
@@ -240,5 +242,25 @@ def test_text_mode(fake, answer, expected_calls):
     account(fake, quota=120000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
     result = run_cli(fake, "setup", "--region", "ap-northeast-2", input=f"sk-ant-TEXT\n{answer}\n\n")
     assert "[y/N]" in result.stdout and "번호를 입력하세요" in result.stdout
+    # API 키는 입력 내용을 보이게 받는다고 알리고, 입력 뒤에는 길이만 확인해 준다 (짧은 값은 일부도 보이지 않음)
+    assert "Anthropic API 키 (입력 내용이 화면에 보입니다): " in result.stdout
+    assert "Anthropic API 키 입력됨: (11자)" in result.stdout
     assert "sk-ant-TEXT" not in result.stdout
     assert len(mutating_calls(fake)) == expected_calls
+
+
+def test_entered_secret_is_confirmed_with_a_masked_preview(fake):
+    # 보이지 않게 입력한 값도 들어갔는지 알 수 있게, 앞 7글자·끝 4글자·길이만 보여 준다
+    account(fake)
+    result = setup_json(fake, *FIRST_RUN)
+    logs = [e["line"] for e in events(result.stdout) if e["type"] == "log"]
+    assert "Anthropic API 키 입력됨: sk-ant-…ALUE (24자)" in logs
+    assert SECRETS["ANTHROPIC_API_KEY"] not in result.stdout
+
+
+@pytest.mark.parametrize("value, shown", [
+    ("sk-ant-api03-" + "x" * 90 + "ABCD", "sk-ant-…ABCD (107자)"),
+    ("short-secret", "(12자)"),   # 짧으면 일부만 보여도 추측하기 쉬워 길이만
+])
+def test_mask_secret(value, shown):
+    assert mask_secret(value) == shown

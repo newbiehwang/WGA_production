@@ -16,6 +16,7 @@
   응답이 없거나(EOF) 형식이 틀리거나 id가 다르면 "거절"로 처리한다. 모호할 때 변경하지 않는 쪽이 안전하다.
   선택(choice)은 기본값을 쓴다. 기본값은 항상 아무것도 바꾸지 않는 쪽(예: "기존 값 유지")으로 정한다.
 - 텍스트 모드(터미널): `y/N` 질문과 getpass(입력 내용이 화면에 보이지 않음)를 쓴다.
+  입력했는지 확인하기 어려운 값(API 키 등)은 `echo=True`로 입력 내용을 보여 줄 수 있다.
 
 비밀 값은 명령 인자로 넘기지 않는다. 실행 중인 프로세스의 인자는 같은 Mac의 다른 사용자도
 `ps`로 볼 수 있기 때문이다. 대신 `secret_file`로 권한 0600 임시 파일을 만들어
@@ -103,18 +104,23 @@ class Interaction:
         answer = self.stdin.readline().strip().lower()
         return answer in ("y", "yes")
 
-    def secret(self, id_: str, prompt: str) -> str | None:
-        """비밀 값을 입력받는다. 받은 값은 곧바로 Redactor에 등록해 이후 어떤 출력에서도 가려지게 한다."""
+    def secret(self, id_: str, prompt: str, *, echo: bool = False) -> str | None:
+        """비밀 값을 입력받는다. 받은 값은 곧바로 Redactor에 등록해 이후 어떤 출력에서도 가려지게 한다.
+
+        echo=True면 터미널에서 입력하는 글자를 그대로 보여 준다. 붙여 넣은 긴 키는 가려져 있으면
+        들어갔는지 알 수 없어서다. 입력 내용은 터미널 스크롤에 남지만 CLI의 다른 출력(이벤트·로그)에는
+        여전히 가려서 나간다. JSON 모드에서는 입력받는 쪽이 화면을 정하므로 영향이 없다."""
         if self.json_mode:
             self.emitter.input_required(id_, prompt, secret=True)
             response = self._read_response("secret_response", id_)
             value = response.get("value") if response else None
             if not isinstance(value, str):
                 return None
-        elif self.stdin.isatty():
+        elif self.stdin.isatty() and not echo:
             value = getpass.getpass(f"  {prompt}: ", stream=self.prompt_stream)
         else:
-            # 파이프로 값을 넣는 경우 (자동화 스크립트). getpass는 이때 경고를 띄우므로 직접 한 줄을 읽는다
+            # 보이게 입력하는 경우, 또는 파이프로 값을 넣는 경우 (자동화 스크립트). getpass는 파이프에서
+            # 경고를 띄우므로 직접 한 줄을 읽는다 (터미널이면 입력하는 글자가 그대로 보인다)
             self.prompt_stream.write(f"  {prompt}: ")
             self.prompt_stream.flush()
             value = self.stdin.readline().rstrip("\n")

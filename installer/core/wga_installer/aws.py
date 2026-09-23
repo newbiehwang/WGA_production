@@ -32,10 +32,11 @@ class SecretParam:
     key: str                 # /wga/<env>/ 뒤의 이름
     title: str               # 화면에 보일 이름
     required: bool           # False면 비워 두어도 된다 (등록하지 않고 건너뜀)
+    echo: bool = False       # True면 터미널에서 입력 내용을 보여 준다 (붙여 넣었는지 확인하기 어려운 긴 키)
 
 
 SECRET_PARAMS = (
-    SecretParam("ANTHROPIC_API_KEY", "Anthropic API 키", required=True),
+    SecretParam("ANTHROPIC_API_KEY", "Anthropic API 키", required=True, echo=True),
     # Slack 값은 Slack 봇을 쓸 때만 필요하다. 없으면 Slack 요청이 서명 검증에서 모두 거부된다
     SecretParam("SlackbotToken", "Slack 봇 토큰 (xoxb-...)", required=False),
     SecretParam("SlackSigningSecret", "Slack Signing Secret", required=False),
