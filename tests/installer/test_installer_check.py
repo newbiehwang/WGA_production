@@ -9,7 +9,7 @@ from .helpers import checks_by_id, events, healthy_mac, run_cli
 READ_ONLY = {
     "aws": ("--version", "configure get region", "sts get-caller-identity",
             "cloudformation describe-stacks", "ssm describe-parameters", "service-quotas list-service-quotas",
-            "s3api list-buckets", "iam simulate-principal-policy"),
+            "s3api list-buckets", "iam simulate-principal-policy", "organizations describe-organization"),
     "gh": ("--version", "auth status"),
 }
 
@@ -352,8 +352,8 @@ def test_read_only_policy_fails_deploy_permissions(fake, repo):
     deploy = checks_by_id(result.stdout)["aws_deploy_permissions"]
     assert result.returncode == 1
     assert deploy["status"] == "fail"
-    assert deploy["detail"] == ("허용되지 않는 작업: ssm:PutParameter, cloudformation:CreateStack, s3:CreateBucket, "
-                                "lambda:CreateFunction, dynamodb:CreateTable 외 1개")
+    assert deploy["detail"] == ("ap-northeast-2에서 허용되지 않는 작업: ssm:PutParameter, cloudformation:CreateStack, "
+                                "s3:CreateBucket, lambda:CreateFunction, dynamodb:CreateTable 외 1개")
     assert "AdministratorAccess" in deploy["hint"]
 
 
@@ -362,7 +362,7 @@ def test_explicit_deny_counts_as_denied(fake, repo):
         {"EvalActionName": "iam:CreateRole", "EvalDecision": "explicitDeny"}]}))
     healthy_mac(fake)
     deploy = checks_by_id(check_json(fake, repo).stdout)["aws_deploy_permissions"]
-    assert deploy["status"] == "fail" and deploy["detail"] == "허용되지 않는 작업: iam:CreateRole"
+    assert deploy["status"] == "fail" and deploy["detail"] == "ap-northeast-2에서 허용되지 않는 작업: iam:CreateRole"
 
 
 def test_simulator_not_allowed_is_only_a_warning(fake, repo):
@@ -394,3 +394,87 @@ def test_invalid_credentials_skip_permission_checks(fake, repo):
     assert checks["aws_credentials"]["status"] == "fail"
     assert "aws_permissions" not in checks and "aws_deploy_permissions" not in checks
     assert not [c for c in fake.calls("aws") if "describe-stacks" in c["args"]]
+
+
+# 실제로 만난 메시지 (교육·회사 등 다른 조직이 만든 구성원 계정). 계정 번호는 예시로 바꿨다
+SCP_DENIED = ("An error occurred (AccessDeniedException) when calling the DescribeParameters operation: User: "
+              "arn:aws:iam::123456789012:user/wga-installer is not authorized to perform: ssm:DescribeParameters "
+              "on resource: arn:aws:ssm:ap-northeast-2:123456789012:* with an explicit deny in a service control "
+              "policy: arn:aws:organizations::999988887777:policy/o-example111/service_control_policy/p-example1\n")
+MEMBER_ORG = json.dumps({"Organization": {"Id": "o-example111", "MasterAccountId": "999988887777",
+                                          "FeatureSet": "ALL"}})
+
+
+def test_scp_denial_points_to_the_organization_not_iam(fake, repo):
+    # AdministratorAccess를 붙여도 SCP는 풀리지 않는다. "정책을 붙이세요"라고 안내하면 헛수고를 시킨다
+    fake.add("aws", "organizations describe-organization", MEMBER_ORG)
+    for match in ("cloudformation describe-stacks", "ssm describe-parameters", "service-quotas list-service-quotas"):
+        fake.add("aws", match, stderr=SCP_DENIED, exit=254)
+    healthy_mac(fake)
+    result = check_json(fake, repo)
+    checks = checks_by_id(result.stdout)
+    assert result.returncode == 1
+
+    org = checks["organization"]
+    assert org["status"] == "info"
+    assert org["detail"] == ("조직 o-example111의 구성원 계정입니다 (관리 계정 999988887777). "
+                             "조직의 SCP가 이 계정의 권한을 제한할 수 있습니다")
+    perm = checks["aws_permissions"]
+    assert perm["detail"] == "권한이 없습니다: CloudFormation, SSM Parameter Store, Service Quotas (조직 SCP가 거부)"
+    assert "서비스 제어 정책(SCP)" in perm["hint"] and "조직 관리 계정(999988887777)의 관리자" in perm["hint"]
+    assert "--region" in perm["hint"]   # 리전 제한이 가장 흔한 원인이다 (AWS가 관리하는 프로젝트 계정)
+    assert "권한 추가에서" not in perm["hint"]
+
+
+def test_scp_hint_without_organization_details(fake, repo):
+    # 구성원 계정은 보통 describe-organization을 볼 수 있지만, 막혀 있어도 안내는 SCP 기준이어야 한다
+    fake.add("aws", "organizations describe-organization", exit=254, stderr=DENIED)
+    fake.add("aws", "ssm describe-parameters", stderr=SCP_DENIED, exit=254)
+    healthy_mac(fake)
+    checks = checks_by_id(check_json(fake, repo).stdout)
+    assert "organization" not in checks
+    assert "조직 관리 계정의 관리자" in checks["aws_permissions"]["hint"]
+
+
+def test_permissions_boundary_denial(fake, repo):
+    fake.add("aws", "ssm describe-parameters", exit=254,
+             stderr="An error occurred (AccessDeniedException) when calling the DescribeParameters operation: User: "
+                    "arn:aws:iam::123456789012:user/wga-installer is not authorized to perform: ssm:DescribeParameters "
+                    "with an explicit deny in a permissions boundary\n")
+    healthy_mac(fake)
+    perm = checks_by_id(check_json(fake, repo).stdout)["aws_permissions"]
+    assert perm["detail"] == "권한이 없습니다: SSM Parameter Store (권한 경계가 거부)"
+    assert "사용자 → wga-installer → 권한 탭 → 권한 경계" in perm["hint"]
+
+
+def test_management_account_is_reported(fake, repo):
+    fake.add("aws", "organizations describe-organization", json.dumps(
+        {"Organization": {"Id": "o-example111", "MasterAccountId": "123456789012"}}))
+    healthy_mac(fake)
+    checks = checks_by_id(check_json(fake, repo).stdout)
+    assert checks["organization"]["detail"] == "조직 o-example111의 관리 계정입니다"
+    assert checks["aws_permissions"]["status"] == "ok"
+
+
+
+def test_simulation_is_told_the_target_region(fake, repo):
+    # 리전을 제한하는 SCP는 요청 리전을 모르면 모두 거부로 나온다. 실제로 AWS 관리 프로젝트 계정에서
+    # 허용된 리전(시드니)으로 점검했는데도 배포 작업 18개가 거부로 나왔다
+    healthy_mac(fake)
+    check_json(fake, repo, "--region", "ap-southeast-2")
+    general, iam = [c["args"] for c in fake.calls("aws") if "simulate-principal-policy" in c["args"]]
+    region = "ContextKeyName=aws:RequestedRegion,ContextKeyValues={},ContextKeyType=string"
+    assert general[general.index("--context-entries") + 1] == region.format("ap-southeast-2")
+    # IAM은 전역 서비스라 실제 요청 리전이 us-east-1이다
+    assert iam[iam.index("--context-entries") + 1] == region.format("us-east-1")
+
+
+def test_scp_denial_in_simulation_gets_the_scp_hint(fake, repo):
+    fake.add("aws", "organizations describe-organization", MEMBER_ORG)
+    fake.add("aws", "cloudformation:CreateStack", json.dumps({"EvaluationResults": [
+        {"EvalActionName": "cloudformation:CreateStack", "EvalDecision": "explicitDeny",
+         "OrganizationsDecisionDetail": {"AllowedByOrganizations": False}}]}))
+    healthy_mac(fake)
+    deploy = checks_by_id(check_json(fake, repo).stdout)["aws_deploy_permissions"]
+    assert deploy["detail"] == "ap-northeast-2에서 허용되지 않는 작업: cloudformation:CreateStack (조직 SCP가 거부)"
+    assert "서비스 제어 정책(SCP)" in deploy["hint"] and "999988887777" in deploy["hint"]

@@ -123,6 +123,10 @@ def healthy_mac(fake: FakeCli, identity: dict | None = None) -> FakeCli:
     fake.add("aws", "s3api list-buckets", "0")
     fake.add("aws", "iam simulate-principal-policy", json.dumps({"EvaluationResults": [
         {"EvalActionName": "ssm:PutParameter", "EvalDecision": "allowed"}]}))
+    # 조직에 속하지 않은 계정 (대부분의 개인 계정)
+    fake.add("aws", "organizations describe-organization", exit=254,
+             stderr="An error occurred (AWSOrganizationsNotInUseException) when calling the DescribeOrganization "
+                    "operation: Your account is not a member of an organization.\n")
     fake.add("gh", "--version", "gh version 2.50.0 (2024-06-01)\n")
     fake.add("gh", "auth status", "github.com\n  ✓ Logged in to github.com account octocat (keyring)\n")
     fake.add("git", "--version", "git version 2.45.1\n")

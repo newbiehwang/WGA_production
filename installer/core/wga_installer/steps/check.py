@@ -14,6 +14,7 @@
 
 권한을 따로 보는 이유: `sts get-caller-identity`는 권한이 하나도 없어도 성공한다. 그래서 정책을
 붙이지 않은 IAM 사용자도 "자격 증명 OK"가 나오고, 다음 단계에서야 모든 호출이 거부된다.
+거부 메시지에는 누가 막았는지(IAM 정책 없음·권한 경계·조직 SCP)가 들어 있어, 그에 맞게 안내한다.
 """
 import json
 import os
@@ -119,7 +120,8 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
     _check_homebrew(runner, report)
     _check_repo(ctx, runner, report)
     _check_aws_identity(ctx, runner, results, report)
-    _check_aws_permissions(ctx, runner, results, report)
+    organization = _check_organization(ctx, runner, results, report)
+    _check_aws_permissions(ctx, runner, results, report, organization)
     _check_region(ctx, report)
     report("free_plan", "무료 플랜 제약", CHECK_INFO,
            "무료 플랜 계정은 IAM Identity Center·Organizations·GuardDuty를 쓸 수 없고, "
@@ -313,16 +315,60 @@ def _check_aws_identity(ctx: Context, runner: Runner, results: dict[str, CheckRe
         report("root_account", "루트 계정 사용 여부", CHECK_OK, "IAM 사용자")
 
 
-def _permission_hint(ctx: Context) -> str:
-    """권한이 모자랄 때 어디서 무엇을 붙이면 되는지. IAM 사용자면 콘솔에서 바로 찾아갈 수 있게 이름을 넣는다."""
-    if ":user/" in ctx.caller_arn:
-        user = ctx.caller_arn.split(":user/", 1)[1].rsplit("/", 1)[-1]   # 경로(/team/...)가 있으면 이름만
+def _check_organization(ctx: Context, runner: Runner, results: dict[str, CheckResult], report) -> dict | None:
+    """AWS Organizations 구성원인지. 구성원이면 조직의 SCP(서비스 제어 정책)가 이 계정의 IAM 정책보다
+    먼저 적용되어, 계정 안에서 AdministratorAccess를 붙여도 막힌 작업은 풀리지 않는다.
+    학교·회사·교육 과정에서 받은 계정이 흔히 이렇다. 조직에 속하지 않았거나 조회할 수 없으면 항목을 만들지 않는다."""
+    credentials = results.get("aws_credentials")
+    if credentials is None or credentials.status != CHECK_OK:
+        return None
+    data, _ = aws_json(runner, "organizations", "describe-organization", timeout=AWS_TIMEOUT)
+    organization = data.get("Organization") if isinstance(data, dict) else None
+    if not isinstance(organization, dict):
+        return None   # AWSOrganizationsNotInUseException(조직 없음)이나 조회 거부
+    org_id, manager = organization.get("Id", "?"), organization.get("MasterAccountId", "?")
+    if manager == ctx.account_id:
+        report("organization", "AWS Organizations", CHECK_INFO, f"조직 {org_id}의 관리 계정입니다")
+    else:
+        report("organization", "AWS Organizations", CHECK_INFO,
+               f"조직 {org_id}의 구성원 계정입니다 (관리 계정 {manager}). 조직의 SCP가 이 계정의 권한을 제한할 수 있습니다")
+    return organization
+
+
+def _permission_hint(ctx: Context, outputs: list[str], organization: dict | None) -> str:
+    """권한이 모자랄 때 어디서 무엇을 고치면 되는지. 거부 메시지가 누가 막았는지 알려 주므로 그에 맞춰 안내한다
+    (IAM 정책이 없을 때와 SCP가 막을 때는 해결 방법이 완전히 다르다)."""
+    text = "\n".join(outputs)
+    if "service control policy" in text:
+        manager = (organization or {}).get("MasterAccountId")
+        who = f"조직 관리 계정({manager})의 관리자" if manager else "조직 관리 계정의 관리자"
+        return ("AWS Organizations의 서비스 제어 정책(SCP)이 명시적으로 막고 있습니다. SCP는 이 계정의 IAM 정책보다 "
+                "먼저 적용되므로 AdministratorAccess를 붙여도(루트 사용자여도) 풀리지 않습니다. "
+                "SCP가 쓸 수 있는 리전을 제한하는 경우가 많으니 먼저 허용된 리전을 확인해 --region으로 지정해 보세요 "
+                "(AWS가 관리하는 '프로젝트' 계정은 프로젝트를 만들 때 고른 리전만 허용합니다). "
+                f"그래도 막히면 {who}에게 SCP 완화를 요청하거나, 조직에 속하지 않은 다른 AWS 계정을 쓰세요")
+    user = ctx.caller_arn.split(":user/", 1)[1].rsplit("/", 1)[-1] if ":user/" in ctx.caller_arn else None
+    if "permissions boundary" in text:
+        where = f"IAM 콘솔 → 사용자 → {user} → 권한 탭 → 권한 경계" if user else "IAM 역할의 권한 경계"
+        return f"권한 경계(permissions boundary)가 막고 있습니다. {where}에서 경계를 없애거나 필요한 작업을 허용하세요"
+    if user:   # 경로(/team/...)가 있으면 이름만
         return (f"IAM 콘솔 → 사용자 → {user} → 권한 탭 → 권한 추가에서 AdministratorAccess를 연결하세요 "
                 "(몇 초 안에 반영됩니다)")
     return "이 자격 증명의 IAM 역할에 WGA 배포에 필요한 권한을 붙이세요"
 
 
-def _check_aws_permissions(ctx: Context, runner: Runner, results: dict[str, CheckResult], report) -> None:
+# 거부한 주체를 한마디로 (점검 결과의 detail에 덧붙인다)
+def _denied_by(outputs: list[str]) -> str:
+    text = "\n".join(outputs)
+    if "service control policy" in text:
+        return " (조직 SCP가 거부)"
+    if "permissions boundary" in text:
+        return " (권한 경계가 거부)"
+    return ""
+
+
+def _check_aws_permissions(ctx: Context, runner: Runner, results: dict[str, CheckResult], report,
+                           organization: dict | None = None) -> None:
     """정책이 붙어 있는지. 읽기는 실제로 한 번씩 호출해 보고, 쓰기는 정책 시뮬레이터로 묻는다 (아무것도 만들지 않는다)."""
     credentials = results.get("aws_credentials")
     if credentials is None or credentials.status != CHECK_OK:
@@ -330,6 +376,7 @@ def _check_aws_permissions(ctx: Context, runner: Runner, results: dict[str, Chec
 
     title = "AWS 권한 (조회)"
     denied: list[str] = []
+    denied_outputs: list[str] = []   # 누가 거부했는지(IAM 정책·권한 경계·SCP) 안내에 쓴다
     inactive: list[str] = []
     other: list[str] = []
     for label, args in PERMISSION_READS:
@@ -340,14 +387,16 @@ def _check_aws_permissions(ctx: Context, runner: Runner, results: dict[str, Chec
             inactive.append(label)
         elif any(marker in result.output for marker in _DENIED_MARKERS):
             denied.append(label)
+            denied_outputs.append(result.output)
         elif result.returncode == RC_TIMEOUT:
             other.append(f"{label}: 응답 없음")
         else:
             other.append(f"{label}: {error_text(result)}")
 
     if denied:
-        report("aws_permissions", title, CHECK_FAIL, "권한이 없습니다: " + ", ".join(denied),
-               _permission_hint(ctx))
+        report("aws_permissions", title, CHECK_FAIL,
+               "권한이 없습니다: " + ", ".join(denied) + _denied_by(denied_outputs),
+               _permission_hint(ctx, denied_outputs, organization))
         return
     if inactive:
         report("aws_permissions", title, CHECK_FAIL, "아직 쓸 수 없는 서비스: " + ", ".join(inactive),
@@ -359,10 +408,10 @@ def _check_aws_permissions(ctx: Context, runner: Runner, results: dict[str, Chec
                "네트워크 연결을 확인하고 다시 점검하세요")
         return
     report("aws_permissions", title, CHECK_OK, ", ".join(label for label, _ in PERMISSION_READS))
-    _check_deploy_permissions(ctx, runner, report)
+    _check_deploy_permissions(ctx, runner, report, organization)
 
 
-def _check_deploy_permissions(ctx: Context, runner: Runner, report) -> None:
+def _check_deploy_permissions(ctx: Context, runner: Runner, report, organization: dict | None = None) -> None:
     """setup·deploy가 바꾸는 작업을 IAM 정책 시뮬레이터로 확인한다.
     배포는 20~40분 걸리고 권한이 모자라면 중간(보통 IAM Role 생성)에서 실패해 롤백까지 기다려야 하므로 미리 본다."""
     title = "AWS 권한 (배포)"
@@ -377,9 +426,16 @@ def _check_deploy_permissions(ctx: Context, runner: Runner, report) -> None:
 
     role_arn = f"arn:aws:iam::{ctx.account_id}:role/{PERMISSION_CHECK_ROLE}"
     denied: list[str] = []
-    for actions, resource in ((PERMISSION_WRITES, None), (PERMISSION_IAM_WRITES, role_arn)):
+    denied_by: list[str] = []   # 시뮬레이터가 알려 주는 거부 주체 (안내 문구를 고르는 데 쓴다)
+    # aws:RequestedRegion을 넘기는 이유: 시뮬레이터는 요청 리전을 모른다. 리전을 제한하는 SCP
+    # ("이 리전들이 아니면 거부" = StringNotEquals)는 키가 없으면 조건이 참이 되어, 허용된 리전에
+    # 배포하는데도 모두 거부로 나온다. IAM은 전역 서비스라 실제 요청 리전이 us-east-1이다.
+    for actions, resource, region in ((PERMISSION_WRITES, None, ctx.region),
+                                      (PERMISSION_IAM_WRITES, role_arn, "us-east-1")):
         args = ["iam", "simulate-principal-policy", "--policy-source-arn", ctx.caller_arn,
-                "--action-names", *actions]
+                "--action-names", *actions,
+                "--context-entries",
+                f"ContextKeyName=aws:RequestedRegion,ContextKeyValues={region},ContextKeyType=string"]
         if resource:
             args += ["--resource-arns", resource]
         data, result = aws_json(runner, *args, timeout=AWS_TIMEOUT)
@@ -396,11 +452,18 @@ def _check_deploy_permissions(ctx: Context, runner: Runner, report) -> None:
         for item in data.get("EvaluationResults") or []:
             if isinstance(item, dict) and item.get("EvalDecision") != "allowed":
                 denied.append(str(item.get("EvalActionName", "?")))
+                # 조직 SCP·권한 경계가 거부했으면 결과에 False로 표시된다. 조회 점검과 같은 안내를 쓰도록
+                # 거부 메시지에 나오는 표현으로 옮겨 둔다
+                if (item.get("OrganizationsDecisionDetail") or {}).get("AllowedByOrganizations") is False:
+                    denied_by.append("service control policy")
+                if (item.get("PermissionsBoundaryDecisionDetail") or {}).get("AllowedByPermissionsBoundary") is False:
+                    denied_by.append("permissions boundary")
 
     if denied:
         shown = ", ".join(denied[:5]) + (f" 외 {len(denied) - 5}개" if len(denied) > 5 else "")
-        report("aws_deploy_permissions", title, CHECK_FAIL, "허용되지 않는 작업: " + shown,
-               _permission_hint(ctx))
+        report("aws_deploy_permissions", title, CHECK_FAIL,
+               f"{ctx.region}에서 허용되지 않는 작업: " + shown + _denied_by(denied_by),
+               _permission_hint(ctx, denied_by, organization))
         return
     report("aws_deploy_permissions", title, CHECK_OK,
            f"배포에 필요한 작업 {len(PERMISSION_WRITES) + len(PERMISSION_IAM_WRITES)}개 모두 허용 (정책 시뮬레이터)")
