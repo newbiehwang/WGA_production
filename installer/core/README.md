@@ -49,6 +49,24 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 이 도구를 실행할 수 없고,
 
 쓸 수 있는 Python이 없거나 `python -m wga_installer`를 3.10 미만으로 직접 실행하면, 설치 방법을 담은 오류를 출력하고 종료 코드 3으로 끝납니다.
 
+## 터미널 출력
+
+```
+사전 설정 (dev, ap-southeast-2)
+  API Gateway 통합 타임아웃 할당량                      [완료]
+  SSM 파라미터                                          [오류]
+    /wga/dev/ANTHROPIC_API_KEY을(를) 저장하지 못했습니다
+    An error occurred (AccessDeniedException) when calling the PutParameter operation: ...
+✗ 사전 설정을 끝내지 못했습니다. 원인을 해결하고 다시 실행하면 이어서 진행합니다
+```
+
+- 하위 단계는 한 줄로 끝나고, 결과가 오른쪽에 붙습니다: `[완료]` · `[예정]`(dry-run에서 바꿀 일) · `[건너뜀]` · `[오류]`
+- 이미 되어 있는 단계도 `[완료]`입니다. 할 말이 있을 때만 아랫줄에 씁니다
+- 오류는 `[오류]` 아랫줄에 무엇이 실패했는지, 그 아랫줄에 **명령이 낸 오류 원문**, 그 아래 해결 안내(`→`)를 씁니다
+- 도중에 질문이나 로그가 나오는 단계는 제목을 먼저 쓰고, 끝날 때 결과 줄을 다시 씁니다
+- `--dry-run`은 명령 제목 옆에 한 번만 알립니다
+- 마지막 줄: `✓` 성공 · `·` 건너뜀 · `✗` 실패
+
 ## 공통 옵션
 
 | 옵션 | 설명 |
@@ -80,13 +98,15 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 이 도구를 실행할 수 없고,
 {"type": "dry_run", "id": "put_ssm", "command": "aws ssm put-parameter ...", "reason": "SSM에 값을 저장합니다"}
 {"type": "log", "stream": "stdout", "line": "..."}
 {"type": "step_finished", "step": "check", "status": "ok", "summary": "통과 14개 · 주의 1개 · 실패 0개"}
-{"type": "error", "step": "check", "message": "...", "hint": "..."}
+{"type": "error", "step": "setup", "message": "할당량을 조회하지 못했습니다", "raw": "An error occurred (AccessDeniedException) ...", "hint": "..."}
 ```
 
 - `check.status`: `ok` 통과 / `warn` 진행 가능하지만 확인 필요 / `fail` 진행 불가 / `info` 정보
 - `check.url`: 있으면 사람이 열어 볼 주소 (프론트엔드, CloudWatch 대시보드 등)
+- `check.raw`·`error.raw`: 실패한 명령이 낸 **오류 원문** (AWS CLI·gh·CloudFormation이 남긴 그대로). `detail`·`message`는 무엇이 실패했는지 붙인 설명입니다
 - `progress.phase`: deploy.sh의 번호 단계 `N/6`. 번호 없는 구분 줄(예: Layer 패키징)은 직전 번호를 유지하고 `label`만 바뀝니다
-- `step_finished.status`: `ok` / `skipped`(이미 되어 있음) / `failed`
+- `step_finished.status`: `ok`(끝냄. 이미 되어 있던 경우 포함) / `skipped`(하지 않음. 사용자가 거절한 경우 등) / `failed`
+- `step_finished.summary`: 할 말이 없으면 빈 문자열입니다 (이미 되어 있는 단계 등)
 - `log.stream`: `stdout`·`stderr`(실행한 명령의 출력) / `info`(설치 마법사의 안내)
 - 사용자가 입력한 비밀 값은 어떤 이벤트에도 그대로 나오지 않고 `***`로 가려집니다.
 

@@ -108,7 +108,8 @@ def main(argv: list[str] | None = None, *, stdin: TextIO | None = None, stdout: 
     environ = dict(os.environ if environ is None else environ)
 
     redactor = Redactor()
-    emitter: Emitter = (JsonEmitter if args.json else TextEmitter)(redactor, stdout)
+    emitter: Emitter = (JsonEmitter(redactor, stdout) if args.json
+                        else TextEmitter(redactor, stdout, dry_run=args.dry_run))
     try:
         ctx = build_context(env=args.env, region=args.region, profile=args.profile, repo=args.repo,
                             environ=environ, cwd=cwd or Path.cwd(),

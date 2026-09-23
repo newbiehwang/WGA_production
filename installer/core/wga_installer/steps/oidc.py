@@ -59,7 +59,7 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
         ok = _block_test(ctx, runner, emitter, repo)
 
     if not ok:
-        emitter.step_finished(STEP, STEP_FAILED, "설정을 끝내지 못했습니다. 원인을 해결한 뒤 다시 실행하면 이어서 진행합니다")
+        emitter.step_finished(STEP, STEP_FAILED, "설정을 끝내지 못했습니다. 원인을 해결하고 다시 실행하면 이어서 진행합니다")
         return 1
     emitter.step_finished(STEP, STEP_OK, f"{repo}의 main에 push하면 {ctx.env}에 배포됩니다"
                           + (" (prod는 승인 후)" if ctx.env == "prod" else ""))
@@ -85,7 +85,7 @@ def _preconditions(ctx: Context, runner: Runner, emitter: Emitter) -> str | None
         return None
     admin, error = github.is_admin(runner, repo)
     if admin is None:
-        emitter.error(STEP, f"{repo} 저장소 정보를 가져오지 못했습니다: {error}")
+        emitter.error(STEP, f"{repo} 저장소 정보를 가져오지 못했습니다", raw=error)
         return None
     if not admin:
         emitter.error(STEP, f"{repo}의 관리자 권한이 없습니다",
@@ -104,25 +104,25 @@ def _deploy_role(ctx: Context, runner: Runner, emitter: Emitter, repo: str) -> t
 
     stack, error = _describe_stack(runner, stack_name)
     if error:
-        emitter.error(step, f"스택을 조회하지 못했습니다: {error}")
-        emitter.step_finished(step, STEP_FAILED, "조회 실패")
+        emitter.error(step, "스택을 조회하지 못했습니다", raw=error)
+        emitter.step_finished(step, STEP_FAILED, "")
         return False, UNKNOWN_ROLE
     status = stack.get("StackStatus", "") if stack else ""
     if status.endswith("_IN_PROGRESS"):
         emitter.error(step, f"{stack_name}이(가) 작업 중입니다 ({status})", hint="끝난 뒤 다시 실행하세요")
-        emitter.step_finished(step, STEP_FAILED, "작업 중인 스택")
+        emitter.step_finished(step, STEP_FAILED, "")
         return False, UNKNOWN_ROLE
     if status in ("ROLLBACK_COMPLETE", "ROLLBACK_FAILED"):
         # 처음 만들다 실패한 스택은 업데이트할 수 없고, 지운 뒤 다시 만들어야 한다
         emitter.error(step, f"{stack_name}이(가) 처음 생성에 실패한 상태입니다 ({status})",
                       hint=f"aws cloudformation delete-stack --stack-name {stack_name} 로 지운 뒤 다시 실행하세요")
-        emitter.step_finished(step, STEP_FAILED, "생성 실패 상태")
+        emitter.step_finished(step, STEP_FAILED, "")
         return False, UNKNOWN_ROLE
 
     provider_arn, error = _existing_provider(ctx, runner, stack_name, stack is not None)
     if error:
-        emitter.error(step, error)
-        emitter.step_finished(step, STEP_FAILED, "OIDC 공급자 확인 실패")
+        emitter.error(step, "GitHub OIDC 공급자를 확인하지 못했습니다", raw=error)
+        emitter.step_finished(step, STEP_FAILED, "")
         return False, UNKNOWN_ROLE
     params = {"Environment": ctx.env, "GitHubRepository": repo, "ExistingOidcProviderArn": provider_arn}
 
@@ -131,7 +131,7 @@ def _deploy_role(ctx: Context, runner: Runner, emitter: Emitter, repo: str) -> t
                                                                                          template_path):
         role_arn = _role_arn(stack)
         if role_arn:
-            emitter.step_finished(step, STEP_SKIPPED, "이미 최신 상태입니다")
+            emitter.step_finished(step, STEP_OK, "")   # 이미 최신 = 할 일을 마친 상태
             return True, role_arn
 
     if provider_arn:
@@ -145,23 +145,23 @@ def _deploy_role(ctx: Context, runner: Runner, emitter: Emitter, repo: str) -> t
                            reason=f"{repo}의 {ctx.env} Environment만 쓸 수 있는 배포 Role을 만듭니다 "
                                   "(IAM Role 생성, PowerUserAccess + wga-* Role 관리 권한)")
     if result.outcome == DRY_RUN:
-        emitter.step_finished(step, STEP_OK, "dry-run: 배포하지 않았습니다")
+        emitter.step_finished(step, STEP_OK, "")
         return True, (_role_arn(stack) if stack else None) or UNKNOWN_ROLE
     if result.outcome == DECLINED:
-        emitter.step_finished(step, STEP_SKIPPED, "배포하지 않았습니다")
+        emitter.step_finished(step, STEP_SKIPPED, "")
         return False, UNKNOWN_ROLE
     if not result.ok:
         for failure in stack_failures(runner, [stack_name], started - CLOCK_SKEW):
-            emitter.error(step, f"{failure.logical_id} ({failure.resource_type}) — {failure.reason}")
-        emitter.error(step, f"스택 배포에 실패했습니다: {error_text(result)}")
-        emitter.step_finished(step, STEP_FAILED, "배포 실패")
+            emitter.error(step, f"{failure.logical_id} ({failure.resource_type})", raw=failure.reason)
+        emitter.error(step, "스택 배포에 실패했습니다", raw=error_text(result))
+        emitter.step_finished(step, STEP_FAILED, "")
         return False, UNKNOWN_ROLE
 
     stack, error = _describe_stack(runner, stack_name)
     role_arn = _role_arn(stack) if stack else None
     if not role_arn:
-        emitter.error(step, f"스택 출력 DeployRoleArn을 읽지 못했습니다: {error or '출력 없음'}")
-        emitter.step_finished(step, STEP_FAILED, "출력 조회 실패")
+        emitter.error(step, "스택 출력 DeployRoleArn을 읽지 못했습니다", raw=error or "출력에 DeployRoleArn이 없습니다")
+        emitter.step_finished(step, STEP_FAILED, "")
         return False, UNKNOWN_ROLE
     emitter.step_finished(step, STEP_OK, f"배포 Role: {role_arn}")
     return True, role_arn
@@ -186,10 +186,10 @@ def _existing_provider(ctx: Context, runner: Runner, stack_name: str, stack_exis
         if result.ok:
             return "", None   # 이 스택이 공급자를 가지고 있다 → 계속 가지고 있어야 한다 (모듈 설명 참고)
         if not ("does not exist" in result.stderr or is_not_found(result)):
-            return "", f"스택 리소스를 조회하지 못했습니다: {error_text(result)}"
+            return "", error_text(result)
     data, result = aws_json(runner, "iam", "list-open-id-connect-providers")
     if data is None:
-        return "", f"OIDC 공급자 목록을 조회하지 못했습니다: {error_text(result)}"
+        return "", error_text(result)
     for provider in data.get("OpenIDConnectProviderList", []):
         arn = provider.get("Arn", "")
         if arn.endswith(f"oidc-provider/{PROVIDER_HOST}"):
@@ -229,15 +229,15 @@ def _environment(ctx: Context, runner: Runner, emitter: Emitter, repo: str) -> b
     emitter.step_started(step, f"GitHub Environment {ctx.env}")
     current, exists, error = github.environment(runner, repo, ctx.env)
     if error:
-        emitter.error(step, f"Environment를 조회하지 못했습니다: {error}")
-        emitter.step_finished(step, STEP_FAILED, "조회 실패")
+        emitter.error(step, "Environment를 조회하지 못했습니다", raw=error)
+        emitter.step_finished(step, STEP_FAILED, "")
         return False
     policies: list[str] = []
     if exists:
         policies, error = github.branch_policies(runner, repo, ctx.env)
         if policies is None:
-            emitter.error(step, f"배포 브랜치 규칙을 조회하지 못했습니다: {error}")
-            emitter.step_finished(step, STEP_FAILED, "조회 실패")
+            emitter.error(step, "배포 브랜치 규칙을 조회하지 못했습니다", raw=error)
+            emitter.step_finished(step, STEP_FAILED, "")
             return False
 
     reviewers = _reviewers(current)
@@ -245,8 +245,8 @@ def _environment(ctx: Context, runner: Runner, emitter: Emitter, repo: str) -> b
     if ctx.env == "prod":
         user, result = github.gh_json(runner, "api", "user")
         if not user or "id" not in user:
-            emitter.error(step, f"로그인한 GitHub 사용자를 확인하지 못했습니다: {github.error_text(result)}")
-            emitter.step_finished(step, STEP_FAILED, "사용자 조회 실패")
+            emitter.error(step, "로그인한 GitHub 사용자를 확인하지 못했습니다", raw=github.error_text(result))
+            emitter.step_finished(step, STEP_FAILED, "")
             return False
         me = {"type": "User", "id": user["id"]}
 
@@ -260,8 +260,7 @@ def _environment(ctx: Context, runner: Runner, emitter: Emitter, repo: str) -> b
         emitter.log(f"main 외의 배포 브랜치 규칙이 있습니다: {', '.join(extra)}. 그 브랜치에서도 {ctx.env}에 "
                     "배포할 수 있으니 필요 없으면 GitHub의 Environment 설정에서 지우세요", stream="info")
     if not need_put and not need_main:
-        emitter.step_finished(step, STEP_SKIPPED, "이미 main 브랜치로 제한되어 있습니다"
-                              + (" (본인이 필수 검토자)" if me else ""))
+        emitter.step_finished(step, STEP_OK, "")   # 이미 main 브랜치로 제한됨
         return True
 
     # PUT은 보호 규칙 전체를 새로 정하므로, 기존 검토자·대기 시간은 그대로 다시 넣는다
@@ -283,27 +282,27 @@ def _environment(ctx: Context, runner: Runner, emitter: Emitter, repo: str) -> b
     outcome = runner.approve("github_environment", f"{ctx.env} Environment의 배포를 main 브랜치로 제한합니다"
                              + (" (prod는 본인 승인 필요)" if me else ""), shown)
     if outcome == DRY_RUN:
-        emitter.step_finished(step, STEP_OK, "dry-run: 바꾸지 않았습니다")
+        emitter.step_finished(step, STEP_OK, "")
         return True
     if outcome == DECLINED:
-        emitter.step_finished(step, STEP_SKIPPED, "바꾸지 않았습니다")
+        emitter.step_finished(step, STEP_SKIPPED, "")
         return False
 
     if need_put:
         with secret_file(body) as path:
             result = runner.run_approved(put[:-1] + [path], timeout=60)
         if not result.ok:
-            emitter.error(step, f"Environment 설정에 실패했습니다: {github.error_text(result)}",
+            emitter.error(step, "Environment 설정에 실패했습니다", raw=github.error_text(result),
                           hint="비공개 저장소에서 필수 검토자를 쓰려면 유료 플랜이 필요할 수 있습니다")
-            emitter.step_finished(step, STEP_FAILED, "설정 실패")
+            emitter.step_finished(step, STEP_FAILED, "")
             return False
     if need_main:
         result = runner.run_approved(post, timeout=60)
         if not result.ok:
-            emitter.error(step, f"배포 브랜치 규칙 추가에 실패했습니다: {github.error_text(result)}")
-            emitter.step_finished(step, STEP_FAILED, "설정 실패")
+            emitter.error(step, "배포 브랜치 규칙 추가에 실패했습니다", raw=github.error_text(result))
+            emitter.step_finished(step, STEP_FAILED, "")
             return False
-    emitter.step_finished(step, STEP_OK, "main 브랜치만 배포할 수 있게 했습니다" + (" (본인이 필수 검토자)" if me else ""))
+    emitter.step_finished(step, STEP_OK, "main 브랜치만 배포 · 본인 승인 필요" if me else "main 브랜치만 배포")
     return True
 
 
@@ -327,8 +326,8 @@ def _variables(ctx: Context, runner: Runner, emitter: Emitter, repo: str, role_a
     emitter.step_started(step, "저장소 변수")
     current, error = github.variables(runner, repo)
     if current is None:
-        emitter.error(step, f"저장소 변수를 조회하지 못했습니다: {error}")
-        emitter.step_finished(step, STEP_FAILED, "조회 실패")
+        emitter.error(step, "저장소 변수를 조회하지 못했습니다", raw=error)
+        emitter.step_finished(step, STEP_FAILED, "")
         return False
 
     # (이름, 원하는 값, 승인 화면의 이유). Role 변수를 마지막에 둔다: 등록되는 순간부터 main push가 배포를 일으킨다
@@ -357,8 +356,8 @@ def _variables(ctx: Context, runner: Runner, emitter: Emitter, repo: str, role_a
             kept.append(name)
             continue
         if result.outcome == EXECUTED and not result.ok:
-            emitter.error(step, f"{name} 등록에 실패했습니다: {github.error_text(result)}")
-            emitter.step_finished(step, STEP_FAILED, "등록 실패")
+            emitter.error(step, f"{name} 등록에 실패했습니다", raw=github.error_text(result))
+            emitter.step_finished(step, STEP_FAILED, "")
             return False
         changed.append(name)
 
@@ -366,11 +365,9 @@ def _variables(ctx: Context, runner: Runner, emitter: Emitter, repo: str, role_a
         emitter.step_finished(step, STEP_SKIPPED, f"{role_var}을(를) 등록하지 않아 자동 배포는 꺼져 있습니다")
         return False
     if not changed:
-        emitter.step_finished(step, STEP_SKIPPED, "이미 모두 등록되어 있습니다"
-                              + (f" (유지: {', '.join(kept)})" if kept else ""))
+        emitter.step_finished(step, STEP_OK, "")   # 이미 모두 등록됨
         return True
-    prefix = "dry-run: 등록할 변수 " if runner.dry_run else "등록함: "
-    emitter.step_finished(step, STEP_OK, prefix + ", ".join(changed))
+    emitter.step_finished(step, STEP_OK, ("등록 예정: " if runner.dry_run else "등록: ") + ", ".join(changed))
     return True
 
 
@@ -409,18 +406,17 @@ def _test_run(ctx: Context, runner: Runner, emitter: Emitter, repo: str) -> bool
                            id_="workflow_run", timeout=60,
                            reason=f"main 브랜치로 배포 워크플로를 실행합니다 ({ctx.env}에 실제로 배포되고 비용이 발생합니다)")
     if result.outcome != EXECUTED:
-        emitter.step_finished(step, STEP_SKIPPED if result.outcome == DECLINED else STEP_OK,
-                              "실행하지 않았습니다" if result.outcome == DECLINED else "dry-run: 실행하지 않았습니다")
+        emitter.step_finished(step, STEP_SKIPPED if result.outcome == DECLINED else STEP_OK, "")
         return result.outcome != DECLINED
     if not result.ok:
-        emitter.error(step, f"워크플로를 실행하지 못했습니다: {github.error_text(result)}")
-        emitter.step_finished(step, STEP_FAILED, "실행 실패")
+        emitter.error(step, "워크플로를 실행하지 못했습니다", raw=github.error_text(result))
+        emitter.step_finished(step, STEP_FAILED, "")
         return False
 
     found = _find_run(runner, repo, github.DEPLOY_BRANCH, started)
     if not found:
         emitter.error(step, "실행 기록을 찾지 못했습니다", hint="GitHub의 Actions 탭에서 직접 확인하세요")
-        emitter.step_finished(step, STEP_FAILED, "실행 기록 없음")
+        emitter.step_finished(step, STEP_FAILED, "")
         return False
     emitter.log(f"실행: {found.get('url')} (배포가 끝날 때까지 기다립니다. 보통 20~40분)", stream="info")
 
@@ -438,11 +434,11 @@ def _test_run(ctx: Context, runner: Runner, emitter: Emitter, repo: str) -> bool
                 return True
             emitter.error(step, f"{job.get('name')}이(가) {job.get('conclusion')}(으)로 끝났습니다",
                           hint=f"로그: {found.get('url')}")
-            emitter.step_finished(step, STEP_FAILED, "배포 작업 실패")
+            emitter.step_finished(step, STEP_FAILED, "")
             return False
         time.sleep(POLL_INTERVAL)
     emitter.error(step, "제한 시간 안에 배포 작업이 끝나지 않았습니다", hint=f"진행 상황: {found.get('url')}")
-    emitter.step_finished(step, STEP_FAILED, "시간 초과")
+    emitter.step_finished(step, STEP_FAILED, "")
     return False
 
 
@@ -457,8 +453,8 @@ def _block_test(ctx: Context, runner: Runner, emitter: Emitter, repo: str) -> bo
     ref, result = github.gh_json(runner, "api", f"repos/{repo}/git/ref/heads/{github.DEPLOY_BRANCH}")
     sha = (ref or {}).get("object", {}).get("sha")
     if not sha:
-        emitter.error(step, f"main 브랜치의 커밋을 찾지 못했습니다: {github.error_text(result)}")
-        emitter.step_finished(step, STEP_FAILED, "조회 실패")
+        emitter.error(step, "main 브랜치의 커밋을 찾지 못했습니다", raw=github.error_text(result))
+        emitter.step_finished(step, STEP_FAILED, "")
         return False
 
     branch = f"wga-installer-block-test-{int(time.time())}"
@@ -470,14 +466,13 @@ def _block_test(ctx: Context, runner: Runner, emitter: Emitter, repo: str) -> bo
                              [format_command(create), format_command(dispatch),
                               f"gh run cancel <실행 ID> --repo {repo}   # 막히지 않았을 때만", format_command(delete)])
     if outcome != EXECUTED:
-        emitter.step_finished(step, STEP_SKIPPED if outcome == DECLINED else STEP_OK,
-                              "확인하지 않았습니다" if outcome == DECLINED else "dry-run: 확인하지 않았습니다")
+        emitter.step_finished(step, STEP_SKIPPED if outcome == DECLINED else STEP_OK, "")
         return outcome != DECLINED
 
     created = runner.run_approved(create, timeout=60)
     if not created.ok:
-        emitter.error(step, f"임시 브랜치를 만들지 못했습니다: {github.error_text(created)}")
-        emitter.step_finished(step, STEP_FAILED, "브랜치 생성 실패")
+        emitter.error(step, "임시 브랜치를 만들지 못했습니다", raw=github.error_text(created))
+        emitter.step_finished(step, STEP_FAILED, "")
         return False
     try:
         return _judge_block(ctx, runner, emitter, repo, branch, dispatch)
@@ -485,7 +480,7 @@ def _block_test(ctx: Context, runner: Runner, emitter: Emitter, repo: str) -> bo
         # 어떤 결과든(예외 포함) 임시 브랜치는 지운다
         removed = runner.run_approved(delete, timeout=60)
         if not removed.ok:
-            emitter.error(step, f"임시 브랜치 {branch}를 지우지 못했습니다: {github.error_text(removed)}",
+            emitter.error(step, f"임시 브랜치 {branch}를 지우지 못했습니다", raw=github.error_text(removed),
                           hint="GitHub에서 직접 지우세요")
 
 
@@ -495,13 +490,13 @@ def _judge_block(ctx: Context, runner: Runner, emitter: Emitter, repo: str, bran
     started = datetime.now(timezone.utc)
     result = runner.run_approved(dispatch, timeout=60)
     if not result.ok:
-        emitter.error(step, f"워크플로를 실행하지 못했습니다: {github.error_text(result)}")
-        emitter.step_finished(step, STEP_FAILED, "실행 실패")
+        emitter.error(step, "워크플로를 실행하지 못했습니다", raw=github.error_text(result))
+        emitter.step_finished(step, STEP_FAILED, "")
         return False
     found = _find_run(runner, repo, branch, started)
     if not found:
         emitter.error(step, "실행 기록을 찾지 못했습니다", hint="GitHub의 Actions 탭에서 직접 확인하세요")
-        emitter.step_finished(step, STEP_FAILED, "실행 기록 없음")
+        emitter.step_finished(step, STEP_FAILED, "")
         return False
 
     deadline = time.monotonic() + BLOCK_TEST_TIMEOUT
@@ -515,15 +510,15 @@ def _judge_block(ctx: Context, runner: Runner, emitter: Emitter, repo: str, bran
             if job.get("conclusion") == "skipped":
                 emitter.error(step, "배포 작업이 건너뛰어져 판단할 수 없습니다",
                               hint=f"저장소 변수 {github.role_variable(ctx.env)}이(가) 등록되어 있는지 확인하세요")
-                emitter.step_finished(step, STEP_FAILED, "판단 불가")
+                emitter.step_finished(step, STEP_FAILED, "")
                 return False
             if job.get("steps"):
                 runner.run_approved(["gh", "run", "cancel", str(found["databaseId"]), "--repo", repo], timeout=60)
                 emitter.error(step, f"{branch} 브랜치에서 {ctx.env} 배포 작업이 시작되었습니다. 실행을 취소했습니다",
                               hint="GitHub의 Environment 설정에서 배포 브랜치가 main으로만 제한되어 있는지 확인하세요")
-                emitter.step_finished(step, STEP_FAILED, "차단되지 않음")
+                emitter.step_finished(step, STEP_FAILED, "")
                 return False
         time.sleep(POLL_INTERVAL)
     emitter.error(step, "제한 시간 안에 판단하지 못했습니다", hint=f"진행 상황: {found.get('url')}")
-    emitter.step_finished(step, STEP_FAILED, "시간 초과")
+    emitter.step_finished(step, STEP_FAILED, "")
     return False

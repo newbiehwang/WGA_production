@@ -84,7 +84,7 @@ class ProgressParser:
 def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
     emitter.step_started(STEP, f"WGA 배포 ({ctx.env}, {ctx.region})")
     if not _preflight(ctx, runner, emitter):
-        emitter.step_finished(STEP, STEP_FAILED, "사전 확인에서 멈췄습니다 (배포를 시작하지 않음)")
+        emitter.step_finished(STEP, STEP_FAILED, "배포 전 확인에서 멈췄습니다 (배포하지 않음)")
         return 1
 
     emitter.log("배포에는 보통 20~40분이 걸립니다", stream="info")
@@ -92,7 +92,7 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
     if ctx.alarm_email:
         extra_env["ALARM_EMAIL"] = ctx.alarm_email
     else:
-        emitter.log("알람 이메일 없이 배포합니다 (--alarm-email을 주면 CloudWatch 알람을 메일로 받습니다)",
+        emitter.log("알람 이메일 없음 (--alarm-email로 지정하면 CloudWatch 알람을 메일로 받습니다)",
                     stream="info")
 
     parser = ProgressParser(emitter)
@@ -102,7 +102,7 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
                            cwd=str(ctx.repo_root), extra_env=extra_env, stream=True, on_line=parser.feed)
 
     if result.outcome == DRY_RUN:
-        emitter.step_finished(STEP, STEP_OK, "dry-run: 배포하지 않았습니다")
+        emitter.step_finished(STEP, STEP_OK, "배포 확인 끝 (바꾼 것 없음)")
         return 0
     if result.outcome == DECLINED:
         emitter.step_finished(STEP, STEP_SKIPPED, "배포하지 않았습니다")
@@ -111,20 +111,22 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
         emitter.error(STEP, "배포를 취소했습니다",
                       hint="스택이 업데이트 중인 상태로 남아 있을 수 있습니다. CloudFormation 콘솔에서 wga-로 시작하는 "
                            "스택이 *_IN_PROGRESS가 아닌지 확인한 뒤 deploy를 다시 실행하세요")
-        emitter.step_finished(STEP, STEP_FAILED, "취소됨")
+        emitter.step_finished(STEP, STEP_FAILED, "취소했습니다")
         return RC_INTERRUPTED
     if not result.ok:
         _report_failure(ctx, runner, emitter, result, since=started_at - CLOCK_SKEW)
-        emitter.step_finished(STEP, STEP_FAILED, f"deploy.sh가 종료 코드 {result.returncode}로 실패했습니다")
+        emitter.step_finished(STEP, STEP_FAILED, f"배포에 실패했습니다 (deploy.sh 종료 코드 {result.returncode})")
         return 1
 
-    parts = [f"{key}: {value}" for key, value in (
-        ("API", parser.summary.get("api_url")),
-        ("프론트엔드", _with_scheme(parser.summary.get("frontend_url")))) if value]
+    # 주소는 한 줄에 하나씩 (결과 요약 한 줄에 몰아 쓰면 길어서 복사하기 어렵다)
+    for label, value in (("API", parser.summary.get("api_url")),
+                         ("프론트엔드", _with_scheme(parser.summary.get("frontend_url")))):
+        if value:
+            emitter.log(f"{label}: {value}", stream="info")
     if ctx.alarm_email:
         emitter.log(f"{ctx.alarm_email}로 온 구독 확인 메일(AWS Notification - Subscription Confirmation)의 "
                     "링크를 눌러야 알람 메일을 받습니다", stream="info")
-    emitter.step_finished(STEP, STEP_OK, "배포했습니다" + (f" ({', '.join(parts)})" if parts else ""))
+    emitter.step_finished(STEP, STEP_OK, "배포 완료")
     return 0
 
 
@@ -145,7 +147,7 @@ def _preflight(ctx: Context, runner: Runner, emitter: Emitter) -> bool:
     required = [f"{ctx.ssm_prefix}/{param.key}" for param in SECRET_PARAMS if param.required]
     existing, error = existing_parameters(runner, required)
     if existing is None:
-        emitter.error(STEP, f"SSM 파라미터를 확인하지 못했습니다: {error}")
+        emitter.error(STEP, "SSM 파라미터를 확인하지 못했습니다", raw=error)
         ok = False
     else:
         missing = [name for name in required if name not in existing]
@@ -157,13 +159,12 @@ def _preflight(ctx: Context, runner: Runner, emitter: Emitter) -> bool:
     quota, error = find_timeout_quota(runner)
     if quota is None:
         # 할당량 조회 권한이 없는 계정일 수도 있다. 막지는 않고 알려만 준다
-        emitter.log(f"통합 타임아웃 할당량을 확인하지 못했습니다 ({error}). 부족하면 LLM 스택 배포가 실패합니다",
-                    stream="info")
+        emitter.log("통합 타임아웃 할당량을 확인하지 못했습니다 — 부족하면 스택 생성이 실패합니다", stream="info")
+        emitter.log(error or "(오류 원문 없음)", stream="stderr")
     elif quota.value < REQUIRED_TIMEOUT_MS:
-        emitter.error(STEP, f"API Gateway 통합 타임아웃 할당량이 {int(quota.value)}ms입니다 "
-                            f"(필요: {REQUIRED_TIMEOUT_MS}ms 이상)",
-                      hint="setup 명령으로 증가를 요청하고, 승인된 뒤 다시 배포하세요. cloudformation/llm.yaml이 "
-                           f"통합 타임아웃을 {REQUIRED_TIMEOUT_MS}ms로 설정하므로 지금 배포하면 스택 생성이 실패합니다")
+        # cloudformation/llm.yaml이 통합 타임아웃을 120000ms로 고정하므로 지금 배포하면 스택 생성이 실패한다
+        emitter.error(STEP, f"통합 타임아웃 할당량이 {int(quota.value)}ms입니다 (필요 {REQUIRED_TIMEOUT_MS}ms)",
+                      hint="setup으로 증가를 요청하고, 승인된 뒤 다시 배포하세요")
         ok = False
     return ok
 
@@ -171,7 +172,8 @@ def _preflight(ctx: Context, runner: Runner, emitter: Emitter) -> bool:
 def _report_failure(ctx: Context, runner: Runner, emitter: Emitter, result, *, since: datetime) -> None:
     unique = stack_failures(runner, main_stacks(ctx.env), since)
     for failure in unique:
-        emitter.error(STEP, f"{failure.stack}: {failure.logical_id} ({failure.resource_type}) — {failure.reason}")
+        # 원인(reason)은 CloudFormation이 남긴 원문이다
+        emitter.error(STEP, f"{failure.stack}: {failure.logical_id} ({failure.resource_type})", raw=failure.reason)
     if not unique:
-        emitter.error(STEP, f"deploy.sh가 실패했습니다: {error_text(result)}",
+        emitter.error(STEP, "deploy.sh가 실패했습니다", raw=error_text(result),
                       hint="CloudFormation 스택에서는 실패 기록을 찾지 못했습니다. 위 로그의 마지막 부분을 확인하세요")

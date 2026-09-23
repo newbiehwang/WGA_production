@@ -99,7 +99,7 @@ class Interaction:
             response = self._read_response("confirm_response", id_)
             # approved가 정확히 true일 때만 승인. "yes" 같은 문자열이나 누락은 거절로 본다
             return response is not None and response.get("approved") is True
-        self.prompt_stream.write("  진행할까요? [y/N] ")
+        self.prompt_stream.write(f"{self.emitter.indent}진행할까요? [y/N] ")
         self.prompt_stream.flush()
         answer = self.stdin.readline().strip().lower()
         return answer in ("y", "yes")
@@ -110,18 +110,19 @@ class Interaction:
         echo=True면 터미널에서 입력하는 글자를 그대로 보여 준다. 붙여 넣은 긴 키는 가려져 있으면
         들어갔는지 알 수 없어서다. 입력 내용은 터미널 스크롤에 남지만 CLI의 다른 출력(이벤트·로그)에는
         여전히 가려서 나간다. JSON 모드에서는 입력받는 쪽이 화면을 정하므로 영향이 없다."""
+        # 터미널에서도 알린다: 출력 쪽이 이 질문이 속한 단계 제목을 먼저 쓰고 들여쓰기를 맞춘다
+        self.emitter.input_required(id_, prompt, secret=True)
         if self.json_mode:
-            self.emitter.input_required(id_, prompt, secret=True)
             response = self._read_response("secret_response", id_)
             value = response.get("value") if response else None
             if not isinstance(value, str):
                 return None
         elif self.stdin.isatty() and not echo:
-            value = getpass.getpass(f"  {prompt}: ", stream=self.prompt_stream)
+            value = getpass.getpass(f"{self.emitter.indent}{prompt}: ", stream=self.prompt_stream)
         else:
             # 보이게 입력하는 경우, 또는 파이프로 값을 넣는 경우 (자동화 스크립트). getpass는 파이프에서
             # 경고를 띄우므로 직접 한 줄을 읽는다 (터미널이면 입력하는 글자가 그대로 보인다)
-            self.prompt_stream.write(f"  {prompt}: ")
+            self.prompt_stream.write(f"{self.emitter.indent}{prompt}: ")
             self.prompt_stream.flush()
             value = self.stdin.readline().rstrip("\n")
         self.emitter.redactor.add(value)
@@ -134,7 +135,7 @@ class Interaction:
             response = self._read_response("text_response", id_)
             value = response.get("value") if response else None
             return value.strip() if isinstance(value, str) else ""
-        self.prompt_stream.write(f"  {prompt}: ")
+        self.prompt_stream.write(f"{self.emitter.indent}{prompt}: ")
         self.prompt_stream.flush()
         return self.stdin.readline().strip()
 
@@ -149,9 +150,10 @@ class Interaction:
                 self.emitter.log(f"{prompt}: 응답이 없어 기본값({default})을 씁니다", stream="info")
                 return default
             return choice
-        lines = [f"  {prompt}"] + [f"    {number}) {label}" for number, (_, label) in enumerate(options, 1)]
+        pad = self.emitter.indent
+        lines = [f"{pad}{prompt}"] + [f"{pad}  {number}) {label}" for number, (_, label) in enumerate(options, 1)]
         default_number = valid.index(default) + 1
-        self.prompt_stream.write("\n".join(lines) + f"\n  번호를 입력하세요 [기본 {default_number}]: ")
+        self.prompt_stream.write("\n".join(lines) + f"\n{pad}번호를 입력하세요 [기본 {default_number}]: ")
         self.prompt_stream.flush()
         answer = self.stdin.readline().strip()
         if answer.isdigit() and 1 <= int(answer) <= len(options):

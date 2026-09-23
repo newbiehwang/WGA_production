@@ -116,13 +116,26 @@ def test_missing_stack_fails(fake):
     assert code == 1 and checks["stack_wga-mcp-dev"]["detail"] == "스택이 없습니다"
 
 
+def test_nothing_deployed_stops_with_one_line(fake):
+    # 배포 전에 돌리면 나머지 검사도 모두 같은 이유로 실패하므로, 한 항목으로 알리고 끝낸다
+    deployed(fake, stacks=[stack("wga-prod", root=None)])   # 다른 환경의 스택만 있다
+    http = FakeHttp()
+    code, checks, evts = run_verify(fake, http)
+    assert code == 1
+    assert list(checks) == ["stacks"]
+    assert checks["stacks"]["detail"] == "dev 환경에 배포된 스택이 없습니다"
+    assert checks["stacks"]["hint"] == "deploy를 먼저 실행하세요"
+    assert evts[-1]["summary"] == "배포된 것이 없습니다 — deploy를 먼저 실행하세요"
+    assert http.calls == []
+
+
 def test_broken_nested_stack_fails_even_if_root_is_complete(fake):
     deployed(fake, stacks=healthy_stacks(**{"wga-dev-LlmStack-A": stack(
         "wga-dev-LlmStack-A", status="UPDATE_ROLLBACK_COMPLETE", root="wga-dev", reason="LlmMethod 실패")}))
     code, checks, _ = run_verify(fake, FakeHttp())
     assert code == 1
     assert checks["stack_wga-dev"]["detail"] == "wga-dev-LlmStack-A: UPDATE_ROLLBACK_COMPLETE"
-    assert checks["stack_wga-dev"]["hint"].startswith("LlmMethod 실패")
+    assert checks["stack_wga-dev"]["raw"] == "LlmMethod 실패"   # CloudFormation이 남긴 원인 원문
 
 
 def test_unauthenticated_success_is_a_failure(fake):

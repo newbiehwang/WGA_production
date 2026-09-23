@@ -108,9 +108,10 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
     emitter.step_started(STEP, "사전 점검")
     results: dict[str, CheckResult] = {}
 
-    def report(id_: str, title: str, status: str, detail: str, hint: str | None = None) -> None:
+    def report(id_: str, title: str, status: str, detail: str, hint: str | None = None,
+               raw: str | None = None) -> None:
         results[id_] = CheckResult(status, detail)
-        emitter.check(id_, title, status, detail, hint)
+        emitter.check(id_, title, status, detail, hint, raw=raw)
 
     _check_system(runner, report)
     for tool in TOOLS:
@@ -123,18 +124,16 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
     organization = _check_organization(ctx, runner, results, report)
     _check_aws_permissions(ctx, runner, results, report, organization)
     _check_region(ctx, report)
-    report("free_plan", "무료 플랜 제약", CHECK_INFO,
-           "무료 플랜 계정은 IAM Identity Center·Organizations·GuardDuty를 쓸 수 없고, "
-           "Organizations에 가입하면 유료 플랜으로 바뀝니다. WGA 배포에는 이 서비스들이 필요하지 않습니다")
     _check_github_auth(runner, results, report)
 
     counts = {status: sum(1 for r in results.values() if r.status == status)
               for status in (CHECK_OK, CHECK_WARN, CHECK_FAIL)}
-    summary = f"통과 {counts[CHECK_OK]}개 · 주의 {counts[CHECK_WARN]}개 · 실패 {counts[CHECK_FAIL]}개"
+    # 0개는 말하지 않는다 (정보 항목은 판단이 아니므로 세지 않는다)
+    warn = f" · {counts[CHECK_WARN]}개 주의" if counts[CHECK_WARN] else ""
     if counts[CHECK_FAIL]:
-        emitter.step_finished(STEP, STEP_FAILED, summary + " — 실패 항목을 해결한 뒤 다시 점검하세요")
+        emitter.step_finished(STEP, STEP_FAILED, f"{counts[CHECK_FAIL]}개 오류{warn} — 해결한 뒤 다시 점검하세요")
         return 1
-    emitter.step_finished(STEP, STEP_OK, summary)
+    emitter.step_finished(STEP, STEP_OK, f"{counts[CHECK_OK]}개 통과{warn}")
     return 0
 
 
@@ -175,8 +174,8 @@ def _check_tool(runner: Runner, tool: Tool, report) -> None:
         report(tool.id, tool.title, missing_status, "설치되어 있지 않습니다", install_hint or None)
         return
     if not result.ok:
-        report(tool.id, tool.title, missing_status,
-               f"실행 중 오류 (종료 코드 {result.returncode}): {_first_line(result.output)}", install_hint or None)
+        report(tool.id, tool.title, missing_status, f"실행 중 오류 (종료 코드 {result.returncode})",
+               install_hint or None, raw=_first_line(result.output))
         return
     if tool.pattern is None:
         report(tool.id, tool.title, CHECK_OK, _first_line(result.output))
@@ -185,7 +184,7 @@ def _check_tool(runner: Runner, tool: Tool, report) -> None:
     match = re.search(tool.pattern, result.output)
     if not match:
         # 버전 형식이 바뀐 새 버전일 수 있으므로 막지 않고 주의만 준다
-        report(tool.id, tool.title, CHECK_WARN, f"버전을 확인하지 못했습니다: {_first_line(result.output)}")
+        report(tool.id, tool.title, CHECK_WARN, "버전을 확인하지 못했습니다", raw=_first_line(result.output))
         return
     version = tuple(int(part) for part in match.groups())
     if tool.minimum and version < tool.minimum:
@@ -204,9 +203,9 @@ def _check_pip(runner: Runner, report) -> None:
         if result.ok:
             match = re.search(r"pip (\S+)", result.output)
             version = match.group(1) if match else _first_line(result.output)
-            report("pip", "pip (Lambda Layer 패키징)", CHECK_OK, f"{version} (`{' '.join(command[:-1])}` 사용)")
+            report("pip", "pip", CHECK_OK, version)
             return
-    report("pip", "pip (Lambda Layer 패키징)", CHECK_FAIL, "pip·pip3·python3 -m pip 모두 찾지 못했습니다",
+    report("pip", "pip", CHECK_FAIL, "pip·pip3·python3 -m pip 모두 찾지 못했습니다",
            "brew install python 또는 python3 -m ensurepip --upgrade")
 
 
@@ -215,7 +214,7 @@ def _check_python(report) -> None:
     여기까지 왔다면 통과다. 어떤 인터프리터가 선택됐는지 보여 주는 것이 목적이다
     (installer/core/wga-installer 실행기가 Homebrew Python을 먼저 고른다)."""
     version = ".".join(str(part) for part in sys.version_info[:3])
-    report("python", "Python (설치 마법사 실행용)", CHECK_OK, f"{version} ({sys.executable})")
+    report("python", "Python", CHECK_OK, f"{version} ({sys.executable})")
 
 
 def _check_homebrew(runner: Runner, report) -> None:
@@ -285,15 +284,16 @@ def _check_aws_identity(ctx: Context, runner: Runner, results: dict[str, CheckRe
 
     result = runner.run(["aws", "sts", "get-caller-identity", "--output", "json"], timeout=AWS_TIMEOUT)
     if not result.ok:
+        raw = None
         if result.returncode == RC_TIMEOUT:
             detail, hint = "AWS 응답이 없어 중단했습니다", "네트워크 연결을 확인하세요"
         else:
-            detail, hint = _first_line(result.stderr or result.stdout), None
+            detail, hint, raw = "확인하지 못했습니다", None, error_text(result)
             for needles, known_detail, known_hint in _AWS_ERRORS:
                 if any(needle in result.output for needle in needles):
                     detail, hint = known_detail, known_hint
                     break
-        report("aws_credentials", title, CHECK_FAIL, detail, hint)
+        report("aws_credentials", title, CHECK_FAIL, detail, hint, raw=raw)
         return
 
     try:
@@ -328,10 +328,10 @@ def _check_organization(ctx: Context, runner: Runner, results: dict[str, CheckRe
         return None   # AWSOrganizationsNotInUseException(조직 없음)이나 조회 거부
     org_id, manager = organization.get("Id", "?"), organization.get("MasterAccountId", "?")
     if manager == ctx.account_id:
-        report("organization", "AWS Organizations", CHECK_INFO, f"조직 {org_id}의 관리 계정입니다")
+        report("organization", "AWS Organizations", CHECK_INFO, f"{org_id}의 관리 계정")
     else:
-        report("organization", "AWS Organizations", CHECK_INFO,
-               f"조직 {org_id}의 구성원 계정입니다 (관리 계정 {manager}). 조직의 SCP가 이 계정의 권한을 제한할 수 있습니다")
+        # 구성원이면 조직의 SCP가 권한을 막을 수 있다. 막혔을 때는 권한 항목이 그 안내를 한다
+        report("organization", "AWS Organizations", CHECK_INFO, f"{org_id}의 구성원 계정 (관리 계정 {manager})")
     return organization
 
 
@@ -342,11 +342,11 @@ def _permission_hint(ctx: Context, outputs: list[str], organization: dict | None
     if "service control policy" in text:
         manager = (organization or {}).get("MasterAccountId")
         who = f"조직 관리 계정({manager})의 관리자" if manager else "조직 관리 계정의 관리자"
-        return ("AWS Organizations의 서비스 제어 정책(SCP)이 명시적으로 막고 있습니다. SCP는 이 계정의 IAM 정책보다 "
-                "먼저 적용되므로 AdministratorAccess를 붙여도(루트 사용자여도) 풀리지 않습니다. "
-                "SCP가 쓸 수 있는 리전을 제한하는 경우가 많으니 먼저 허용된 리전을 확인해 --region으로 지정해 보세요 "
-                "(AWS가 관리하는 '프로젝트' 계정은 프로젝트를 만들 때 고른 리전만 허용합니다). "
-                f"그래도 막히면 {who}에게 SCP 완화를 요청하거나, 조직에 속하지 않은 다른 AWS 계정을 쓰세요")
+        # SCP는 이 계정의 IAM 정책보다 먼저 적용되어 계정 안에서는(루트여도) 풀 수 없다.
+        # 리전 제한이 가장 흔하다: AWS가 관리하는 '프로젝트' 계정은 프로젝트를 만들 때 고른 리전만 허용한다
+        return ("조직의 서비스 제어 정책(SCP)이 막고 있어 AdministratorAccess로도 풀리지 않습니다. "
+                "허용된 리전이 따로 있을 수 있으니 --region을 바꿔 보고, 그래도 막히면 "
+                f"{who}에게 요청하거나 다른 AWS 계정을 쓰세요")
     user = ctx.caller_arn.split(":user/", 1)[1].rsplit("/", 1)[-1] if ":user/" in ctx.caller_arn else None
     if "permissions boundary" in text:
         where = f"IAM 콘솔 → 사용자 → {user} → 권한 탭 → 권한 경계" if user else "IAM 역할의 권한 경계"
@@ -377,8 +377,9 @@ def _check_aws_permissions(ctx: Context, runner: Runner, results: dict[str, Chec
     title = "AWS 권한 (조회)"
     denied: list[str] = []
     denied_outputs: list[str] = []   # 누가 거부했는지(IAM 정책·권한 경계·SCP) 안내에 쓴다
+    first_denial: str | None = None  # 화면에 보여 줄 오류 원문 (모두 같은 이유로 거부되므로 하나면 된다)
     inactive: list[str] = []
-    other: list[str] = []
+    other: list[tuple[str, str]] = []
     for label, args in PERMISSION_READS:
         result = runner.run(["aws", *args, "--output", "json"], timeout=AWS_TIMEOUT)
         if result.ok:
@@ -388,15 +389,16 @@ def _check_aws_permissions(ctx: Context, runner: Runner, results: dict[str, Chec
         elif any(marker in result.output for marker in _DENIED_MARKERS):
             denied.append(label)
             denied_outputs.append(result.output)
+            first_denial = first_denial or error_text(result)
         elif result.returncode == RC_TIMEOUT:
-            other.append(f"{label}: 응답 없음")
+            other.append((label, "응답 없음"))
         else:
-            other.append(f"{label}: {error_text(result)}")
+            other.append((label, error_text(result)))
 
     if denied:
         report("aws_permissions", title, CHECK_FAIL,
                "권한이 없습니다: " + ", ".join(denied) + _denied_by(denied_outputs),
-               _permission_hint(ctx, denied_outputs, organization))
+               _permission_hint(ctx, denied_outputs, organization), raw=first_denial)
         return
     if inactive:
         report("aws_permissions", title, CHECK_FAIL, "아직 쓸 수 없는 서비스: " + ", ".join(inactive),
@@ -404,8 +406,8 @@ def _check_aws_permissions(ctx: Context, runner: Runner, results: dict[str, Chec
         return
     if other:
         # 권한 문제인지 알 수 없는 실패 (네트워크, 일시적 오류 등). 배포를 막을 근거가 없으므로 warn
-        report("aws_permissions", title, CHECK_WARN, "확인하지 못했습니다 — " + other[0],
-               "네트워크 연결을 확인하고 다시 점검하세요")
+        report("aws_permissions", title, CHECK_WARN, f"확인하지 못했습니다 ({other[0][0]})",
+               "네트워크 연결을 확인하고 다시 점검하세요", raw=other[0][1])
         return
     report("aws_permissions", title, CHECK_OK, ", ".join(label for label, _ in PERMISSION_READS))
     _check_deploy_permissions(ctx, runner, report, organization)
@@ -444,10 +446,11 @@ def _check_deploy_permissions(ctx: Context, runner: Runner, report, organization
                 # 시뮬레이터를 쓸 권한(iam:SimulatePrincipalPolicy) 자체가 없다. 조회는 통과했으니 막지는 않는다
                 report("aws_deploy_permissions", title, CHECK_WARN,
                        "미리 확인하지 못했습니다 (iam:SimulatePrincipalPolicy 권한 없음)",
-                       "AdministratorAccess가 붙어 있으면 무시해도 됩니다. 아니면 권한이 모자랄 때 배포 도중 실패합니다")
+                       "AdministratorAccess가 붙어 있으면 무시해도 됩니다. 아니면 권한이 모자랄 때 배포 도중 실패합니다",
+                       raw=error_text(result))
             else:
-                report("aws_deploy_permissions", title, CHECK_WARN,
-                       f"미리 확인하지 못했습니다 — {error_text(result)}")
+                report("aws_deploy_permissions", title, CHECK_WARN, "미리 확인하지 못했습니다",
+                       raw=error_text(result))
             return
         for item in data.get("EvaluationResults") or []:
             if isinstance(item, dict) and item.get("EvalDecision") != "allowed":
@@ -466,7 +469,7 @@ def _check_deploy_permissions(ctx: Context, runner: Runner, report, organization
                _permission_hint(ctx, denied_by, organization))
         return
     report("aws_deploy_permissions", title, CHECK_OK,
-           f"배포에 필요한 작업 {len(PERMISSION_WRITES) + len(PERMISSION_IAM_WRITES)}개 모두 허용 (정책 시뮬레이터)")
+           f"필요한 작업 {len(PERMISSION_WRITES) + len(PERMISSION_IAM_WRITES)}개 허용")
 
 
 def _check_region(ctx: Context, report) -> None:

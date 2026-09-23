@@ -30,7 +30,7 @@ def test_healthy_mac_passes(fake, repo):
     checks = checks_by_id(result.stdout)
     assert {"system", "aws_cli", "gh_cli", "git", "node", "npm", "zip", "unzip", "pip", "python",
             "homebrew", "repo", "aws_credentials", "root_account", "aws_permissions", "aws_deploy_permissions",
-            "region", "free_plan", "github_auth"} == checks.keys()
+            "region", "github_auth"} == checks.keys()
     assert {c["status"] for c in checks.values()} <= {"ok", "info"}
     assert checks["aws_credentials"]["detail"] == "계정 123456789012 · arn:aws:iam::123456789012:user/wga-installer"
     assert checks["region"]["detail"] == "ap-northeast-2 (기본값)"
@@ -137,7 +137,7 @@ def test_pip_found_the_same_way_as_deploy_sh(fake, repo):
     fake.remove("pip")
     fake.add("python3", "-m pip --version", "pip 24.0 from /x (python 3.12)\n")
     checks = checks_by_id(check_json(fake, repo).stdout)
-    assert checks["pip"]["detail"] == "24.0 (`python3 -m pip` 사용)"
+    assert checks["pip"]["detail"] == "24.0"
 
 
 def test_missing_pip_fails(fake, repo):
@@ -170,7 +170,7 @@ def test_assumed_role_is_ok(fake, repo):
     ("An error occurred (ExpiredToken) when calling the GetCallerIdentity operation: expired",
      "자격 증명이 만료되었습니다"),
     ("The config profile (nope) could not be found", "지정한 AWS 프로필이 없습니다"),
-    ("알 수 없는 오류 메시지", "알 수 없는 오류 메시지"),
+    ("알 수 없는 오류 메시지", "확인하지 못했습니다"),
 ])
 def test_credential_errors_are_explained(fake, repo, stderr, detail):
     fake.add("aws", "sts get-caller-identity", stderr=stderr + "\n", exit=255)
@@ -179,6 +179,8 @@ def test_credential_errors_are_explained(fake, repo, stderr, detail):
     checks = checks_by_id(result.stdout)
     assert result.returncode == 1
     assert checks["aws_credentials"]["detail"] == detail
+    # 설명과 따로, AWS CLI가 낸 오류 원문을 그대로 보여 준다
+    assert checks["aws_credentials"]["raw"] == stderr
     assert "root_account" not in checks
 
 
@@ -243,8 +245,23 @@ def test_text_mode_is_human_readable(fake, repo):
     healthy_mac(fake)
     result = run_cli(fake, "check", "--repo", str(repo))
     assert result.returncode == 0
-    assert "▶ 사전 점검" in result.stdout and "[ OK ] AWS CLI: 2.17.0" in result.stdout
-    assert not any(line.startswith("{") for line in result.stdout.splitlines())
+    lines = result.stdout.splitlines()
+    assert "사전 점검" in lines and "  [ OK ] AWS CLI: 2.17.0" in lines
+    assert lines[-1] == "✓ 17개 통과"   # 0개인 주의·오류는 말하지 않는다
+    assert not any(line.startswith("{") for line in lines)
+
+
+def test_text_mode_shows_error_source_under_the_item(fake, repo):
+    # [오류] 바로 아랫줄에 명령이 낸 오류 원문, 그 아래에 해결 안내
+    fake.add("aws", "sts get-caller-identity", exit=254,
+             stderr="An error occurred (InvalidClientTokenId) when calling the GetCallerIdentity operation: bad\n")
+    healthy_mac(fake)
+    lines = run_cli(fake, "check", "--repo", str(repo)).stdout.splitlines()
+    at = lines.index("  [오류] AWS 자격 증명: Access Key가 올바르지 않거나 비활성화되었습니다")
+    assert lines[at + 1] == ("         An error occurred (InvalidClientTokenId) when calling the "
+                             "GetCallerIdentity operation: bad")
+    assert lines[at + 2] == "         → IAM 콘솔에서 키 상태를 확인하고 다시 입력하세요"
+    assert lines[-1] == "✗ 1개 오류 — 해결한 뒤 다시 점검하세요"
 
 
 def test_usage_error_exit_code(fake):
@@ -310,7 +327,8 @@ def test_unknown_read_error_is_only_a_warning(fake, repo):
     result = check_json(fake, repo)
     perm = checks_by_id(result.stdout)["aws_permissions"]
     assert result.returncode == 0
-    assert perm["status"] == "warn" and perm["detail"].startswith("확인하지 못했습니다 — SSM Parameter Store: ")
+    assert perm["status"] == "warn" and perm["detail"] == "확인하지 못했습니다 (SSM Parameter Store)"
+    assert perm["raw"].startswith("Could not connect to the endpoint URL")
 
 
 def test_permission_checks_use_profile_and_region(fake, repo):
@@ -417,12 +435,12 @@ def test_scp_denial_points_to_the_organization_not_iam(fake, repo):
 
     org = checks["organization"]
     assert org["status"] == "info"
-    assert org["detail"] == ("조직 o-example111의 구성원 계정입니다 (관리 계정 999988887777). "
-                             "조직의 SCP가 이 계정의 권한을 제한할 수 있습니다")
+    assert org["detail"] == "o-example111의 구성원 계정 (관리 계정 999988887777)"
     perm = checks["aws_permissions"]
     assert perm["detail"] == "권한이 없습니다: CloudFormation, SSM Parameter Store, Service Quotas (조직 SCP가 거부)"
     assert "서비스 제어 정책(SCP)" in perm["hint"] and "조직 관리 계정(999988887777)의 관리자" in perm["hint"]
-    assert "--region" in perm["hint"]   # 리전 제한이 가장 흔한 원인이다 (AWS가 관리하는 프로젝트 계정)
+    assert "--region" in perm["hint"]
+    assert perm["raw"] == SCP_DENIED.strip()   # 거부 원문 (어느 SCP가 막았는지 들어 있다)   # 리전 제한이 가장 흔한 원인이다 (AWS가 관리하는 프로젝트 계정)
     assert "권한 추가에서" not in perm["hint"]
 
 
@@ -452,7 +470,7 @@ def test_management_account_is_reported(fake, repo):
         {"Organization": {"Id": "o-example111", "MasterAccountId": "123456789012"}}))
     healthy_mac(fake)
     checks = checks_by_id(check_json(fake, repo).stdout)
-    assert checks["organization"]["detail"] == "조직 o-example111의 관리 계정입니다"
+    assert checks["organization"]["detail"] == "o-example111의 관리 계정"
     assert checks["aws_permissions"]["status"] == "ok"
 
 

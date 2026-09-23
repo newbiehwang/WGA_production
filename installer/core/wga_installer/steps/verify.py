@@ -55,33 +55,42 @@ def run(ctx: Context, runner: Runner, emitter: Emitter, http: HttpFunc = http_re
     statuses: list[str] = []
 
     def report(id_: str, title: str, status: str, detail: str, hint: str | None = None,
-               url: str | None = None) -> None:
+               url: str | None = None, raw: str | None = None) -> None:
         statuses.append(status)
-        emitter.check(id_, title, status, detail, hint, url)
+        emitter.check(id_, title, status, detail, hint, url, raw=raw)
 
     stacks = _check_stacks(ctx, runner, report)
+    if stacks is None:
+        # 배포된 것이 하나도 없다: 나머지 검사는 모두 같은 이유로 실패하므로 하지 않는다
+        emitter.step_finished(STEP, STEP_FAILED, "배포된 것이 없습니다 — deploy를 먼저 실행하세요")
+        return 1
     _check_api(ctx, runner, http, report)
     _check_access_denied(ctx, runner, report)
     _check_frontend(ctx, stacks, http, report)
     _check_dashboard(ctx, runner, report)
 
     counts = {s: statuses.count(s) for s in (CHECK_OK, CHECK_WARN, CHECK_FAIL)}
-    summary = f"통과 {counts[CHECK_OK]}개 · 주의 {counts[CHECK_WARN]}개 · 실패 {counts[CHECK_FAIL]}개"
+    warn = f" · {counts[CHECK_WARN]}개 주의" if counts[CHECK_WARN] else ""   # 0개는 말하지 않는다
     if counts[CHECK_FAIL]:
-        emitter.step_finished(STEP, STEP_FAILED, summary)
+        emitter.step_finished(STEP, STEP_FAILED, f"{counts[CHECK_FAIL]}개 오류{warn}")
         return 1
-    emitter.step_finished(STEP, STEP_OK, summary)
+    emitter.step_finished(STEP, STEP_OK, f"{counts[CHECK_OK]}개 통과{warn}")
     return 0
 
 
-def _check_stacks(ctx: Context, runner: Runner, report) -> dict[str, dict]:
-    """최상위 스택과 그 아래 중첩 스택의 상태. 다른 검사가 쓰도록 {스택 이름: 스택 정보}를 돌려준다."""
+def _check_stacks(ctx: Context, runner: Runner, report) -> dict[str, dict] | None:
+    """최상위 스택과 그 아래 중첩 스택의 상태. 다른 검사가 쓰도록 {스택 이름: 스택 정보}를 돌려준다.
+    이 환경의 스택이 하나도 없으면 한 항목으로 알리고 None을 돌려준다 (배포 전에 실행한 경우)."""
     data, result = aws_json(runner, "cloudformation", "describe-stacks")
     if data is None:
-        report("stacks", "CloudFormation 스택", CHECK_FAIL, f"스택 목록을 조회하지 못했습니다: {error_text(result)}")
+        report("stacks", "CloudFormation 스택", CHECK_FAIL, "스택 목록을 조회하지 못했습니다", raw=error_text(result))
         return {}
     all_stacks = data.get("Stacks", [])
     by_name = {stack["StackName"]: stack for stack in all_stacks}
+    if not any(name in by_name for name in main_stacks(ctx.env)):
+        report("stacks", "CloudFormation 스택", CHECK_FAIL, f"{ctx.env} 환경에 배포된 스택이 없습니다",
+               "deploy를 먼저 실행하세요")
+        return None
 
     for name in main_stacks(ctx.env):
         title = f"스택 {name}"
@@ -95,8 +104,8 @@ def _check_stacks(ctx: Context, runner: Runner, report) -> dict[str, dict]:
         if broken:
             detail = ", ".join(f"{s['StackName']}: {s.get('StackStatus')}" for s in broken)
             reason = next((s.get("StackStatusReason") for s in broken if s.get("StackStatusReason")), None)
-            hint = (f"{reason} — " if reason else "") + "*_ROLLBACK_COMPLETE는 마지막 배포가 실패해 되돌아간 상태입니다"
-            report(f"stack_{name}", title, CHECK_FAIL, detail, hint)
+            report(f"stack_{name}", title, CHECK_FAIL, detail,
+                   "*_ROLLBACK_COMPLETE는 마지막 배포가 실패해 되돌아간 상태입니다", raw=reason)
             continue
         detail = stack["StackStatus"] + (f" (중첩 스택 {len(nested)}개 정상)" if nested else "")
         report(f"stack_{name}", title, CHECK_OK, detail)
@@ -118,7 +127,7 @@ def _check_api(ctx: Context, runner: Runner, http: HttpFunc, report) -> None:
     base, error = _api_base(ctx, runner)
     if base is None:
         for id_, title in (("api_auth", "인증 없는 API 호출 차단"), ("api_health", "공개 경로 /health")):
-            report(id_, title, CHECK_FAIL, f"API 주소를 알 수 없습니다: {error}", "deploy가 끝났는지 확인하세요")
+            report(id_, title, CHECK_FAIL, "API 주소를 알 수 없습니다", "deploy가 끝났는지 확인하세요", raw=error)
         return
 
     # 인증 헤더 없이 LLM API를 부른다. Cognito 인증이 걸려 있으면 API Gateway가 401로 막는다.
@@ -127,7 +136,7 @@ def _check_api(ctx: Context, runner: Runner, http: HttpFunc, report) -> None:
     if status in (401, 403):
         report("api_auth", "인증 없는 API 호출 차단", CHECK_OK, f"POST /llm1 → {status} (막힘)")
     elif status is None:
-        report("api_auth", "인증 없는 API 호출 차단", CHECK_FAIL, f"요청하지 못했습니다: {error}")
+        report("api_auth", "인증 없는 API 호출 차단", CHECK_FAIL, "요청하지 못했습니다", raw=error)
     elif 200 <= status < 300:
         report("api_auth", "인증 없는 API 호출 차단", CHECK_FAIL, f"POST /llm1 → {status}: 인증 없이 호출되었습니다",
                "cloudformation/llm.yaml의 LlmMethod에 AuthorizationType: COGNITO_USER_POOLS가 적용됐는지 확인하세요")
@@ -138,8 +147,10 @@ def _check_api(ctx: Context, runner: Runner, http: HttpFunc, report) -> None:
     if status == 200:
         report("api_health", "공개 경로 /health", CHECK_OK, "GET /health → 200", url=f"{base}/health")
     else:
-        report("api_health", "공개 경로 /health", CHECK_FAIL,
-               f"GET /health → {status}" if status is not None else f"요청하지 못했습니다: {error}")
+        if status is None:
+            report("api_health", "공개 경로 /health", CHECK_FAIL, "요청하지 못했습니다", raw=error)
+        else:
+            report("api_health", "공개 경로 /health", CHECK_FAIL, f"GET /health → {status}")
 
 
 def _check_access_denied(ctx: Context, runner: Runner, report) -> None:
@@ -169,7 +180,8 @@ def _check_access_denied(ctx: Context, runner: Runner, report) -> None:
         report("access_denied", title, CHECK_WARN, f"{len(found)}건: {shown}",
                "IAM 정책에 필요한 권한이 빠졌을 수 있습니다. 해당 Lambda의 Role 정책을 확인하세요")
     elif errors:
-        report("access_denied", title, CHECK_WARN, f"일부 로그 그룹을 확인하지 못했습니다: {'; '.join(errors)}")
+        report("access_denied", title, CHECK_WARN, f"로그 그룹 {len(errors)}개를 확인하지 못했습니다",
+               raw="; ".join(errors))
     else:
         report("access_denied", title, CHECK_OK, f"0건 (로그 그룹 {checked}개 확인)")
 
@@ -198,8 +210,11 @@ def _check_dashboard(ctx: Context, runner: Runner, report) -> None:
            f"#dashboards/dashboard/{name}")
     data, result = aws_json(runner, "cloudwatch", "get-dashboard", "--dashboard-name", name)
     if data is None:
-        status = CHECK_FAIL if is_not_found(result) else CHECK_WARN
-        report("dashboard", "CloudWatch 대시보드", status, f"{name}: {error_text(result)}")
+        if is_not_found(result):
+            report("dashboard", "CloudWatch 대시보드", CHECK_FAIL, f"{name}이(가) 없습니다")
+        else:
+            report("dashboard", "CloudWatch 대시보드", CHECK_WARN, f"{name}을(를) 확인하지 못했습니다",
+                   raw=error_text(result))
         return
     report("dashboard", "CloudWatch 대시보드", CHECK_OK, name, url=url)
 
