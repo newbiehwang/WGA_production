@@ -344,7 +344,9 @@ def _permission_hint(ctx: Context, outputs: list[str], organization: dict | None
         who = f"조직 관리 계정({manager})의 관리자" if manager else "조직 관리 계정의 관리자"
         return ("AWS Organizations의 서비스 제어 정책(SCP)이 명시적으로 막고 있습니다. SCP는 이 계정의 IAM 정책보다 "
                 "먼저 적용되므로 AdministratorAccess를 붙여도(루트 사용자여도) 풀리지 않습니다. "
-                f"{who}에게 SCP 완화를 요청하거나, 조직에 속하지 않은 다른 AWS 계정을 쓰세요")
+                "SCP가 쓸 수 있는 리전을 제한하는 경우가 많으니 먼저 허용된 리전을 확인해 --region으로 지정해 보세요 "
+                "(AWS가 관리하는 '프로젝트' 계정은 프로젝트를 만들 때 고른 리전만 허용합니다). "
+                f"그래도 막히면 {who}에게 SCP 완화를 요청하거나, 조직에 속하지 않은 다른 AWS 계정을 쓰세요")
     user = ctx.caller_arn.split(":user/", 1)[1].rsplit("/", 1)[-1] if ":user/" in ctx.caller_arn else None
     if "permissions boundary" in text:
         where = f"IAM 콘솔 → 사용자 → {user} → 권한 탭 → 권한 경계" if user else "IAM 역할의 권한 경계"
@@ -406,10 +408,10 @@ def _check_aws_permissions(ctx: Context, runner: Runner, results: dict[str, Chec
                "네트워크 연결을 확인하고 다시 점검하세요")
         return
     report("aws_permissions", title, CHECK_OK, ", ".join(label for label, _ in PERMISSION_READS))
-    _check_deploy_permissions(ctx, runner, report)
+    _check_deploy_permissions(ctx, runner, report, organization)
 
 
-def _check_deploy_permissions(ctx: Context, runner: Runner, report) -> None:
+def _check_deploy_permissions(ctx: Context, runner: Runner, report, organization: dict | None = None) -> None:
     """setup·deploy가 바꾸는 작업을 IAM 정책 시뮬레이터로 확인한다.
     배포는 20~40분 걸리고 권한이 모자라면 중간(보통 IAM Role 생성)에서 실패해 롤백까지 기다려야 하므로 미리 본다."""
     title = "AWS 권한 (배포)"
@@ -424,9 +426,16 @@ def _check_deploy_permissions(ctx: Context, runner: Runner, report) -> None:
 
     role_arn = f"arn:aws:iam::{ctx.account_id}:role/{PERMISSION_CHECK_ROLE}"
     denied: list[str] = []
-    for actions, resource in ((PERMISSION_WRITES, None), (PERMISSION_IAM_WRITES, role_arn)):
+    denied_by: list[str] = []   # 시뮬레이터가 알려 주는 거부 주체 (안내 문구를 고르는 데 쓴다)
+    # aws:RequestedRegion을 넘기는 이유: 시뮬레이터는 요청 리전을 모른다. 리전을 제한하는 SCP
+    # ("이 리전들이 아니면 거부" = StringNotEquals)는 키가 없으면 조건이 참이 되어, 허용된 리전에
+    # 배포하는데도 모두 거부로 나온다. IAM은 전역 서비스라 실제 요청 리전이 us-east-1이다.
+    for actions, resource, region in ((PERMISSION_WRITES, None, ctx.region),
+                                      (PERMISSION_IAM_WRITES, role_arn, "us-east-1")):
         args = ["iam", "simulate-principal-policy", "--policy-source-arn", ctx.caller_arn,
-                "--action-names", *actions]
+                "--action-names", *actions,
+                "--context-entries",
+                f"ContextKeyName=aws:RequestedRegion,ContextKeyValues={region},ContextKeyType=string"]
         if resource:
             args += ["--resource-arns", resource]
         data, result = aws_json(runner, *args, timeout=AWS_TIMEOUT)
@@ -443,11 +452,18 @@ def _check_deploy_permissions(ctx: Context, runner: Runner, report) -> None:
         for item in data.get("EvaluationResults") or []:
             if isinstance(item, dict) and item.get("EvalDecision") != "allowed":
                 denied.append(str(item.get("EvalActionName", "?")))
+                # 조직 SCP·권한 경계가 거부했으면 결과에 False로 표시된다. 조회 점검과 같은 안내를 쓰도록
+                # 거부 메시지에 나오는 표현으로 옮겨 둔다
+                if (item.get("OrganizationsDecisionDetail") or {}).get("AllowedByOrganizations") is False:
+                    denied_by.append("service control policy")
+                if (item.get("PermissionsBoundaryDecisionDetail") or {}).get("AllowedByPermissionsBoundary") is False:
+                    denied_by.append("permissions boundary")
 
     if denied:
         shown = ", ".join(denied[:5]) + (f" 외 {len(denied) - 5}개" if len(denied) > 5 else "")
-        report("aws_deploy_permissions", title, CHECK_FAIL, "허용되지 않는 작업: " + shown,
-               _permission_hint(ctx, [], None))
+        report("aws_deploy_permissions", title, CHECK_FAIL,
+               f"{ctx.region}에서 허용되지 않는 작업: " + shown + _denied_by(denied_by),
+               _permission_hint(ctx, denied_by, organization))
         return
     report("aws_deploy_permissions", title, CHECK_OK,
            f"배포에 필요한 작업 {len(PERMISSION_WRITES) + len(PERMISSION_IAM_WRITES)}개 모두 허용 (정책 시뮬레이터)")
