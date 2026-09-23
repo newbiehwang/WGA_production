@@ -49,7 +49,8 @@ struct RunDetails: View {
                 SubstepList(substeps: run.substeps)
             }
             if !run.checks.isEmpty {
-                CheckList(items: run.checks).frame(minHeight: CGFloat(min(run.checks.count, 8)) * 44)
+                // 한 줄에 제목·설명·안내가 들어가므로 줄당 56pt로 잡는다 (모자라면 목록 안에서 스크롤된다)
+                CheckList(items: run.checks).frame(minHeight: CGFloat(min(run.checks.count, 8)) * 56)
             }
             if !run.dryRuns.isEmpty {
                 DryRunList(items: run.dryRuns)
