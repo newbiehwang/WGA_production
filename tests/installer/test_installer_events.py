@@ -2,7 +2,8 @@
 import io
 import json
 
-from wga_installer.events import JsonEmitter, Redactor, TextEmitter
+from wga_installer.events import (STEP_FAILED, STEP_OK, STEP_SKIPPED, JsonEmitter, Redactor, TextEmitter,
+                                  display_width)
 
 
 def test_json_emitter_writes_one_object_per_line():
@@ -51,7 +52,7 @@ def test_redactor_ignores_empty_secret():
 def test_text_emitter_formats_check_with_hint():
     out = io.StringIO()
     TextEmitter(Redactor(), out).check("aws_cli", "AWS CLI", "fail", "설치되어 있지 않습니다", "brew install awscli")
-    assert out.getvalue() == "  [실패] AWS CLI: 설치되어 있지 않습니다\n         → brew install awscli\n"
+    assert out.getvalue() == "  [오류] AWS CLI: 설치되어 있지 않습니다\n         → brew install awscli\n"
 
 
 def test_text_emitter_also_redacts():
@@ -60,3 +61,93 @@ def test_text_emitter_also_redacts():
     out = io.StringIO()
     TextEmitter(redactor, out).log("token=xoxb-123")
     assert "xoxb-123" not in out.getvalue()
+
+
+# --- 터미널 출력 모양 --------------------------------------------------------------------------------
+
+def text_emitter(**kwargs):
+    out = io.StringIO()
+    return TextEmitter(Redactor(), out, **kwargs), out
+
+
+def test_display_width_counts_korean_as_two_columns():
+    assert display_width("SSM 파라미터") == 4 + 4 * 2   # "SSM " + 한글 4자
+    assert display_width("abc") == 3
+
+
+def test_substep_is_one_line_with_status_on_the_left():
+    emitter, out = text_emitter()
+    emitter.step_started("setup", "사전 설정 (dev, ap-southeast-2)")
+    emitter.step_started("quota", "API Gateway 통합 타임아웃 할당량")
+    emitter.step_finished("quota", STEP_OK, "")
+    emitter.step_started("ssm", "SSM 파라미터")
+    emitter.step_finished("ssm", STEP_OK, "")
+    emitter.step_finished("setup", STEP_OK, "사전 설정 완료")
+    # 점검 항목([ OK ] …)처럼 결과 표시가 왼쪽에 온다
+    assert out.getvalue().splitlines() == ["", "사전 설정 (dev, ap-southeast-2)",
+                                           "  [완료] API Gateway 통합 타임아웃 할당량",
+                                           "  [완료] SSM 파라미터",
+                                           "✓ 사전 설정 완료"]
+
+
+def test_failed_substep_shows_error_then_source_under_it():
+    emitter, out = text_emitter()
+    emitter.step_started("setup", "사전 설정")
+    emitter.step_started("quota", "할당량")
+    emitter.error("quota", "할당량을 조회하지 못했습니다", raw="An error occurred (AccessDenied) ...",
+                  hint="콘솔에서 확인하세요")
+    emitter.step_finished("quota", STEP_FAILED, "")
+    # [오류] 아랫줄에 무엇이 실패했는지, 그 아랫줄에 오류 원문 (제목 글자에 맞춰 들여 쓴다)
+    assert out.getvalue().splitlines()[2:] == ["  [오류] 할당량",
+                                               "         할당량을 조회하지 못했습니다",
+                                               "         An error occurred (AccessDenied) ...",
+                                               "         → 콘솔에서 확인하세요"]
+
+
+def test_error_outside_a_substep_is_tagged():
+    emitter, out = text_emitter()
+    emitter.step_started("deploy", "WGA 배포")
+    emitter.error("deploy", "deploy.sh가 실패했습니다", raw="npm ERR! build failed")
+    emitter.step_finished("deploy", STEP_FAILED, "배포에 실패했습니다")
+    assert out.getvalue().splitlines()[2:] == ["  [오류] deploy.sh가 실패했습니다",
+                                               "         npm ERR! build failed",
+                                               "✗ 배포에 실패했습니다"]
+
+
+def test_substep_with_output_prints_title_first():
+    # 도중에 질문·로그가 나오면 제목을 먼저 쓰고, 끝나면 결과 줄을 다시 쓴다
+    emitter, out = text_emitter()
+    emitter.step_started("setup", "사전 설정")
+    emitter.step_started("quota", "할당량")
+    emitter.log("현재 29000ms → 120000ms 필요", stream="info")
+    emitter.step_finished("quota", STEP_OK, "요청했습니다 (PENDING)")
+    assert out.getvalue().splitlines()[2:] == ["  할당량",
+                                               "    현재 29000ms → 120000ms 필요",
+                                               "  [완료] 할당량",
+                                               "         요청했습니다 (PENDING)"]
+
+
+def test_dry_run_is_announced_once_and_planned_steps_say_planned():
+    emitter, out = text_emitter(dry_run=True)
+    emitter.step_started("setup", "사전 설정")
+    emitter.step_started("quota", "할당량")
+    emitter.dry_run("request_quota", "aws service-quotas request-service-quota-increase", "할당량을 올려 달라고 요청합니다")
+    emitter.step_finished("quota", STEP_OK, "")
+    emitter.step_started("ssm", "SSM 파라미터")
+    emitter.step_finished("ssm", STEP_OK, "")
+    lines = out.getvalue().splitlines()
+    assert lines[1] == "사전 설정 · dry-run (아무것도 바꾸지 않음)"
+    assert lines[3:5] == ["    할 일: 할당량을 올려 달라고 요청합니다",
+                          "      $ aws service-quotas request-service-quota-increase"]
+    assert lines[5] == "  [예정] 할당량"          # 바꾸지 않았으므로 "완료"가 아니다
+    assert lines[6] == "  [완료] SSM 파라미터"    # 이미 되어 있어 할 일이 없었던 단계
+    assert "dry-run" not in "\n".join(lines[2:])   # 줄마다 되풀이하지 않는다
+
+
+def test_skipped_substep_gives_the_reason():
+    emitter, out = text_emitter()
+    emitter.step_started("setup", "사전 설정")
+    emitter.step_started("quota", "할당량")
+    emitter.step_finished("quota", STEP_SKIPPED, "할당량이 오르기 전에는 배포가 실패합니다")
+    assert out.getvalue().splitlines()[2:] == ["  [건너뜀] 할당량",
+                                               "           할당량이 오르기 전에는 배포가 실패합니다"]

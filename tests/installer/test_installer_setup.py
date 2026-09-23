@@ -82,7 +82,7 @@ def test_first_run_requests_quota_and_stores_secrets(fake):
     steps = finished(result.stdout)
     assert steps["quota"]["status"] == "ok" and "PENDING" in steps["quota"]["summary"]
     assert steps["ssm_parameters"] == {"type": "step_finished", "step": "ssm_parameters", "status": "ok",
-                                       "summary": "등록 3개 · 유지 0개"}
+                                       "summary": "3개 등록"}   # 0개(유지)는 말하지 않는다
 
     request = [c for c in mutating_calls(fake) if "request-service-quota-increase" in c]
     assert request == [["service-quotas", "request-service-quota-increase", "--service-code", "apigateway",
@@ -114,7 +114,9 @@ def test_second_run_changes_nothing(fake):
     result = setup_json(fake)
     steps = finished(result.stdout)
     assert result.returncode == 0
-    assert steps["quota"]["status"] == steps["ssm_parameters"]["status"] == "skipped"
+    # 이미 되어 있으면 "할 일을 마친 상태"라 ok이고, 요약 없이 [완료]로만 보인다
+    assert steps["quota"]["status"] == steps["ssm_parameters"]["status"] == "ok"
+    assert steps["quota"]["summary"] == steps["ssm_parameters"]["summary"] == ""
     assert mutating_calls(fake) == []
     assert [e["type"] for e in events(result.stdout)].count("choice_required") == 3
 
@@ -123,7 +125,8 @@ def test_previously_raised_higher_quota_is_enough(fake):
     # 예전에 180000ms로 올려 둔 계정은 다시 요청하지 않는다
     account(fake, quota=180000, existing={key: "SecureString" for key in SECRETS})
     result = setup_json(fake)
-    assert finished(result.stdout)["quota"]["summary"] == "이미 충분합니다 (현재 180000ms)"
+    assert finished(result.stdout)["quota"] == {"type": "step_finished", "step": "quota", "status": "ok",
+                                                "summary": ""}
     assert mutating_calls(fake) == []
 
 
@@ -131,7 +134,7 @@ def test_pending_request_is_not_repeated(fake):
     account(fake, requests=("CASE_OPENED",), existing={key: "SecureString" for key in SECRETS})
     result = setup_json(fake)
     quota = finished(result.stdout)["quota"]
-    assert quota["status"] == "skipped" and "CASE_OPENED" in quota["summary"]
+    assert quota["status"] == "ok" and quota["summary"] == "승인 대기 중 (CASE_OPENED) — 승인되면 deploy를 실행하세요"
     assert mutating_calls(fake) == []
 
 
@@ -147,7 +150,7 @@ def test_unadjustable_quota_fails_but_ssm_still_runs(fake):
     result = setup_json(fake)
     steps = finished(result.stdout)
     assert result.returncode == 1
-    assert steps["quota"]["status"] == "failed" and steps["ssm_parameters"]["status"] == "skipped"
+    assert steps["quota"]["status"] == "failed" and steps["ssm_parameters"]["status"] == "ok"
     assert steps["setup"]["status"] == "failed"
 
 
@@ -157,7 +160,9 @@ def test_quota_lookup_error_is_reported(fake):
     account(fake, existing={key: "SecureString" for key in SECRETS})
     result = setup_json(fake)
     errors = [e for e in events(result.stdout) if e["type"] == "error"]
-    assert result.returncode == 1 and "AccessDeniedException" in errors[0]["message"]
+    # 무엇이 실패했는지(message)와 AWS가 낸 오류 원문(raw)을 나눠 보낸다
+    assert result.returncode == 1 and errors[0]["message"] == "할당량을 조회하지 못했습니다"
+    assert "AccessDeniedException" in errors[0]["raw"]
 
 
 def test_quota_found_in_default_list(fake):
@@ -177,7 +182,7 @@ def test_overwrite_existing_parameter(fake):
     stored = [json.loads(content) for _, content in fake.captures()]
     assert [(s["Name"], s["Value"], s["Overwrite"]) for s in stored] == [
         (f"{PREFIX}/ANTHROPIC_API_KEY", "sk-ant-NEW", True)]
-    assert finished(result.stdout)["ssm_parameters"]["summary"] == "등록 1개 · 유지 2개"
+    assert finished(result.stdout)["ssm_parameters"]["summary"] == "1개 등록"
 
 
 def test_plain_string_parameter_is_flagged(fake):
@@ -200,7 +205,7 @@ def test_empty_slack_values_are_skipped(fake):
                         secret("SlackbotToken", ""), secret("SlackSigningSecret", ""))
     assert result.returncode == 0
     assert mutating_calls(fake) == []
-    assert finished(result.stdout)["ssm_parameters"]["summary"] == "등록 0개 · 유지 1개 · 건너뜀 2개"
+    assert finished(result.stdout)["ssm_parameters"]["summary"] == "2개 건너뜀"
 
 
 def test_empty_anthropic_key_fails(fake):
@@ -214,7 +219,11 @@ def test_declined_put_is_not_executed(fake):
     account(fake, quota=120000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
     result = setup_json(fake, secret("ANTHROPIC_API_KEY", "sk-ant-x"), confirm("put_ANTHROPIC_API_KEY", False))
     assert mutating_calls(fake) == [] and list(fake.tmp.iterdir()) == []
-    assert "건너뜀 1개" in finished(result.stdout)["ssm_parameters"]["summary"]
+    steps = finished(result.stdout)
+    # 필수 값(API 키)을 저장하지 않기로 했다: 이대로는 배포할 수 없으므로 전체도 "완료"라 하지 않는다
+    assert steps["ssm_parameters"]["status"] == "skipped"
+    assert steps["ssm_parameters"]["summary"] == "1개 건너뜀 — API 키가 없으면 배포할 수 없습니다"
+    assert steps["setup"]["status"] == "skipped" and "아직 배포할 수 없습니다" in steps["setup"]["summary"]
 
 
 def test_put_failure_is_reported(fake):
@@ -242,20 +251,22 @@ def test_text_mode(fake, answer, expected_calls):
     account(fake, quota=120000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
     result = run_cli(fake, "setup", "--region", "ap-northeast-2", input=f"sk-ant-TEXT\n{answer}\n\n")
     assert "[y/N]" in result.stdout and "번호를 입력하세요" in result.stdout
-    # API 키는 입력 내용을 보이게 받는다고 알리고, 입력 뒤에는 길이만 확인해 준다 (짧은 값은 일부도 보이지 않음)
-    assert "Anthropic API 키 (입력 내용이 화면에 보입니다): " in result.stdout
-    assert "Anthropic API 키 입력됨: (11자)" in result.stdout
+    # API 키는 보이게 입력받으므로 설명 문구도, 입력 뒤 확인 줄도 붙이지 않는다 (aws configure처럼)
+    assert "    Anthropic API 키: " in result.stdout
+    assert "입력 내용이 화면에 보입니다" not in result.stdout and "입력됨" not in result.stdout
     assert "sk-ant-TEXT" not in result.stdout
     assert len(mutating_calls(fake)) == expected_calls
 
 
-def test_entered_secret_is_confirmed_with_a_masked_preview(fake):
-    # 보이지 않게 입력한 값도 들어갔는지 알 수 있게, 앞 7글자·끝 4글자·길이만 보여 준다
+def test_hidden_secret_is_confirmed_with_a_masked_preview(fake):
+    # 보이지 않게 입력한 값(Slack)은 들어갔는지 알 수 있게 앞 7글자·끝 4글자·길이만 보여 준다.
+    # 보이게 입력한 API 키는 확인할 필요가 없어 보여 주지 않는다
     account(fake)
     result = setup_json(fake, *FIRST_RUN)
     logs = [e["line"] for e in events(result.stdout) if e["type"] == "log"]
-    assert "Anthropic API 키 입력됨: sk-ant-…ALUE (24자)" in logs
-    assert SECRETS["ANTHROPIC_API_KEY"] not in result.stdout
+    assert [line for line in logs if line.startswith("입력됨")] == ["입력됨: (17자)", "입력됨: abcdef0…NING (23자)"]
+    for value in SECRETS.values():
+        assert value not in result.stdout
 
 
 @pytest.mark.parametrize("value, shown", [

@@ -30,93 +30,94 @@ STEP = "setup"
 def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
     # 다른 명령처럼 명령 전체의 시작·끝을 알린다 (읽는 쪽이 제목과 결과 요약을 보여 줄 수 있게)
     emitter.step_started(STEP, f"사전 설정 ({ctx.env}, {ctx.region})")
-    quota_ok = _request_quota(ctx, runner, emitter)
-    ssm_ok = _store_parameters(ctx, runner, emitter)
-    if quota_ok and ssm_ok:
-        emitter.step_finished(STEP, STEP_OK, "사전 설정을 마쳤습니다. 할당량 요청이 승인된 뒤 배포하세요"
-                              if not runner.dry_run else "dry-run: 바꾸지 않았습니다")
+    # 하위 단계의 결과(STEP_OK·STEP_SKIPPED·STEP_FAILED). 하나가 실패해도 다른 하나는 진행한다
+    statuses = [_request_quota(ctx, runner, emitter), _store_parameters(ctx, runner, emitter)]
+    if STEP_FAILED in statuses:
+        emitter.step_finished(STEP, STEP_FAILED,
+                              "사전 설정을 끝내지 못했습니다. 원인을 해결하고 다시 실행하면 이어서 진행합니다")
+        return 1
+    if STEP_SKIPPED in statuses:
+        # 사용자가 거절한 항목이 있다 (할당량 요청이나 API 키 저장). 이대로는 배포가 실패하므로 "완료"라 하지 않는다
+        emitter.step_finished(STEP, STEP_SKIPPED, "건너뛴 항목이 있어 아직 배포할 수 없습니다. setup을 다시 실행하세요")
         return 0
-    emitter.step_finished(STEP, STEP_FAILED, "사전 설정을 끝내지 못했습니다. 원인을 해결한 뒤 다시 실행하면 이어서 진행합니다")
-    return 1
+    emitter.step_finished(STEP, STEP_OK, "사전 설정 확인 끝 (바꾼 것 없음)" if runner.dry_run else "사전 설정 완료")
+    return 0
 
 
 # ---------------------------------------------------------------- 할당량
 
-def _request_quota(ctx: Context, runner: Runner, emitter: Emitter) -> bool:
-    """할당량이 부족하면 증가를 요청한다. 실패(조회 오류, 조정 불가, 요청 실패)면 False."""
+def _request_quota(ctx: Context, runner: Runner, emitter: Emitter) -> str:
+    """할당량이 부족하면 증가를 요청한다. 결과 상태(STEP_OK·STEP_SKIPPED·STEP_FAILED)를 돌려준다."""
     step = "quota"
-    emitter.step_started(step, f"API Gateway 통합 타임아웃 할당량 ({ctx.region})")
+    emitter.step_started(step, "API Gateway 통합 타임아웃 할당량")
 
     quota, error = find_timeout_quota(runner)
     if quota is None:
-        emitter.error(step, f"할당량을 조회하지 못했습니다: {error}",
+        emitter.error(step, "할당량을 조회하지 못했습니다", raw=error,
                       hint="Service Quotas 콘솔에서 API Gateway의 'Maximum integration timeout in milliseconds'를 "
                            "직접 확인하세요")
-        emitter.step_finished(step, STEP_FAILED, "할당량 조회 실패")
-        return False
+        emitter.step_finished(step, STEP_FAILED, "")
+        return STEP_FAILED
 
     current = int(quota.value)
     if current >= REQUIRED_TIMEOUT_MS:
-        emitter.step_finished(step, STEP_SKIPPED, f"이미 충분합니다 (현재 {current}ms)")
-        return True
+        emitter.step_finished(step, STEP_OK, "")   # 이미 충분하다 = 할 일을 마친 상태
+        return STEP_OK
     if not quota.adjustable:
         emitter.error(step, f"이 리전에서는 할당량을 조정할 수 없습니다 (현재 {current}ms)",
                       hint="다른 리전을 쓰거나 AWS Support에 문의하세요")
-        emitter.step_finished(step, STEP_FAILED, "조정 불가")
-        return False
+        emitter.step_finished(step, STEP_FAILED, "")
+        return STEP_FAILED
 
     # 이미 요청해 둔 것이 처리 중이면 또 요청하지 않는다 (중복 요청은 거절될 수 있다)
     history, error = quota_requests(runner, quota.code)
     if history is None:
-        emitter.error(step, f"이전 요청 기록을 조회하지 못했습니다: {error}")
-        emitter.step_finished(step, STEP_FAILED, "요청 기록 조회 실패")
-        return False
+        emitter.error(step, "이전 요청 기록을 조회하지 못했습니다", raw=error)
+        emitter.step_finished(step, STEP_FAILED, "")
+        return STEP_FAILED
     pending = next((r for r in history if r.get("Status") in QUOTA_PENDING_STATUSES), None)
     if pending:
-        emitter.step_finished(step, STEP_SKIPPED,
-                              f"이미 요청해 두었습니다 (상태 {pending['Status']}, 요청 값 "
-                              f"{int(pending.get('DesiredValue', 0))}ms). 승인된 뒤 deploy를 실행하세요")
-        return True
+        emitter.step_finished(step, STEP_OK, f"승인 대기 중 ({pending['Status']}) — 승인되면 deploy를 실행하세요")
+        return STEP_OK
     if history and history[0].get("Status") in QUOTA_REJECTED_STATUSES:
-        emitter.log(f"가장 최근 요청이 거절되었습니다 (상태 {history[0]['Status']}). 다시 요청합니다", stream="info")
+        emitter.log(f"지난 요청이 거절되었습니다 ({history[0]['Status']}). 다시 요청합니다", stream="info")
 
-    emitter.log(f"현재 {current}ms입니다. WGA는 LLM 응답을 최대 {REQUIRED_TIMEOUT_MS // 1000}초 기다리도록 통합 타임아웃을 "
-                f"{REQUIRED_TIMEOUT_MS}ms로 설정하므로, 할당량이 오르기 전에는 배포가 실패합니다", stream="info")
-    emitter.log("보통 자동으로 승인되지만, 무료 플랜 계정은 거절될 수 있습니다", stream="info")
+    # llm.yaml이 통합 타임아웃을 120000ms로 고정하므로 할당량이 오르기 전에는 스택 생성이 실패한다
+    emitter.log(f"현재 {current}ms → {REQUIRED_TIMEOUT_MS}ms 필요", stream="info")
     result = runner.change(
         ["aws", "service-quotas", "request-service-quota-increase", "--service-code", QUOTA_SERVICE,
          "--quota-code", quota.code, "--desired-value", str(REQUIRED_TIMEOUT_MS), "--output", "json"],
         id_="request_quota", reason=f"통합 타임아웃 할당량을 {REQUIRED_TIMEOUT_MS}ms로 올려 달라고 요청합니다",
         timeout=60)
     if result.outcome == DRY_RUN:
-        emitter.step_finished(step, STEP_OK, "dry-run: 요청하지 않았습니다")
-        return True
+        emitter.step_finished(step, STEP_OK, "")
+        return STEP_OK
     if result.outcome == DECLINED:
-        emitter.step_finished(step, STEP_SKIPPED, "요청하지 않았습니다 (할당량이 오르기 전에는 배포가 실패합니다)")
-        return True
+        emitter.step_finished(step, STEP_SKIPPED, "할당량이 오르기 전에는 배포가 실패합니다")
+        return STEP_SKIPPED
     if not result.ok:
-        emitter.error(step, f"요청이 실패했습니다: {error_text(result)}")
-        emitter.step_finished(step, STEP_FAILED, "요청 실패")
-        return False
+        emitter.error(step, "할당량 증가를 요청하지 못했습니다", raw=error_text(result))
+        emitter.step_finished(step, STEP_FAILED, "")
+        return STEP_FAILED
     try:
         status = json.loads(result.stdout)["RequestedQuota"]["Status"]
     except (json.JSONDecodeError, KeyError, TypeError):
         status = "알 수 없음"
-    emitter.step_finished(step, STEP_OK, f"요청했습니다 (상태 {status}). 승인된 뒤 deploy를 실행하세요")
-    return True
+    emitter.step_finished(step, STEP_OK, f"요청했습니다 ({status}) — 승인되면 deploy를 실행하세요")
+    return STEP_OK
 
 
 # ---------------------------------------------------------------- SSM 파라미터
 
-def _store_parameters(ctx: Context, runner: Runner, emitter: Emitter) -> bool:
+def _store_parameters(ctx: Context, runner: Runner, emitter: Emitter) -> str:
     step = "ssm_parameters"
-    emitter.step_started(step, "SSM 파라미터 등록")
+    emitter.step_started(step, "SSM 파라미터")
     names = [f"{ctx.ssm_prefix}/{param.key}" for param in SECRET_PARAMS]
     existing, error = existing_parameters(runner, names)
     if existing is None:
-        emitter.error(step, f"기존 파라미터를 조회하지 못했습니다: {error}")
-        emitter.step_finished(step, STEP_FAILED, "조회 실패")
-        return False
+        emitter.error(step, "기존 파라미터를 조회하지 못했습니다", raw=error)
+        emitter.step_finished(step, STEP_FAILED, "")
+        return STEP_FAILED
 
     stored, kept, declined, failed, planned = [], [], [], [], []
     for param, name in zip(SECRET_PARAMS, names, strict=True):
@@ -134,19 +135,20 @@ def _store_parameters(ctx: Context, runner: Runner, emitter: Emitter) -> bool:
         outcome = _put_parameter(ctx, runner, emitter, param, name, overwrite=param_type is not None)
         {"stored": stored, "failed": failed, "planned": planned, "declined": declined}[outcome].append(name)
 
-    counts = f"등록 {len(stored)}개 · 유지 {len(kept)}개" + (f" · 건너뜀 {len(declined)}개" if declined else "")
+    # 0개는 말하지 않는다. 모두 이미 등록되어 있으면(=할 일이 없으면) 요약 없이 [완료]
+    required = {f"{ctx.ssm_prefix}/{param.key}" for param in SECRET_PARAMS if param.required}
+    parts = [f"{len(names_)}개 {label}" for names_, label in
+             ((failed, "실패"), (stored, "등록"), (planned, "등록 예정"), (declined, "건너뜀")) if names_]
+    summary = " · ".join(parts) if (stored or failed or planned or declined) else ""
     if failed:
-        emitter.step_finished(step, STEP_FAILED, f"{counts} · 실패 {len(failed)}개")
-        return False
-    if planned:
-        emitter.step_finished(step, STEP_OK, f"dry-run: {len(planned)}개를 등록할 예정 · 유지 {len(kept)}개")
-    elif not stored and not declined:
-        emitter.step_finished(step, STEP_SKIPPED, f"모두 이미 등록되어 있습니다 ({counts})")
-    elif not stored:
-        emitter.step_finished(step, STEP_SKIPPED, counts)
-    else:
-        emitter.step_finished(step, STEP_OK, counts)
-    return True
+        emitter.step_finished(step, STEP_FAILED, summary)
+        return STEP_FAILED
+    if any(name in required for name in declined):
+        # 필수 값(API 키)을 사용자가 저장하지 않기로 했다 → 배포할 수 없는 상태
+        emitter.step_finished(step, STEP_SKIPPED, summary + " — API 키가 없으면 배포할 수 없습니다")
+        return STEP_SKIPPED
+    emitter.step_finished(step, STEP_OK, summary)
+    return STEP_OK
 
 
 def mask_secret(value: str) -> str:
@@ -169,14 +171,13 @@ def _put_parameter(ctx: Context, runner: Runner, emitter: Emitter, param: Secret
                       id_=f"put_{param.key}", reason=reason)
         return "planned"
 
-    prompt = param.title + (" (입력 내용이 화면에 보입니다)" if param.echo else "")
-    value = runner.interaction.secret(f"secret_{param.key}", prompt, echo=param.echo)
+    value = runner.interaction.secret(f"secret_{param.key}", param.title, echo=param.echo)
     # 복사해 붙여 넣을 때 딸려 온 공백·줄바꿈을 지운다 (그대로 저장하면 API 호출이 인증 오류로 실패한다)
     value = (value or "").strip()
     runner.emitter.redactor.add(value)
-    if value:
-        # 무엇이 들어갔는지 알 수 있게 앞뒤 몇 글자와 길이만 보여 준다 (보이지 않게 입력한 값도 확인할 수 있도록)
-        emitter.log(f"{param.title} 입력됨: {mask_secret(value)}", stream="info")
+    if value and not param.echo:
+        # 보이지 않게 입력한 값은 들어갔는지 알 수 없으므로 길이 등으로 확인해 준다 (보이게 입력한 값은 필요 없다)
+        emitter.log(f"입력됨: {mask_secret(value)}", stream="info")
     if not value:
         if param.required:
             emitter.error(step, f"{param.title}이(가) 비어 있어 저장하지 않았습니다",
@@ -184,8 +185,7 @@ def _put_parameter(ctx: Context, runner: Runner, emitter: Emitter, param: Secret
             return "failed"
         # Slack을 쓰지 않는 경우: 등록하지 않는다. Lambda 설정(layers/common/config.py)은 있는 파라미터만
         # 읽고, Signing Secret이 없으면 Slack 요청을 모두 거부하므로(services/slackbot/slack_security.py) 안전하다.
-        emitter.log(f"{param.title}을(를) 비워 두어 등록하지 않습니다. Slack 기능은 꺼진 상태로 동작하며, "
-                    "나중에 setup을 다시 실행해 등록할 수 있습니다", stream="info")
+        emitter.log("비워 두어 등록하지 않습니다 (Slack 기능 꺼짐, 나중에 setup으로 등록 가능)", stream="info")
         return "declined"
 
     request = {"Name": name, "Value": value, "Type": "SecureString", "Overwrite": overwrite}
@@ -196,6 +196,6 @@ def _put_parameter(ctx: Context, runner: Runner, emitter: Emitter, param: Secret
     if result.outcome == DECLINED:
         return "declined"
     if not result.ok:
-        emitter.error(step, f"{name} 저장에 실패했습니다: {error_text(result)}")
+        emitter.error(step, f"{name}을(를) 저장하지 못했습니다", raw=error_text(result))
         return "failed"
     return "stored"

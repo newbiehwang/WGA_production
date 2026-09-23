@@ -197,7 +197,7 @@ def test_partial_delete_objects_failure_stops(fake):
     github(fake)
     code, evts = run_step(fake, teardown.run, stdin=approve_all())
     assert code == 1 and not any("delete-bucket" in c for c in deletions(fake))
-    assert any("AccessDenied" in e.get("message", "") for e in evts if e["type"] == "error")
+    assert any("AccessDenied" in e.get("raw", "") for e in evts if e["type"] == "error")   # 원문은 raw에
 
 
 def test_dry_run_deletes_nothing_and_shows_every_step(fake):
@@ -213,7 +213,7 @@ def test_nothing_to_delete(fake):
     account(fake, stacks=[], buckets=[], ecr=False, log_groups=[], params=())
     github(fake, variables=(), environment=False)
     code, evts = run_step(fake, teardown.run)
-    assert code == 0 and evts[-1]["status"] == "skipped" and deletions(fake) == []
+    assert code == 0 and evts[-1]["status"] == "ok" and deletions(fake) == []   # 지울 것이 없음 = 할 일 없음
 
 
 def test_github_required_when_oidc_stack_exists(fake):

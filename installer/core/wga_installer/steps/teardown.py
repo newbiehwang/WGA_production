@@ -64,7 +64,7 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
     if ctx.env == "prod" and not ctx.allow_prod:
         emitter.error(STEP, "prod 환경은 --allow-prod 없이 지울 수 없습니다",
                       hint="정말 지우려면 --env prod --allow-prod로 다시 실행하세요")
-        emitter.step_finished(STEP, STEP_FAILED, "prod 보호")
+        emitter.step_finished(STEP, STEP_FAILED, "prod는 지우지 않았습니다")
         return 1
 
     plan = _inventory(ctx, runner, emitter)
@@ -72,14 +72,14 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
         emitter.step_finished(STEP, STEP_FAILED, "지울 대상을 확인하지 못해 아무것도 지우지 않았습니다")
         return 1
     if plan.empty():
-        emitter.step_finished(STEP, STEP_SKIPPED, f"{ctx.env} 환경에 지울 것이 없습니다")
+        emitter.step_finished(STEP, STEP_OK, f"{ctx.env} 환경에 지울 것이 없습니다")
         return 0
 
     if not runner.dry_run:
         typed = runner.interaction.text("confirm_env", f"되돌릴 수 없습니다. 삭제하려면 환경 이름 '{ctx.env}'을(를) 입력하세요")
         if typed != ctx.env:
             emitter.error(STEP, "환경 이름이 일치하지 않아 아무것도 지우지 않았습니다")
-            emitter.step_finished(STEP, STEP_SKIPPED, "취소됨")
+            emitter.step_finished(STEP, STEP_SKIPPED, "취소했습니다 (아무것도 지우지 않음)")
             return 1
 
     for name, action in (("GitHub 저장소 변수", _delete_role_variable), ("CloudFormation 스택", _delete_stacks),
@@ -88,13 +88,13 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
                          ("GitHub Environment", _delete_github_environment)):
         outcome = action(ctx, runner, emitter, plan)
         if outcome == "failed":
-            emitter.step_finished(STEP, STEP_FAILED, f"{name} 단계에서 멈췄습니다. 원인을 해결한 뒤 다시 실행하면 남은 것만 지웁니다")
+            emitter.step_finished(STEP, STEP_FAILED, f"{name} 단계에서 멈췄습니다. 원인을 해결하고 다시 실행하면 남은 것만 지웁니다")
             return 1
         if outcome == "declined":
             emitter.step_finished(STEP, STEP_SKIPPED, f"{name} 단계에서 중단했습니다 (앞 단계까지만 지움)")
             return 1
 
-    emitter.step_finished(STEP, STEP_OK, "dry-run: 아무것도 지우지 않았습니다" if runner.dry_run
+    emitter.step_finished(STEP, STEP_OK, "정리 확인 끝 (지운 것 없음)" if runner.dry_run
                           else f"{ctx.env} 환경의 WGA 리소스를 모두 지웠습니다")
     return 0
 
@@ -104,13 +104,13 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
 def _inventory(ctx: Context, runner: Runner, emitter: Emitter) -> Plan | None:
     identity, result = aws_json(runner, "sts", "get-caller-identity")
     if not identity:
-        emitter.error(STEP, f"AWS 계정을 확인하지 못했습니다: {error_text(result)}")
+        emitter.error(STEP, "AWS 계정을 확인하지 못했습니다", raw=error_text(result))
         return None
     plan = Plan(account_id=identity["Account"])
 
     data, result = aws_json(runner, "cloudformation", "describe-stacks")
     if data is None:
-        emitter.error(STEP, f"스택 목록을 조회하지 못했습니다: {error_text(result)}")
+        emitter.error(STEP, "스택 목록을 조회하지 못했습니다", raw=error_text(result))
         return None
     existing = {s["StackName"] for s in data.get("Stacks", [])}
     others = [e for e in ENVIRONMENTS if e != ctx.env]
@@ -152,14 +152,14 @@ def _inventory(ctx: Context, runner: Runner, emitter: Emitter) -> Plan | None:
         if result.ok:
             plan.buckets.append(bucket)
         elif not any(marker in result.stderr for marker in ("404", "Not Found", "NoSuchBucket")):
-            emitter.error(STEP, f"버킷 {bucket}을(를) 확인하지 못했습니다: {error_text(result)}")
+            emitter.error(STEP, f"버킷 {bucket}을(를) 확인하지 못했습니다", raw=error_text(result))
             return None
     _report(emitter, "target_buckets", "S3 버킷 (모든 버전 포함)", CHECK_INFO,
             ", ".join(plan.buckets) if plan.buckets else "없음")
 
     data, result = aws_json(runner, "logs", "describe-log-groups", "--log-group-name-prefix", "/aws/lambda/wga-")
     if data is None:
-        emitter.error(STEP, f"로그 그룹을 조회하지 못했습니다: {error_text(result)}")
+        emitter.error(STEP, "로그 그룹을 조회하지 못했습니다", raw=error_text(result))
         return None
     plan.log_groups = sorted(g["logGroupName"] for g in data.get("logGroups", [])
                              if g["logGroupName"].endswith(f"-{ctx.env}"))
@@ -169,7 +169,7 @@ def _inventory(ctx: Context, runner: Runner, emitter: Emitter) -> Plan | None:
     names = [f"{ctx.ssm_prefix}/{param.key}" for param in SECRET_PARAMS]
     found, error = existing_parameters(runner, names)
     if found is None:
-        emitter.error(STEP, f"SSM 파라미터를 조회하지 못했습니다: {error}")
+        emitter.error(STEP, "SSM 파라미터를 조회하지 못했습니다", raw=error)
         return None
     plan.parameters = [name for name in names if name in found]
     _report(emitter, "target_parameters", "SSM 파라미터", CHECK_INFO,
@@ -193,11 +193,11 @@ def _inventory_github(ctx: Context, runner: Runner, emitter: Emitter, plan: Plan
         return
     current, error = github.variables(runner, repo)
     if current is None:
-        emitter.error(STEP, f"저장소 변수를 조회하지 못했습니다: {error}")
+        emitter.error(STEP, "저장소 변수를 조회하지 못했습니다", raw=error)
         return
     environment, exists, error = github.environment(runner, repo, ctx.env)
     if error:
-        emitter.error(STEP, f"Environment를 조회하지 못했습니다: {error}")
+        emitter.error(STEP, "Environment를 조회하지 못했습니다", raw=error)
         return
     plan.repo = repo
     variable = github.role_variable(ctx.env)
@@ -235,7 +235,7 @@ def _delete_role_variable(ctx: Context, runner: Runner, emitter: Emitter, plan: 
         return _skipped(outcome)
     result = runner.run_approved(cmd, timeout=60)
     if not result.ok:
-        emitter.error(STEP, f"저장소 변수를 지우지 못했습니다: {github.error_text(result)}")
+        emitter.error(STEP, "저장소 변수를 지우지 못했습니다", raw=github.error_text(result))
         return "failed"
     return "done"
 
@@ -270,7 +270,7 @@ def _delete_stacks(ctx: Context, runner: Runner, emitter: Emitter, plan: Plan) -
                 continue
             failures = stack_failures(runner, [stack], started - CLOCK_SKEW)
         for failure in failures:
-            emitter.error(STEP, f"{failure.stack}: {failure.logical_id} ({failure.resource_type}) — {failure.reason}")
+            emitter.error(STEP, f"{failure.stack}: {failure.logical_id} ({failure.resource_type})", raw=failure.reason)
         emitter.error(STEP, f"스택 {stack}을(를) 지우지 못했습니다",
                       hint="위 원인을 해결하거나 CloudFormation 콘솔에서 확인한 뒤 다시 실행하세요")
         return "failed"
@@ -302,7 +302,7 @@ def _delete_leftover_repository(ctx: Context, runner: Runner, emitter: Emitter, 
         return _skipped(outcome)
     result = runner.run_approved(cmd, timeout=120)
     if not result.ok:
-        emitter.error(STEP, f"ECR 저장소를 지우지 못했습니다: {error_text(result)}")
+        emitter.error(STEP, "ECR 저장소를 지우지 못했습니다", raw=error_text(result))
         return "failed"
     return "done"
 
@@ -324,7 +324,7 @@ def _delete_buckets(ctx: Context, runner: Runner, emitter: Emitter, plan: Plan) 
             return "failed"
         result = runner.run_approved(["aws", "s3api", "delete-bucket", "--bucket", bucket], timeout=120)
         if not result.ok:
-            emitter.error(STEP, f"버킷 {bucket}을(를) 지우지 못했습니다: {error_text(result)}")
+            emitter.error(STEP, f"버킷 {bucket}을(를) 지우지 못했습니다", raw=error_text(result))
             return "failed"
     return "done"
 
@@ -336,7 +336,7 @@ def _empty_bucket(runner: Runner, emitter: Emitter, bucket: str) -> bool:
         data, result = aws_json(runner, "s3api", "list-object-versions", "--bucket", bucket,
                                 "--max-items", str(DELETE_BATCH), timeout=120)
         if data is None:
-            emitter.error(STEP, f"버킷 {bucket}의 객체 목록을 읽지 못했습니다: {error_text(result)}")
+            emitter.error(STEP, f"버킷 {bucket}의 객체 목록을 읽지 못했습니다", raw=error_text(result))
             return False
         objects = [{"Key": item["Key"], "VersionId": item["VersionId"]}
                    for item in (data.get("Versions") or []) + (data.get("DeleteMarkers") or [])]
@@ -349,8 +349,8 @@ def _empty_bucket(runner: Runner, emitter: Emitter, bucket: str) -> bool:
                                               "--delete", f"file://{path}", "--output", "json"], timeout=300)
             errors = _delete_errors(result.stdout) if result.ok else []
             if not result.ok or errors:
-                emitter.error(STEP, f"버킷 {bucket}의 객체를 지우지 못했습니다: "
-                                    f"{errors[0] if errors else error_text(result)}")
+                emitter.error(STEP, f"버킷 {bucket}의 객체를 지우지 못했습니다",
+                              raw=errors[0] if errors else error_text(result))
                 return False
     emitter.error(STEP, f"버킷 {bucket}을(를) 비우는 데 너무 오래 걸려 멈췄습니다")
     return False
@@ -376,7 +376,7 @@ def _delete_log_groups(ctx: Context, runner: Runner, emitter: Emitter, plan: Pla
     for cmd in commands:
         result = runner.run_approved(cmd, timeout=60)
         if not result.ok and "ResourceNotFound" not in result.stderr:
-            emitter.error(STEP, f"로그 그룹 {cmd[-1]}을(를) 지우지 못했습니다: {error_text(result)}")
+            emitter.error(STEP, f"로그 그룹 {cmd[-1]}을(를) 지우지 못했습니다", raw=error_text(result))
             return "failed"
     return "done"
 
@@ -390,7 +390,7 @@ def _delete_parameters(ctx: Context, runner: Runner, emitter: Emitter, plan: Pla
         return _skipped(outcome)
     result = runner.run_approved(cmd, timeout=60)
     if not result.ok:
-        emitter.error(STEP, f"SSM 파라미터를 지우지 못했습니다: {error_text(result)}")
+        emitter.error(STEP, "SSM 파라미터를 지우지 못했습니다", raw=error_text(result))
         return "failed"
     return "done"
 
@@ -404,7 +404,7 @@ def _delete_github_environment(ctx: Context, runner: Runner, emitter: Emitter, p
         return _skipped(outcome)
     result = runner.run_approved(cmd, timeout=60)
     if not result.ok:
-        emitter.error(STEP, f"GitHub Environment를 지우지 못했습니다: {github.error_text(result)}")
+        emitter.error(STEP, "GitHub Environment를 지우지 못했습니다", raw=github.error_text(result))
         return "failed"
     return "done"
 

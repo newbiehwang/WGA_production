@@ -127,8 +127,9 @@ def test_rerun_changes_nothing(fake, repo_dir):
            variables={"AWS_REGION": "ap-northeast-2", "AWS_DEPLOY_ROLE_ARN_DEV": ROLE_ARN})
     code, evts = run_step(fake, oidc.run, repo=repo_dir)
     assert code == 0 and mutating(fake) == []
-    assert {s: e["status"] for s, e in finished(evts).items() if s != "oidc"} == {
-        "oidc_role": "skipped", "github_environment": "skipped", "github_variables": "skipped"}
+    # 이미 되어 있으면 할 일을 마친 상태(ok)이고, 요약 없이 [완료]로만 보인다
+    assert {s: (e["status"], e["summary"]) for s, e in finished(evts).items() if s != "oidc"} == {
+        "oidc_role": ("ok", ""), "github_environment": ("ok", ""), "github_variables": ("ok", "")}
 
 
 def test_template_change_is_redeployed(fake, repo_dir):
@@ -278,7 +279,7 @@ def test_block_test_cancels_run_that_was_not_blocked(fake, repo_dir):
     assert code == 1
     assert f"run cancel 99 --repo {REPO}" in calls
     assert calls[-1].startswith(f"api -X DELETE repos/{REPO}/git/refs/heads/")   # 임시 브랜치는 항상 지운다
-    assert any("차단되지 않음" == e.get("summary") for e in evts)
+    assert any("배포 작업이 시작되었습니다" in e.get("message", "") for e in evts if e["type"] == "error")
 
 
 def test_block_test_deletes_branch_even_when_run_not_found(fake, repo_dir):

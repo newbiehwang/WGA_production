@@ -125,9 +125,10 @@ def test_successful_deploy(fake, repo):
         ("2/6", "Layer 및 Lambda 함수 패키징"), ("6/6", "배포 완료 요약"), ("6/6", "배포 완료!")]
 
     done = evts[-1]
-    assert done["status"] == "ok"
-    assert "https://abc123.execute-api.ap-northeast-2.amazonaws.com/dev" in done["summary"]
-    assert "https://dev.d1234.amplifyapp.com" in done["summary"]
+    assert done["status"] == "ok" and done["summary"] == "배포 완료"
+    # 주소는 한 줄에 하나씩 (복사하기 쉽게)
+    assert ("info", "API: https://abc123.execute-api.ap-northeast-2.amazonaws.com/dev") in logs
+    assert ("info", "프론트엔드: https://dev.d1234.amplifyapp.com") in logs
     assert any("구독 확인 메일" in e.get("line", "") for e in evts)
 
 
@@ -204,11 +205,12 @@ def test_failure_summary_finds_root_cause_in_nested_stack(fake, repo):
     fake.add("aws", "describe-stack-events", stderr="Stack with id x does not exist\n", exit=254)
 
     result = deploy_cli(fake, repo, input=approve_deploy())
-    errors = [e["message"] for e in events(result.stdout) if e["type"] == "error"]
+    errors = [(e["message"], e.get("raw")) for e in events(result.stdout) if e["type"] == "error"]
     assert result.returncode == 1
-    assert errors == ["wga-dev-LlmStack-ABC: LlmMethod (AWS::ApiGateway::Method) — "
-                      "Timeout should be between 50 ms and 29000 ms"]
-    assert events(result.stdout)[-1]["summary"] == "deploy.sh가 종료 코드 255로 실패했습니다"
+    # 어느 리소스가 실패했는지와, CloudFormation이 남긴 원인 원문을 나눠 보낸다
+    assert errors == [("wga-dev-LlmStack-ABC: LlmMethod (AWS::ApiGateway::Method)",
+                       "Timeout should be between 50 ms and 29000 ms")]
+    assert events(result.stdout)[-1]["summary"] == "배포에 실패했습니다 (deploy.sh 종료 코드 255)"
 
 
 def test_failure_without_stack_events_shows_last_error_line(fake, repo):
@@ -217,7 +219,7 @@ def test_failure_without_stack_events_shows_last_error_line(fake, repo):
     fake.add("aws", "describe-stack-events", stack_events())
     result = deploy_cli(fake, repo, input=approve_deploy())
     error = next(e for e in events(result.stdout) if e["type"] == "error")
-    assert error["message"] == "deploy.sh가 실패했습니다: npm ERR! build failed"
+    assert error["message"] == "deploy.sh가 실패했습니다" and error["raw"] == "npm ERR! build failed"
 
 
 # ---------------------------------------------------------------- 취소: 자식 프로세스까지 정리되는가
