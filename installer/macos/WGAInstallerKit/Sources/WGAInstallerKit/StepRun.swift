@@ -109,6 +109,26 @@ public struct StepRun: Equatable, Sendable {
         }
     }
 
+    /// 진행 표시의 비율 (deploy의 "3/6" → 0.5). 알 수 없으면 nil (막대 대신 돌아가는 표시)
+    public var progressFraction: Double? {
+        guard let phase = progress?.phase else { return nil }
+        let parts = phase.split(separator: "/").compactMap { Double($0) }
+        guard parts.count == 2, parts[1] > 0 else { return nil }
+        return min(max(parts[0] / parts[1], 0), 1)
+    }
+
+    /// 검색어가 들어 있는 로그 줄 (대소문자 구분 없음, 빈 검색어면 전부)
+    public func logs(matching query: String) -> [LogLine] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return logs }
+        return logs.filter { $0.text.localizedCaseInsensitiveContains(trimmed) }
+    }
+
+    /// 복사용 로그 전체 (stderr 줄은 앞에 !를 붙여 구분)
+    public var logText: String {
+        logs.map { ($0.stream == "stderr" ? "! " : "") + $0.text }.joined(separator: "\n")
+    }
+
     /// 질문에 답했다 (같은 질문을 두 번 답하지 않도록 지운다)
     public mutating func answered(_ id: String) {
         if pending?.id == id { pending = nil }

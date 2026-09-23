@@ -10,14 +10,27 @@ struct ContentView: View {
             List(WizardStep.allCases, selection: $model.selected) { step in
                 StepRow(step: step, status: model.status(of: step))
                     .tag(step)
-                    .disabled(!step.isAvailable)
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+            .safeAreaInset(edge: .bottom) { EnvironmentBadge().padding(10) }
         } detail: {
             switch model.selected {
             case .check: CheckView()
             case .aws: AwsConnectView()
-            default: ComingSoonView(step: model.selected)
+            case .setup: SetupView()
+            case .deploy: DeployView()
+            case .verify: VerifyView()
+            case .oidc: OidcView()
+            case .teardown: TeardownView()
+            }
+        }
+        .toolbar {
+            ToolbarItem {
+                // dry-run: 모든 단계에서 상태 확인만 하고 바꾸지 않는다 (전 과정을 안전하게 미리 보기)
+                Toggle(isOn: $model.settings.dryRun) { Label("dry-run", systemImage: "eye") }
+                    .toggleStyle(.button)
+                    .help("켜면 모든 단계가 현재 상태만 확인하고, 실행할 명령을 보여 주기만 합니다")
+                    .disabled(model.isAnyRunning)
             }
         }
         // 질문은 한 번에 하나뿐이다 (CLI가 답을 받을 때까지 다음으로 넘어가지 않음)
@@ -36,11 +49,25 @@ struct StepRow: View {
         HStack {
             StatusIcon(status: status)
             Text(step.title)
-            Spacer()
-            if !step.isAvailable {
-                Text("준비 중").font(.caption).foregroundStyle(.secondary)
-            }
         }
+    }
+}
+
+/// 사이드바 아래: 지금 어느 환경·리전·프로필에 작업하는지 (prod는 눈에 띄게)
+struct EnvironmentBadge: View {
+    @EnvironmentObject var model: WizardModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("환경 \(model.settings.environment)")
+                .bold()
+                .foregroundStyle(model.settings.environment == "prod" ? .red : .primary)
+            Text("리전 \(model.settings.region.isEmpty ? "기본값" : model.settings.region)")
+            Text("프로필 \(model.settings.profile ?? "기본값")")
+            if model.settings.dryRun { Text("dry-run 켜짐").foregroundStyle(.blue) }
+        }
+        .font(.caption)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -57,28 +84,5 @@ struct StatusIcon: View {
         case .failed: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
         case .cancelled: Image(systemName: "stop.circle.fill").foregroundStyle(.orange)
         }
-    }
-}
-
-struct ComingSoonView: View {
-    let step: WizardStep
-
-    var body: some View {
-        ContentUnavailableCompat(title: step.title, message: "이 단계의 화면은 다음 버전에서 추가됩니다. "
-                                 + "지금은 터미널에서 installer/core/wga-installer \(step.command)로 실행할 수 있습니다.")
-    }
-}
-
-/// macOS 13에서도 쓸 수 있는 빈 화면 안내 (ContentUnavailableView는 macOS 14부터)
-struct ContentUnavailableCompat: View {
-    let title: String
-    let message: String
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Text(title).font(.title2).bold()
-            Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 420)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

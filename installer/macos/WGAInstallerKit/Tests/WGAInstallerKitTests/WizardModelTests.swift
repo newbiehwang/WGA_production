@@ -188,8 +188,67 @@ final class WizardModelTests: XCTestCase {
         XCTAssertEqual(model.profiles, ["default", "wga-dev"])
     }
 
-    func testOnlyFirstTwoStepsAreAvailableInM4() {
-        XCTAssertEqual(WizardStep.allCases.filter(\.isAvailable), [.check, .aws])
+    func testStepCommandsAndFlow() {
         XCTAssertEqual(WizardStep.aws.command, "check")
+        XCTAssertEqual(WizardStep.allCases.filter { $0 != .aws }.map(\.command),
+                       ["check", "setup", "deploy", "verify", "oidc", "teardown"])
+        // 다음 단계를 따라가면 사전 점검부터 GitHub 자동 배포까지 이어진다 (정리는 따로 고르는 단계)
+        var path: [WizardStep] = [.check]
+        while let next = path.last?.next { path.append(next) }
+        XCTAssertEqual(path, [.check, .aws, .setup, .deploy, .verify, .oidc])
+        XCTAssertEqual(WizardStep.allCases.filter(\.changesState), [.setup, .deploy, .oidc, .teardown])
+    }
+
+    func testStepSpecificArguments() {
+        let storage = MemoryStorage()
+        var settings = InstallerSettings()
+        settings.alarmEmail = " me@example.com "
+        settings.githubRepository = "octo/WGA_production"
+        settings.dryRun = true
+        storage.value = settings
+        let model = makeModel(storage: storage)
+        let common = ["--env", "dev", "--dry-run"]
+        XCTAssertEqual(model.arguments(for: .check), common)
+        XCTAssertEqual(model.arguments(for: .setup), common)
+        XCTAssertEqual(model.arguments(for: .deploy), common + ["--alarm-email", "me@example.com"])
+        model.options.testRun = true
+        model.options.blockTest = true
+        XCTAssertEqual(model.arguments(for: .oidc), common + ["--alarm-email", "me@example.com",
+                                                             "--github-repo", "octo/WGA_production", "--test-run", "--block-test"])
+        // prod가 아니면 prod 삭제 허용을 넘기지 않는다
+        model.options.allowProd = true
+        XCTAssertEqual(model.arguments(for: .teardown), common + ["--github-repo", "octo/WGA_production"])
+        model.settings.environment = "prod"
+        XCTAssertEqual(model.arguments(for: .teardown),
+                       ["--env", "prod", "--dry-run", "--github-repo", "octo/WGA_production", "--allow-prod"])
+    }
+
+    func testOneTimeOptionsAreClearedAfterRun() {
+        let launcher = FakeLauncher()
+        let model = makeModel(launcher)
+        model.options.blockTest = true
+        model.run(.oidc)
+        XCTAssertEqual(launcher.launches.last?.arguments.contains("--block-test"), true)
+        XCTAssertEqual(model.options, StepOptions())   // 다음 실행에서 모르고 다시 켜지지 않는다
+    }
+
+    func testOnlyOneStepRunsAtATime() {
+        // 배포 중에 정리를 시작하는 식으로 겹쳐 실행하지 않는다
+        let launcher = FakeLauncher()
+        let model = makeModel(launcher)
+        model.run(.deploy)
+        model.run(.teardown)
+        XCTAssertEqual(launcher.launches.map(\.command), ["deploy"])
+        XCTAssertTrue(model.isAnyRunning)
+    }
+
+    func testOldSavedSettingsStillLoad() throws {
+        // M4에서 저장한 설정(새 항목 없음)을 새 버전이 읽어도 저장소 경로 등이 유지된다
+        let old = #"{"environment":"prod","region":"us-west-2","repositoryPath":"/repo","profile":"wga-dev"}"#
+        let settings = try JSONDecoder().decode(InstallerSettings.self, from: Data(old.utf8))
+        XCTAssertEqual(settings.repositoryPath, "/repo")
+        XCTAssertEqual(settings.profile, "wga-dev")
+        XCTAssertFalse(settings.dryRun)
+        XCTAssertEqual(settings.alarmEmail, "")
     }
 }

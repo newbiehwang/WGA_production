@@ -24,10 +24,20 @@ from ..runner import DECLINED, DRY_RUN, Runner, secret_file
 KEEP, OVERWRITE = "keep", "overwrite"
 
 
+STEP = "setup"
+
+
 def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
+    # 다른 명령처럼 명령 전체의 시작·끝을 알린다 (앱은 이것으로 제목과 결과 요약을 보여 준다)
+    emitter.step_started(STEP, f"사전 설정 ({ctx.env}, {ctx.region})")
     quota_ok = _request_quota(ctx, runner, emitter)
     ssm_ok = _store_parameters(ctx, runner, emitter)
-    return 0 if quota_ok and ssm_ok else 1
+    if quota_ok and ssm_ok:
+        emitter.step_finished(STEP, STEP_OK, "사전 설정을 마쳤습니다. 할당량 요청이 승인된 뒤 배포하세요"
+                              if not runner.dry_run else "dry-run: 바꾸지 않았습니다")
+        return 0
+    emitter.step_finished(STEP, STEP_FAILED, "사전 설정을 끝내지 못했습니다. 원인을 해결한 뒤 다시 실행하면 이어서 진행합니다")
+    return 1
 
 
 # ---------------------------------------------------------------- 할당량

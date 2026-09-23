@@ -41,6 +41,10 @@ struct AwsConnectView: View {
                 if model.isRunning(.aws) { ProgressView("연결 확인 중…").controlSize(.small) }
                 CheckList(items: run.checks.filter { Self.shownChecks.contains($0.id) })
                 ErrorList(errors: run.errors)
+                if run.status == .ok, let next = WizardStep.aws.next,
+                   run.checks.contains(where: { $0.id == "aws_credentials" && $0.status == .ok }) {
+                    Button("다음: \(next.title)") { model.selected = next }
+                }
             } else {
                 Spacer()
             }
@@ -80,7 +84,7 @@ struct AwsConnectView: View {
                     saving = false
                 }
             }
-            .disabled(saving || accessKeyId.isEmpty || secretAccessKey.isEmpty)
+            .disabled(saving || accessKeyId.isEmpty || secretAccessKey.isEmpty || model.isAnyRunning)
         }
     }
 
@@ -95,7 +99,7 @@ struct AwsConnectView: View {
                 }
                 .frame(maxWidth: 320)
                 Button("이 프로필로 연결 확인") { model.useProfile(chosenProfile) }
-                    .disabled(chosenProfile.isEmpty || model.isRunning(.aws))
+                    .disabled(chosenProfile.isEmpty || model.isAnyRunning)
             }
         }
     }
