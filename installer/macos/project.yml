@@ -121,6 +121,11 @@ schemes:
       targets:
         WGAInstaller: all
     test:
+      # 셸 환경 변수는 테스트 호스트 앱에 전달되지 않으므로, 빌드 설정을 환경 변수로 넘긴다.
+      # 문서용 그림 만들기:  xcodebuild test ... WGA_SNAPSHOTS=1  (값이 없으면 빈 문자열 → 테스트는 건너뛴다)
+      environmentVariables:
+        WGA_SNAPSHOTS: $(WGA_SNAPSHOTS)
+        WGA_SNAPSHOT_DIR: $(WGA_SNAPSHOT_DIR)
       targets:
         - WGAInstallerTests
         # 로직 테스트는 패키지에 있다 (swift test로도 실행 가능)

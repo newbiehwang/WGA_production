@@ -67,3 +67,40 @@ jobs:
       - run: npm ci
       - name: vue-tsc 타입 검사 + vite 빌드
         run: npm run build
+
+  macos:
+    name: 설치 마법사 macOS 앱 빌드 · 테스트
+    # 공개 저장소라 macOS 러너도 무료다. Xcode는 러너 이미지의 기본 버전을 쓴다.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: XcodeGen 설치
+        # .xcodeproj는 커밋하지 않고 project.yml에서 만든다 (installer/macos/project.yml 주석 참고)
+        run: brew install xcodegen
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      - name: Xcode 프로젝트 생성
+        run: xcodegen generate --quiet
+        working-directory: installer/macos
+      - name: xcodebuild test (앱 번들 구성 + 로직 패키지)
+        # 키체인·실제 AWS를 쓰는 테스트는 환경 변수로 막혀 있어 여기서는 실행되지 않는다
+        # (WGA_KEYCHAIN_TESTS, WGA_CORE_E2E — installer/macos/README.md 참고)
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project WGAInstaller.xcodeproj -scheme WGAInstaller \
+            -destination 'platform=macOS' -configuration Debug \
+            -resultBundlePath "$RUNNER_TEMP/TestResults.xcresult" \
+            CODE_SIGN_IDENTITY=- | tail -60
+        working-directory: installer/macos
+      - name: 배포용 .dmg 만들기 (Release 빌드·서명 검증까지 확인)
+        run: installer/macos/make-dmg.sh "$RUNNER_TEMP/dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WGA-Installer-dmg
+          path: |
+            ${{ runner.temp }}/dmg/*.dmg
+            ${{ runner.temp }}/dmg/*.dmg.sha256
+          retention-days: 7

@@ -120,6 +120,9 @@ WGA_production/
 │   ├─utils
 │   └─views
 ├─images
+├─installer
+│ ├─core                    설치 마법사 CLI (Python, 단계 엔진)
+│ └─macos                   설치 마법사 macOS 앱 (SwiftUI)
 ├─layers
 │ └─common
 ├─mcp
@@ -133,6 +136,28 @@ WGA_production/
 ```
 
 ## 설치 및 배포
+
+배포하는 방법은 두 가지입니다. 결과는 같고, 둘 다 `deploy.sh`로 배포합니다.
+
+| 방법 | 언제 쓰나 |
+|---|---|
+| [설치 마법사 (macOS 앱)](#설치-마법사-macos-앱) | 처음 배포할 때. 필요한 도구·권한·할당량을 먼저 점검하고, 바꾸기 전에 실행할 명령을 보여 주고 확인을 받습니다 |
+| [아래의 명령줄 절차](#사전-요구사항) | 이미 환경을 아는 경우, CI, Linux |
+
+### 설치 마법사 (macOS 앱)
+
+처음 배포하는 사람을 위한 단계별 마법사입니다. 사전 점검 → AWS 연결 → 사전 설정 → 배포 → 검증 → GitHub 자동 배포 → 정리 순서로 진행하며, 각 단계는 **이미 되어 있으면 건너뛰고** 중간에 실패해도 다시 실행하면 이어서 진행합니다.
+
+| ① 사전 점검 | ④ 배포 |
+|---|---|
+| ![사전 점검](installer/macos/docs/screenshots/01-check.png) | ![배포](installer/macos/docs/screenshots/03-deploy.png) |
+
+- **바꾸기 전에 보여 주고 묻습니다:** 상태를 바꾸는 명령은 실행 전에 그대로 화면에 보여 주고 확인을 받습니다. `dry-run`을 켜면 아무것도 바꾸지 않고 전 과정을 미리 볼 수 있습니다.
+- **비밀 값:** AWS Access Key는 이 Mac의 **키체인**에만 저장하고 `~/.aws/credentials`에는 남기지 않습니다(`credential_process`). Anthropic·Slack 값은 SSM Parameter Store에 SecureString으로 올립니다. 비밀 값은 명령 인자로 넘기지 않고(`ps`에 보이지 않도록) 화면·로그에서는 `***`로 가립니다.
+- **정리:** `teardown`으로 한 환경의 리소스를 지울 수 있습니다. 지울 대상을 먼저 보여 주고 환경 이름을 직접 입력해야 진행하며, 다른 환경도 함께 쓰는 리소스(GitHub OIDC 공급자, 템플릿 버킷)는 건드리지 않습니다.
+- **터미널만 쓰고 싶다면** 앱 없이 CLI만 써도 됩니다: `installer/core/wga-installer check --env dev`
+
+자세한 내용: [installer/macos/README.md](installer/macos/README.md) (앱 빌드·`.dmg` 만들기·화면), [installer/core/README.md](installer/core/README.md) (CLI 명령·이벤트 규격)
 
 ### 사전 요구사항
 - AWS CLI 설정 및 적절한 권한
@@ -293,13 +318,14 @@ pytest
 | `test_mcp_tools.py` | MCP 도구(로그 조회, 대시보드 조회)와 세션 저장소 동작 |
 
 ### CI (`.github/workflows/ci.yml`)
-PR과 `main` 푸시마다 세 작업이 병렬로 실행됩니다. AWS 자격 증명은 사용하지 않습니다.
+PR과 `main` 푸시마다 네 작업이 병렬로 실행됩니다. AWS 자격 증명은 사용하지 않습니다.
 
 | 작업 | 내용 |
 |---|---|
 | Python | `ruff`(문법 오류·정의되지 않은 이름), `pytest` |
 | IaC | `cfn-lint`(오류 시 실패), `checkov` 보안 스캔, `deploy.sh` 문법 검사 |
 | 프론트엔드 | `vue-tsc` 타입 검사, `vite build` |
+| 설치 마법사 (macOS) | `xcodegen` + `xcodebuild test`, `make-dmg.sh`로 `.dmg`를 만들어 아티팩트로 올림 |
 
 `checkov`는 도입 시점의 기존 결과를 `cloudformation/.checkov.baseline`에 기준선으로 저장하고, **새로 생기는 보안 문제만** 실패로 처리합니다. 기준선의 항목은 하나씩 해결하면서 기준선을 다시 만듭니다.
 

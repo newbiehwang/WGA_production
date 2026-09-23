@@ -102,6 +102,8 @@ WGA Installer.app/Contents/Resources/core/                installer/core 복사�
 | `WGA_KEYCHAIN_PATH` | (헬퍼) 로그인 키체인 대신 쓸 키체인 파일 (테스트용) |
 | `WGA_KEYCHAIN_TESTS=1` | 실제 키체인 통합 테스트 실행 (임시 키체인을 만들고 지움) |
 | `WGA_CORE_E2E=1` | 저장소의 실제 `installer/core`로 `check --dry-run`을 실행하는 연결 테스트 |
+| `WGA_SNAPSHOTS=1` | 아래 "화면 그림"을 다시 만드는 테스트 실행 (`xcodebuild test`의 빌드 설정으로 넘긴다) |
+| `WGA_SNAPSHOT_DIR` | 화면 그림을 저장할 폴더 (기본: `installer/macos/docs/screenshots`) |
 
 ## 화면
 
@@ -121,3 +123,35 @@ WGA Installer.app/Contents/Resources/core/                installer/core 복사�
 - **한 번만 쓰는 선택:** 시험 배포, 차단 확인, prod 삭제 허용은 실행하고 나면 다시 꺼집니다. 다음 실행에 모르고 적용되지 않게 하기 위해서입니다.
 - **로그:** 검색, 전체 복사(비밀 값은 가려진 상태), 새 줄이 오면 자동으로 아래로 따라갑니다. 최근 5000줄을 보여 줍니다.
 - **설정(⌘,):** 환경·리전·저장소·알람 이메일·GitHub 저장소·dry-run, 그리고 진단 정보(CLI·헬퍼 경로)가 있습니다.
+
+### 화면 그림
+
+| | |
+|---|---|
+| ① 사전 점검 | ② AWS 연결 |
+| ![사전 점검](docs/screenshots/01-check.png) | ![AWS 연결](docs/screenshots/02-aws.png) |
+| ④ 배포 (진행 중) | ⑤ 검증 |
+| ![배포](docs/screenshots/03-deploy.png) | ![검증](docs/screenshots/04-verify.png) |
+| ⑥ GitHub 자동 배포 | ⑦ 정리 |
+| ![GitHub 자동 배포](docs/screenshots/05-oidc.png) | ![정리](docs/screenshots/06-teardown.png) |
+
+그림의 내용은 **설명용 예시 이벤트**입니다. 실제 AWS 계정에 연결하지 않고, 화면에 보이는 계정 번호·주소는 만들어 낸 값입니다.
+그림은 `WGAInstallerTests/ScreenshotTests.swift`가 진짜 화면을 창에 띄워 복사한 것이라, 화면을 고치면 다시 만들어야 합니다.
+
+```bash
+cd installer/macos
+xcodebuild test -project WGAInstaller.xcodeproj -scheme WGAInstaller \
+  -only-testing:WGAInstallerTests/ScreenshotTests WGA_SNAPSHOTS=1
+```
+
+평소에는 건너뛰는 테스트입니다. 화면을 조금만 손봐도 그림이 달라져 CI가 실패하게 만들 이유가 없고, 문서용 그림은 바꾸고 싶을 때만 다시 만들면 되기 때문입니다.
+
+## CI
+
+`.github/workflows/ci.yml`의 **설치 마법사 macOS 앱 빌드 · 테스트** 작업이 PR마다 `macos-latest`에서 실행됩니다.
+
+1. `brew install xcodegen` → `xcodegen generate`
+2. `xcodebuild test` (앱 번들 구성 + 로직 패키지 테스트)
+3. `make-dmg.sh`로 Release 빌드·번들 검사·서명 검증까지 한 뒤 `.dmg`를 만들어 **아티팩트로 올립니다** (7일 보관)
+
+키체인·실제 CLI를 쓰는 테스트(`WGA_KEYCHAIN_TESTS`, `WGA_CORE_E2E`)와 화면 그림 생성(`WGA_SNAPSHOTS`)은 CI에서 실행되지 않습니다. CI는 AWS 자격 증명을 쓰지 않습니다.
