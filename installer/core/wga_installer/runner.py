@@ -7,8 +7,8 @@
   `--dry-run`이면 명령만 보여 주고 실행하지 않는다.
 
 사용자 입력 (`Interaction`)
-- JSON 모드(앱): CLI가 `confirm_required`/`input_required` 이벤트를 stdout으로 보내면,
-  앱이 stdin으로 한 줄짜리 JSON 응답을 돌려준다.
+- JSON 모드: CLI가 `confirm_required`/`input_required` 이벤트를 stdout으로 보내면,
+  호출한 프로그램이 stdin으로 한 줄짜리 JSON 응답을 돌려준다.
       {"type": "confirm_response", "id": "<이벤트 id>", "approved": true}
       {"type": "secret_response",  "id": "<이벤트 id>", "value": "<비밀 값>"}
       {"type": "choice_response",  "id": "<이벤트 id>", "choice": "<선택지 id>"}
@@ -25,7 +25,7 @@
     deploy.sh는 aws·npm·pip 같은 자식 프로세스를 여러 개 띄운다. deploy.sh만 종료하면 자식이 남아
     배포를 계속할 수 있으므로, 스트리밍 명령은 새 프로세스 그룹(start_new_session)으로 실행하고
     신호를 그룹 전체에 보낸다.
-    - 취소(Ctrl+C, 또는 앱이 이 프로세스에 SIGINT/SIGTERM을 보냄): 그룹에 SIGINT를 전달하고
+    - 취소(Ctrl+C, 또는 이 프로세스가 SIGINT/SIGTERM을 받음): 그룹에 SIGINT를 전달하고
       CANCEL_GRACE초 동안 정리되기를 기다린다. 그래도 남아 있거나 한 번 더 취소하면 SIGKILL.
     - 시간 초과: 그룹에 SIGTERM, KILL_GRACE초 뒤에도 남아 있으면 SIGKILL.
     새 그룹으로 떼어 놓으면 터미널의 Ctrl+C가 자식에게 직접 가지 않으므로, 위처럼 이 프로세스가 대신 전달한다.
@@ -155,7 +155,7 @@ class Interaction:
     def _read_response(self, expected_type: str, id_: str, quiet_eof: bool = False) -> dict | None:
         line = self.stdin.readline()
         if not line:
-            # 앱이 stdin을 닫았다 (앱 종료 등). 사람이 답하지 않은 것이므로 거절로 처리한다.
+            # 답을 주던 쪽이 stdin을 닫았다. 사람이 답하지 않은 것이므로 거절로 처리한다.
             # quiet_eof: 선택처럼 기본값으로 계속 진행하는 경우에는 오류로 알리지 않는다
             if not quiet_eof:
                 self.emitter.error("input", f"'{id_}'에 대한 응답을 받지 못해 진행하지 않습니다")
@@ -248,7 +248,7 @@ class Runner:
                 return self._execute_streaming(cmd, env=env, cwd=workdir, timeout=timeout, on_line=on_line)
             proc = subprocess.run(
                 cmd, env=env, cwd=workdir, timeout=timeout,
-                # stdin을 막는 이유: 이 프로세스의 stdin은 앱이 응답을 보내는 통로다.
+                # stdin을 막는 이유: 이 프로세스의 stdin은 질문에 대한 답이 들어오는 통로다.
                 # 자식 명령이 그 줄을 읽어 가면 응답이 사라지고, aws/gh가 대화형 질문으로 멈출 수도 있다.
                 stdin=subprocess.DEVNULL,
                 capture_output=True, text=True, encoding="utf-8", errors="replace",

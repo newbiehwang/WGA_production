@@ -2,13 +2,13 @@
 # WGA 설치 마법사 실행기: 알맞은 Python(3.10 이상)을 골라 `python -m wga_installer`를 실행한다.
 #
 #   installer/core/wga-installer check
-#   installer/core/wga-installer check --json      # macOS 앱도 이 스크립트로 CLI를 실행한다
+#   installer/core/wga-installer check --json      # 다른 프로그램이 읽을 JSON Lines 출력
 #
 # 왜 필요한가
 #   macOS 기본 /usr/bin/python3는 Command Line Tools의 3.9라서 설치 마법사를 실행할 수 없고,
 #   Command Line Tools가 없으면 실행하는 순간 "개발자 도구를 설치하시겠습니까?" 창이 뜬다.
 #   PATH의 python3도 conda·pyenv 등 무엇이든 될 수 있다. 그래서 찾는 순서를 한곳(이 파일)에 정해 두고
-#   터미널 사용자와 앱이 같은 규칙으로 Python을 고르게 한다.
+#   어디서 실행하든 같은 규칙으로 Python을 고르게 한다.
 #
 # 찾는 순서 (3.10 이상인 첫 번째를 쓴다)
 #   1. WGA_PYTHON 환경 변수 — 사용자가 직접 고른 인터프리터. 3.10 미만이면 다른 후보로 넘어가지 않고 오류로 알린다
@@ -27,7 +27,7 @@ script_path=${BASH_SOURCE[0]}
 SCRIPT_DIR="$(cd "${script_path%/*}" && pwd)"
 EXIT_PYTHON_TOO_OLD=3
 
-# 앱은 --json으로 실행하고 stdout의 JSON Lines만 읽으므로, 오류도 같은 형식으로 내보낸다
+# --json으로 실행하면 stdout의 JSON Lines만 읽으므로, 오류도 같은 형식으로 내보낸다
 json_mode=false
 for arg in "$@"; do
   [[ "$arg" == "--json" ]] && json_mode=true

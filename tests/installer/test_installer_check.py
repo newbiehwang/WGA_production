@@ -21,7 +21,7 @@ def test_healthy_mac_passes(fake, repo):
     result = check_json(fake, repo)
     assert result.returncode == 0, result.stdout + result.stderr
 
-    evts = events(result.stdout)   # 모든 줄이 JSON이어야 앱이 읽을 수 있다
+    evts = events(result.stdout)   # 모든 줄이 JSON이어야 읽는 쪽이 파싱할 수 있다
     assert evts[0] == {"type": "step_started", "step": "check", "title": "사전 점검"}
     assert evts[-1]["type"] == "step_finished" and evts[-1]["status"] == "ok"
 
@@ -192,22 +192,22 @@ def test_invalid_region_fails(fake, repo):
     assert result.returncode == 1 and checks_by_id(result.stdout)["region"]["status"] == "fail"
 
 
-def test_non_mac_is_only_a_warning(fake, repo):
+def test_non_mac_is_reported_without_blocking(fake, repo):
     fake.add("uname", "-s", "Linux\n").add("uname", "-m", "x86_64\n")
     healthy_mac(fake)
     result = check_json(fake, repo)
     system = checks_by_id(result.stdout)["system"]
     assert result.returncode == 0
-    assert system["status"] == "warn" and system["detail"] == "Linux (x86_64)"
+    assert system["status"] == "info" and system["detail"] == "Linux (x86_64)"
     assert fake.calls("sw_vers") == []
 
 
-def test_old_macos_is_warned(fake, repo):
+def test_macos_version_is_reported(fake, repo):
     fake.add("sw_vers", "-productVersion", "12.7.4\n")
     fake.add("uname", "-m", "x86_64\n")
     healthy_mac(fake)
     system = checks_by_id(check_json(fake, repo).stdout)["system"]
-    assert system["status"] == "warn" and system["detail"] == "macOS 12.7.4 · Intel (x86_64)"
+    assert system["status"] == "ok" and system["detail"] == "macOS 12.7.4 · Intel (x86_64)"
 
 
 def test_repo_not_found(fake, tmp_path):
@@ -251,7 +251,7 @@ def test_usage_error_exit_code(fake):
 
 
 def test_unexpected_error_becomes_error_event(fake, repo):
-    # sts 응답의 Arn이 문자열이 아닌 경우처럼 예상하지 못한 예외도 JSON 이벤트로 알려야 앱이 멈추지 않는다
+    # sts 응답의 Arn이 문자열이 아닌 경우처럼 예상하지 못한 예외도 JSON 이벤트로 알려야 읽는 쪽이 멈추지 않는다
     fake.add("aws", "sts get-caller-identity", json.dumps({"Account": "1", "Arn": 123}))
     healthy_mac(fake)
     result = check_json(fake, repo)

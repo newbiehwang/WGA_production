@@ -63,13 +63,13 @@ def test_read_only_commands_run_even_in_dry_run(fake):
 
 
 def test_child_process_cannot_read_our_stdin(fake, tmp_path):
-    # stdin은 앱의 응답 통로다. 자식 명령이 읽어 가면 다음 승인 응답이 사라진다
+    # stdin은 질문에 대한 답이 들어오는 통로다. 자식 명령이 읽어 가면 다음 승인 응답이 사라진다
     script = tmp_path / "bin" / "reader"
     script.write_text("#!/bin/bash\n/bin/cat\n")
     script.chmod(0o755)
-    runner, _ = make_runner(fake, stdin="앱이 보낸 응답\n")
+    runner, _ = make_runner(fake, stdin="보낸 응답\n")
     assert runner.run(["reader"]).stdout == ""
-    assert runner.interaction.stdin.readline() == "앱이 보낸 응답\n"
+    assert runner.interaction.stdin.readline() == "보낸 응답\n"
 
 
 # ---- 변경 명령: dry-run과 승인 ----

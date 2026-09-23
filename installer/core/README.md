@@ -1,11 +1,13 @@
 # WGA 설치 마법사 — 단계 엔진 (`wga_installer`)
 
-macOS 설치 마법사 앱이 실행하는 명령줄 도구입니다. 터미널에서 단독으로 써도 됩니다.
+WGA를 배포·검증·정리하는 명령줄 도구입니다. `deploy.sh`를 그대로 쓰되, 배포 전후에 필요한 점검과
+설정(할당량, SSM 비밀 값, GitHub 자동 배포, 정리)을 단계로 묶었습니다. 각 단계는 **이미 되어 있으면
+건너뛰고**, 상태를 바꾸기 전에 실행할 명령을 보여 주고 확인을 받습니다.
 Python 표준 라이브러리만 쓰므로 `pip install`이 필요 없습니다 (Python 3.10 이상).
 
 ```bash
 installer/core/wga-installer check                     # 사전 점검 (터미널용 출력)
-installer/core/wga-installer check --json              # 앱용 JSON Lines 출력
+installer/core/wga-installer check --json              # JSON Lines 출력 (다른 도구에서 읽을 때)
 installer/core/wga-installer check --profile wga-dev   # 기존 AWS CLI 프로필 사용
 installer/core/wga-installer setup                     # 할당량 요청, SSM 비밀 값 등록
 installer/core/wga-installer deploy --alarm-email me@example.com
@@ -30,13 +32,13 @@ installer/core/wga-installer teardown --env dev            # 정리 (되돌릴 �
 - **oidc는 dev·prod만** 설정합니다 (`deploy.yml`에 두 환경의 작업만 있음). Role 변수(`AWS_DEPLOY_ROLE_ARN_<ENV>`)는 등록되는 순간부터 main push가 배포를 일으키므로 가장 마지막에 등록합니다.
 - **OIDC 공급자는 계정에 하나이고 환경들이 함께 씁니다.** 공급자를 가진 스택에는 기존 ARN을 넘기지 않습니다(넘기면 CloudFormation이 공급자를 지움). teardown은 다른 환경이 쓰는 동안 공급자를 가진 OIDC 스택을 남깁니다.
 - **teardown 안전장치:** prod는 `--allow-prod`가 필요합니다. 지울 대상을 먼저 모두 보여 주고, 환경 이름을 직접 입력해야 진행하며, 단계마다 다시 승인받습니다(`--yes` 무시). 다른 환경이 남아 있으면 공유 버킷 `wga-cloudformation-<계정ID>`는 남깁니다.
-- **취소:** `deploy` 도중 Ctrl+C(또는 앱이 SIGINT·SIGTERM을 보냄)를 하면 deploy.sh와 그 자식 프로세스 전체에 중단 신호를 보내고, 최대 60초 기다린 뒤 강제 종료합니다. 스택이 업데이트 도중 상태로 남을 수 있습니다.
+- **취소:** `deploy` 도중 Ctrl+C(또는 SIGTERM)를 받으면 deploy.sh와 그 자식 프로세스 전체에 중단 신호를 보내고, 최대 60초 기다린 뒤 강제 종료합니다. 스택이 업데이트 도중 상태로 남을 수 있습니다.
 
 ## 실행기와 Python 선택
 
 `wga-installer`는 알맞은 Python을 골라 `python -m wga_installer`를 실행하는 bash 스크립트입니다.
-macOS 기본 `/usr/bin/python3`는 3.9라서 설치 마법사를 실행할 수 없고, Command Line Tools가 없으면
-실행하는 순간 설치 창이 뜨기 때문에 찾는 순서를 이 스크립트 한곳에 정해 두었습니다. 앱도 이 스크립트로 CLI를 실행합니다.
+macOS 기본 `/usr/bin/python3`는 3.9라서 이 도구를 실행할 수 없고, Command Line Tools가 없으면
+실행하는 순간 설치 창이 뜨기 때문에 찾는 순서를 이 스크립트 한곳에 정해 두었습니다.
 
 1. `WGA_PYTHON` 환경 변수 (직접 지정. 3.10 미만이면 다른 후보로 넘어가지 않고 오류)
 2. `/opt/homebrew/bin/python3` (Apple Silicon Homebrew)
@@ -50,7 +52,7 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 설치 마법사를 실행할 수 �
 
 | 옵션 | 설명 |
 |---|---|
-| `--json` | 이벤트를 JSON Lines로 출력 (앱용) |
+| `--json` | 이벤트를 JSON Lines로 출력 (다른 프로그램이 읽을 때) |
 | `--dry-run` | 상태 확인만 하고, 변경 명령은 보여 주기만 함 |
 | `--yes` | 변경 작업을 묻지 않고 승인 (되돌릴 수 없는 삭제에는 적용되지 않음) |
 | `--env dev\|test\|prod` | 배포 환경 (기본 `dev`) |
@@ -62,9 +64,9 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 설치 마법사를 실행할 수 �
 | `--test-run`, `--block-test` | (`oidc`) 시험 배포 실행 / main 외 브랜치 배포가 막히는지 확인 |
 | `--allow-prod` | (`teardown`) prod 삭제 허용 |
 
-## 앱과 주고받는 형식
+## 다른 프로그램과 주고받는 형식 (`--json`)
 
-**CLI → 앱 (stdout, 한 줄에 JSON 하나)**
+**CLI → 호출한 프로그램 (stdout, 한 줄에 JSON 하나)**
 
 ```json
 {"type": "step_started", "step": "check", "title": "사전 점검"}
@@ -81,13 +83,13 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 설치 마법사를 실행할 수 �
 ```
 
 - `check.status`: `ok` 통과 / `warn` 진행 가능하지만 확인 필요 / `fail` 진행 불가 / `info` 정보
-- `check.url`: 있으면 앱이 "열기" 버튼을 붙일 주소 (프론트엔드, CloudWatch 대시보드 등)
+- `check.url`: 있으면 사람이 열어 볼 주소 (프론트엔드, CloudWatch 대시보드 등)
 - `progress.phase`: deploy.sh의 번호 단계 `N/6`. 번호 없는 구분 줄(예: Layer 패키징)은 직전 번호를 유지하고 `label`만 바뀝니다
 - `step_finished.status`: `ok` / `skipped`(이미 되어 있음) / `failed`
 - `log.stream`: `stdout`·`stderr`(실행한 명령의 출력) / `info`(설치 마법사의 안내)
 - 사용자가 입력한 비밀 값은 어떤 이벤트에도 그대로 나오지 않고 `***`로 가려집니다.
 
-**앱 → CLI (stdin, 한 줄에 JSON 하나)**
+**호출한 프로그램 → CLI (stdin, 한 줄에 JSON 하나)**
 
 ```json
 {"type": "confirm_response", "id": "put_ssm", "approved": true}
@@ -96,7 +98,7 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 설치 마법사를 실행할 수 �
 {"type": "text_response", "id": "confirm_env", "value": "dev"}
 ```
 
-질문(`confirm_required`·`input_required`·`choice_required`)은 하나씩 순서대로 나오므로 앱도 받은 순서대로 한 줄씩 답합니다. 여러 명령을 한 번에 승인받을 때(teardown의 각 단계 등) `command`에는 명령이 줄바꿈으로 이어져 있습니다.
+질문(`confirm_required`·`input_required`·`choice_required`)은 하나씩 순서대로 나오므로 받은 순서대로 한 줄씩 답합니다. 여러 명령을 한 번에 승인받을 때(teardown의 각 단계 등) `command`에는 명령이 줄바꿈으로 이어져 있습니다.
 
 응답이 없거나(stdin 닫힘) 형식이 틀리거나 `id`가 다르거나 `approved`가 정확히 `true`가 아니면 **거절**로 처리합니다.
 선택(`choice_response`)은 응답이 없거나 선택지에 없는 값이면 `default`를 씁니다. 기본값은 항상 아무것도 바꾸지 않는 쪽입니다.
@@ -118,3 +120,8 @@ AWS·GitHub 없이 가짜 `aws`·`gh` 등으로 테스트합니다 (`tests/insta
 ```bash
 pytest tests/installer
 ```
+
+## 앞으로
+
+- **테스트 모드:** 지금은 가짜 `aws`·`gh` 실행 파일로 테스트합니다. 실제 `aws` CLI를 로컬 목(moto)에 붙여 전 과정을 돌리는 모드를 검토 중입니다.
+- **Terraform:** `deploy` 단계는 `deploy.sh`를 실행하는 일만 `steps/deploy.py`에 모아 두었습니다. 나중에 `terraform plan/apply`로 바꿔도 나머지 단계(점검·비밀 값·검증·GitHub 자동 배포·정리)는 그대로 쓸 수 있습니다.

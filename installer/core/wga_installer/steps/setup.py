@@ -7,7 +7,7 @@
 그래서 여러 번 실행해도 결과가 같고(멱등성), 중간에 실패해도 다시 실행하면 남은 일만 한다.
 
 비밀 값 처리 (계획서 2.2절)
-- 값은 앱이 stdin으로 넘기거나(JSON 모드) 터미널에서 보이지 않게 입력받는다.
+- 값은 터미널에서 보이지 않게 입력받거나(기본), JSON 모드에서는 stdin으로 받는다.
 - 명령 인자로 넘기지 않고, 권한 0600 임시 파일에 담아 `--cli-input-json file://...`로 넘긴 뒤 바로 지운다.
 - 이미 있는 값은 읽지 않는다 (이름·형식만 확인). 덮어쓸지는 사용자가 고르고, 기본은 "유지"다.
 """
@@ -20,7 +20,7 @@ from ..context import Context
 from ..events import STEP_FAILED, STEP_OK, STEP_SKIPPED, Emitter
 from ..runner import DECLINED, DRY_RUN, Runner, secret_file
 
-# 선택지 id (앱은 이 id로 응답한다)
+# 선택지 id (JSON 모드에서는 이 id로 응답한다)
 KEEP, OVERWRITE = "keep", "overwrite"
 
 
@@ -28,7 +28,7 @@ STEP = "setup"
 
 
 def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
-    # 다른 명령처럼 명령 전체의 시작·끝을 알린다 (앱은 이것으로 제목과 결과 요약을 보여 준다)
+    # 다른 명령처럼 명령 전체의 시작·끝을 알린다 (읽는 쪽이 제목과 결과 요약을 보여 줄 수 있게)
     emitter.step_started(STEP, f"사전 설정 ({ctx.env}, {ctx.region})")
     quota_ok = _request_quota(ctx, runner, emitter)
     ssm_ok = _store_parameters(ctx, runner, emitter)

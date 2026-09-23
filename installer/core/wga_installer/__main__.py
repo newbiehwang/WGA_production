@@ -1,7 +1,7 @@
 """명령줄 진입점: `python -m wga_installer <명령> [옵션]`
 
     python -m wga_installer check              # 사전 점검 (터미널용 텍스트 출력)
-    python -m wga_installer check --json       # 앱용 JSON Lines 출력
+    python -m wga_installer check --json       # JSON Lines 출력 (다른 프로그램이 읽을 때)
     python -m wga_installer check --profile wga-dev --region ap-northeast-2
     python -m wga_installer setup              # 할당량 요청, SSM 파라미터 등록
     python -m wga_installer deploy --alarm-email me@example.com
@@ -73,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     # 모든 명령에 공통인 옵션. 명령 뒤에 쓰는 형식(`check --json`)을 쓰기 위해 각 하위 명령에 붙인다
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true",
-                        help="이벤트를 JSON Lines로 출력 (macOS 앱이 사용)")
+                        help="이벤트를 JSON Lines로 출력 (다른 프로그램이 읽을 때)")
     common.add_argument("--dry-run", action="store_true",
                         help="상태 확인만 하고 변경 명령은 보여 주기만 함")
     common.add_argument("--yes", action="store_true",
@@ -94,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _raise_interrupt(signum: int, frame) -> None:
-    # 앱이 종료하면서 SIGTERM을 보내도 Ctrl+C(SIGINT)와 똑같이 처리한다. 기본 동작(즉시 종료)대로 두면
+    # 부모 프로세스가 SIGTERM을 보내도 Ctrl+C(SIGINT)와 똑같이 처리한다. 기본 동작(즉시 종료)대로 두면
     # deploy.sh처럼 따로 실행 중인 자식 프로세스 그룹이 남아 배포를 계속한다 (runner.py 모듈 설명 참고)
     raise KeyboardInterrupt
 
@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None, *, stdin: TextIO | None = None, stdout: 
     except KeyboardInterrupt:
         emitter.error(args.command, "사용자가 중단했습니다")
         return EXIT_INTERRUPTED
-    except Exception as exc:  # noqa: BLE001 - 어떤 예외든 앱이 이해할 수 있는 error 이벤트로 바꾼다
+    except Exception as exc:  # noqa: BLE001 - 어떤 예외든 읽는 쪽이 이해할 수 있는 error 이벤트로 바꾼다
         # 예외 메시지·스택에도 비밀 값이 섞일 수 있으므로 Redactor를 거친다.
         # 스택은 stdout(JSON Lines 통로)을 깨뜨리지 않도록 stderr로 보낸다.
         emitter.error(args.command, f"예상하지 못한 오류: {type(exc).__name__}: {exc}",

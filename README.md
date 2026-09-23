@@ -121,8 +121,7 @@ WGA_production/
 │   └─views
 ├─images
 ├─installer
-│ ├─core                    설치 마법사 CLI (Python, 단계 엔진)
-│ └─macos                   설치 마법사 macOS 앱 (SwiftUI)
+│ └─core                    배포 도구 CLI (점검·설정·배포·검증·정리)
 ├─layers
 │ └─common
 ├─mcp
@@ -141,23 +140,29 @@ WGA_production/
 
 | 방법 | 언제 쓰나 |
 |---|---|
-| [설치 마법사 (macOS 앱)](#설치-마법사-macos-앱) | 처음 배포할 때. 필요한 도구·권한·할당량을 먼저 점검하고, 바꾸기 전에 실행할 명령을 보여 주고 확인을 받습니다 |
-| [아래의 명령줄 절차](#사전-요구사항) | 이미 환경을 아는 경우, CI, Linux |
+| [배포 도구 `wga-installer`](#배포-도구-wga-installer) | 처음 배포할 때, 그리고 평소 운영에. 배포 전후의 점검·설정까지 함께 합니다 |
+| [아래의 명령줄 절차](#사전-요구사항) | 이미 환경을 아는 경우, 직접 단계를 고를 때 |
 
-### 설치 마법사 (macOS 앱)
+### 배포 도구 `wga-installer`
 
-처음 배포하는 사람을 위한 단계별 마법사입니다. 사전 점검 → AWS 연결 → 사전 설정 → 배포 → 검증 → GitHub 자동 배포 → 정리 순서로 진행하며, 각 단계는 **이미 되어 있으면 건너뛰고** 중간에 실패해도 다시 실행하면 이어서 진행합니다.
+`deploy.sh`만으로는 부족한 부분 — 배포 전 할당량·비밀 값 점검, 배포 후 검증, GitHub 자동 배포 설정, 환경 정리 — 을 단계로 묶은 명령줄 도구입니다. Python 표준 라이브러리만 쓰므로 설치할 것이 없습니다(Python 3.10 이상).
 
-| ① 사전 점검 | ④ 배포 |
-|---|---|
-| ![사전 점검](installer/macos/docs/screenshots/01-check.png) | ![배포](installer/macos/docs/screenshots/03-deploy.png) |
+```bash
+installer/core/wga-installer check --env dev      # 도구·자격 증명·리전 점검 (아무것도 바꾸지 않음)
+installer/core/wga-installer setup --env dev      # 할당량 요청, SSM 비밀 값 등록
+installer/core/wga-installer deploy --env dev     # 사전 확인 후 deploy.sh 실행
+installer/core/wga-installer verify --env dev     # 스택·API 인증·로그·프론트엔드 확인
+installer/core/wga-installer oidc --env dev       # GitHub Actions 자동 배포 설정
+installer/core/wga-installer teardown --env dev   # 환경 삭제 (되돌릴 수 없음)
+```
 
-- **바꾸기 전에 보여 주고 묻습니다:** 상태를 바꾸는 명령은 실행 전에 그대로 화면에 보여 주고 확인을 받습니다. `dry-run`을 켜면 아무것도 바꾸지 않고 전 과정을 미리 볼 수 있습니다.
-- **비밀 값:** AWS Access Key는 이 Mac의 **키체인**에만 저장하고 `~/.aws/credentials`에는 남기지 않습니다(`credential_process`). Anthropic·Slack 값은 SSM Parameter Store에 SecureString으로 올립니다. 비밀 값은 명령 인자로 넘기지 않고(`ps`에 보이지 않도록) 화면·로그에서는 `***`로 가립니다.
-- **정리:** `teardown`으로 한 환경의 리소스를 지울 수 있습니다. 지울 대상을 먼저 보여 주고 환경 이름을 직접 입력해야 진행하며, 다른 환경도 함께 쓰는 리소스(GitHub OIDC 공급자, 템플릿 버킷)는 건드리지 않습니다.
-- **터미널만 쓰고 싶다면** 앱 없이 CLI만 써도 됩니다: `installer/core/wga-installer check --env dev`
+- **각 단계는 이미 되어 있으면 건너뜁니다.** 중간에 실패해도 다시 실행하면 이어서 진행합니다.
+- **바꾸기 전에 보여 주고 묻습니다.** 상태를 바꾸는 명령은 실행 전에 그대로 보여 주고 확인을 받습니다. `--dry-run`을 붙이면 아무것도 바꾸지 않고 무엇을 할지만 보여 줍니다.
+- **할당량이 먼저입니다.** `llm.yaml`이 통합 타임아웃을 120000ms로 고정하므로, 할당량이 오르기 전에 배포하면 스택 생성이 실패합니다. `deploy`는 할당량이 부족하면 시작하지 않습니다.
+- **비밀 값:** 명령 인자로 넘기지 않고(`ps`에 보이지 않도록) 입력받아 SSM에 SecureString으로 올리며, 화면·로그에서는 `***`로 가립니다.
+- **정리:** 지울 대상을 먼저 보여 주고 환경 이름을 직접 입력해야 진행합니다. 다른 환경과 함께 쓰는 리소스(GitHub OIDC 공급자, 템플릿 버킷)는 남깁니다.
 
-자세한 내용: [installer/macos/README.md](installer/macos/README.md) (앱 빌드·`.dmg` 만들기·화면), [installer/core/README.md](installer/core/README.md) (CLI 명령·이벤트 규격)
+명령별 동작과 이벤트 형식: [installer/core/README.md](installer/core/README.md)
 
 ### 사전 요구사항
 - AWS CLI 설정 및 적절한 권한
@@ -318,14 +323,13 @@ pytest
 | `test_mcp_tools.py` | MCP 도구(로그 조회, 대시보드 조회)와 세션 저장소 동작 |
 
 ### CI (`.github/workflows/ci.yml`)
-PR과 `main` 푸시마다 네 작업이 병렬로 실행됩니다. AWS 자격 증명은 사용하지 않습니다.
+PR과 `main` 푸시마다 세 작업이 병렬로 실행됩니다. AWS 자격 증명은 사용하지 않습니다.
 
 | 작업 | 내용 |
 |---|---|
 | Python | `ruff`(문법 오류·정의되지 않은 이름), `pytest` |
 | IaC | `cfn-lint`(오류 시 실패), `checkov` 보안 스캔, `deploy.sh` 문법 검사 |
 | 프론트엔드 | `vue-tsc` 타입 검사, `vite build` |
-| 설치 마법사 (macOS) | `xcodegen` + `xcodebuild test`, `make-dmg.sh`로 `.dmg`를 만들어 아티팩트로 올림 |
 
 `checkov`는 도입 시점의 기존 결과를 `cloudformation/.checkov.baseline`에 기준선으로 저장하고, **새로 생기는 보안 문제만** 실패로 처리합니다. 기준선의 항목은 하나씩 해결하면서 기준선을 다시 만듭니다.
 

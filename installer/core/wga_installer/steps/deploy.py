@@ -8,7 +8,7 @@
 2. 승인 후 `AWS_REGION=<리전> [ALARM_EMAIL=<이메일>] ./deploy.sh <env>`를 저장소 루트에서 실행.
    출력은 한 줄씩 log 이벤트로 내보내고, 구분 줄은 progress 이벤트로 바꾼다 (ProgressParser).
 3. 실패하면 CloudFormation 스택 이벤트에서 이번 배포 중 실패한 리소스와 이유를 모아 error 이벤트로 보여 준다.
-4. 취소(Ctrl+C, 앱의 취소 버튼)하면 Runner가 deploy.sh와 그 자식 프로세스 전체에 중단 신호를 보낸다.
+4. 취소(Ctrl+C)하면 Runner가 deploy.sh와 그 자식 프로세스 전체에 중단 신호를 보낸다.
    스택 업데이트 도중이면 스택이 중간 상태로 남을 수 있음을 안내한다.
 
 나중에 Terraform으로 바꿀 때는 deploy_command()만 `terraform apply`로 바꾸면 되도록 실행 방식을 분리해 두었다

@@ -259,7 +259,7 @@ def test_cancel_stops_deploy_and_its_children(fake, repo, sig):
     assert alive(child)
 
     started = time.time()
-    proc.send_signal(sig)   # 앱의 취소 버튼(SIGINT) 또는 앱 종료(SIGTERM)
+    proc.send_signal(sig)   # Ctrl+C(SIGINT) 또는 종료 요청(SIGTERM)
     rest, _ = proc.communicate(timeout=30)
     assert time.time() - started < 20   # 강제 종료(60초)까지 가지 않고 정리된다
     evts = events("".join(lines) + rest)
