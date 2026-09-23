@@ -2,8 +2,8 @@
 import io
 import json
 
-from wga_installer.events import (STATUS_COLUMN, STEP_FAILED, STEP_OK, STEP_SKIPPED, JsonEmitter, Redactor,
-                                  TextEmitter, display_width)
+from wga_installer.events import (STEP_FAILED, STEP_OK, STEP_SKIPPED, JsonEmitter, Redactor, TextEmitter,
+                                  display_width)
 
 
 def test_json_emitter_writes_one_object_per_line():
@@ -75,7 +75,7 @@ def test_display_width_counts_korean_as_two_columns():
     assert display_width("abc") == 3
 
 
-def test_substep_is_one_line_with_status_at_a_fixed_column():
+def test_substep_is_one_line_with_status_on_the_left():
     emitter, out = text_emitter()
     emitter.step_started("setup", "사전 설정 (dev, ap-southeast-2)")
     emitter.step_started("quota", "API Gateway 통합 타임아웃 할당량")
@@ -83,13 +83,11 @@ def test_substep_is_one_line_with_status_at_a_fixed_column():
     emitter.step_started("ssm", "SSM 파라미터")
     emitter.step_finished("ssm", STEP_OK, "")
     emitter.step_finished("setup", STEP_OK, "사전 설정 완료")
-    lines = out.getvalue().splitlines()
-    assert lines == ["", "사전 설정 (dev, ap-southeast-2)",
-                     lines[2], lines[3], "✓ 사전 설정 완료"]
-    # 한글 폭을 두 칸으로 세어 [완료]가 같은 칸에서 시작한다
-    for line in lines[2:4]:
-        assert line.endswith("[완료]")
-        assert display_width(line[:-len("[완료]")]) == STATUS_COLUMN
+    # 점검 항목([ OK ] …)처럼 결과 표시가 왼쪽에 온다
+    assert out.getvalue().splitlines() == ["", "사전 설정 (dev, ap-southeast-2)",
+                                           "  [완료] API Gateway 통합 타임아웃 할당량",
+                                           "  [완료] SSM 파라미터",
+                                           "✓ 사전 설정 완료"]
 
 
 def test_failed_substep_shows_error_then_source_under_it():
@@ -99,11 +97,11 @@ def test_failed_substep_shows_error_then_source_under_it():
     emitter.error("quota", "할당량을 조회하지 못했습니다", raw="An error occurred (AccessDenied) ...",
                   hint="콘솔에서 확인하세요")
     emitter.step_finished("quota", STEP_FAILED, "")
-    lines = out.getvalue().splitlines()
-    assert lines[2].startswith("  할당량 ") and lines[2].endswith("[오류]")
-    assert lines[3:] == ["    할당량을 조회하지 못했습니다",
-                         "    An error occurred (AccessDenied) ...",
-                         "    → 콘솔에서 확인하세요"]
+    # [오류] 아랫줄에 무엇이 실패했는지, 그 아랫줄에 오류 원문 (제목 글자에 맞춰 들여 쓴다)
+    assert out.getvalue().splitlines()[2:] == ["  [오류] 할당량",
+                                               "         할당량을 조회하지 못했습니다",
+                                               "         An error occurred (AccessDenied) ...",
+                                               "         → 콘솔에서 확인하세요"]
 
 
 def test_error_outside_a_substep_is_tagged():
@@ -123,10 +121,10 @@ def test_substep_with_output_prints_title_first():
     emitter.step_started("quota", "할당량")
     emitter.log("현재 29000ms → 120000ms 필요", stream="info")
     emitter.step_finished("quota", STEP_OK, "요청했습니다 (PENDING)")
-    lines = out.getvalue().splitlines()
-    assert lines[2:4] == ["  할당량", "    현재 29000ms → 120000ms 필요"]
-    assert lines[4].startswith("  할당량 ") and lines[4].endswith("[완료]")
-    assert lines[5] == "    요청했습니다 (PENDING)"
+    assert out.getvalue().splitlines()[2:] == ["  할당량",
+                                               "    현재 29000ms → 120000ms 필요",
+                                               "  [완료] 할당량",
+                                               "         요청했습니다 (PENDING)"]
 
 
 def test_dry_run_is_announced_once_and_planned_steps_say_planned():
@@ -141,8 +139,8 @@ def test_dry_run_is_announced_once_and_planned_steps_say_planned():
     assert lines[1] == "사전 설정 · dry-run (아무것도 바꾸지 않음)"
     assert lines[3:5] == ["    할 일: 할당량을 올려 달라고 요청합니다",
                           "      $ aws service-quotas request-service-quota-increase"]
-    assert lines[5].endswith("[예정]")        # 바꾸지 않았으므로 "완료"가 아니다
-    assert lines[6].endswith("[완료]")        # 이미 되어 있어 할 일이 없었던 단계
+    assert lines[5] == "  [예정] 할당량"          # 바꾸지 않았으므로 "완료"가 아니다
+    assert lines[6] == "  [완료] SSM 파라미터"    # 이미 되어 있어 할 일이 없었던 단계
     assert "dry-run" not in "\n".join(lines[2:])   # 줄마다 되풀이하지 않는다
 
 
@@ -151,5 +149,5 @@ def test_skipped_substep_gives_the_reason():
     emitter.step_started("setup", "사전 설정")
     emitter.step_started("quota", "할당량")
     emitter.step_finished("quota", STEP_SKIPPED, "할당량이 오르기 전에는 배포가 실패합니다")
-    lines = out.getvalue().splitlines()
-    assert lines[2].endswith("[건너뜀]") and lines[3] == "    할당량이 오르기 전에는 배포가 실패합니다"
+    assert out.getvalue().splitlines()[2:] == ["  [건너뜀] 할당량",
+                                               "           할당량이 오르기 전에는 배포가 실패합니다"]

@@ -153,11 +153,11 @@ class JsonEmitter(Emitter):
 _CHECK_MARKS = {CHECK_OK: "[ OK ]", CHECK_WARN: "[주의]", CHECK_FAIL: "[오류]", CHECK_INFO: "[정보]"}
 _STEP_TAGS = {STEP_OK: "[완료]", STEP_SKIPPED: "[건너뜀]", STEP_FAILED: "[오류]"}
 _COMMAND_MARKS = {STEP_OK: "✓", STEP_SKIPPED: "·", STEP_FAILED: "✗"}
-STATUS_COLUMN = 56   # 하위 단계 결과([완료] 등)를 놓을 화면 칸 (한글은 두 칸)
 
 
 def display_width(text: str) -> int:
-    """터미널에서 차지하는 칸 수. 한글·한자 같은 넓은 글자는 두 칸이라 글자 수로 맞추면 줄이 어긋난다."""
+    """터미널에서 차지하는 칸 수. 한글·한자 같은 넓은 글자는 두 칸이라 글자 수로 맞추면 줄이 어긋난다
+    (결과 표시 아래 줄을 제목 글자에 맞춰 들여 쓸 때 쓴다)."""
     return sum(2 if unicodedata.east_asian_width(char) in ("W", "F") else 1 for char in text)
 
 
@@ -177,14 +177,14 @@ class TextEmitter(Emitter):
     """터미널용: 설치 도구에서 흔한 모양으로 쓴다.
 
         사전 설정 (dev, ap-southeast-2)
-          API Gateway 통합 타임아웃 할당량                    [완료]
-          SSM 파라미터                                        [오류]
-            /wga/dev/ANTHROPIC_API_KEY를 저장하지 못했습니다
-            An error occurred (AccessDeniedException) when calling the PutParameter operation: ...
+          [완료] API Gateway 통합 타임아웃 할당량
+          [오류] SSM 파라미터
+                 /wga/dev/ANTHROPIC_API_KEY를 저장하지 못했습니다
+                 An error occurred (AccessDeniedException) when calling the PutParameter operation: ...
         ✗ 사전 설정을 끝내지 못했습니다
 
-    - 하위 단계는 한 줄로 끝낸다: 제목과 결과를 끝날 때 한꺼번에 쓴다. 도중에 질문·로그가 나오면
-      제목을 먼저 쓰고, 끝날 때 결과 줄을 다시 쓴다 (질문과 답이 제목 아래에 오도록).
+    - 하위 단계는 한 줄로 끝낸다: 결과 표시([완료] 등)를 점검 항목처럼 왼쪽에 붙여 끝날 때 한꺼번에 쓴다.
+      도중에 질문·로그가 나오면 제목을 먼저 쓰고, 끝날 때 결과 줄을 다시 쓴다 (질문과 답이 제목 아래에 오도록).
     - 성공하면 [완료]만 쓴다. 할 말(요약)이 있을 때만 다음 줄에 쓴다.
       dry-run에서 바꿀 일이 있었던 단계는 [예정]이다 (바꾸지 않았는데 "완료"라고 하면 헷갈린다).
     - 오류는 [오류] 다음 줄에 무엇이 실패했는지, 그 다음 줄에 명령이 낸 오류 원문을 쓴다.
@@ -229,11 +229,9 @@ class TextEmitter(Emitter):
             lines.append(f"{under}→ {event['hint']}")
         self._out(*lines)
 
-    def _result_line(self, step: _Step, status: str) -> str:
-        left = "  " * step.depth + step.title
-        gap = max(STATUS_COLUMN - display_width(left), 2)
-        tag = "[예정]" if status == STEP_OK and step.planned else _STEP_TAGS.get(status, status)
-        return left + " " * gap + tag
+    @staticmethod
+    def _tag(step: _Step, status: str) -> str:
+        return "[예정]" if status == STEP_OK and step.planned else _STEP_TAGS.get(status, status)
 
     def _write(self, event: dict) -> None:
         kind = event["type"]
@@ -295,8 +293,10 @@ class TextEmitter(Emitter):
         if step.depth == 0:
             self._out(f"{_COMMAND_MARKS.get(status, '·')} {summary}")
             return
-        self._out(self._result_line(step, status))
-        pad = "  " * (step.depth + 1)
+        tag = self._tag(step, status)
+        self._out(f"{'  ' * step.depth}{tag} {step.title}")
+        # 아랫줄(오류·이유)은 제목 글자에 맞춰 들여 쓴다
+        pad = "  " * step.depth + " " * (display_width(tag) + 1)
         if step.errors:
             for error in step.errors:
                 self._error_lines(error, pad, tag=False)

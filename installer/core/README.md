@@ -53,14 +53,14 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 이 도구를 실행할 수 없고,
 
 ```
 사전 설정 (dev, ap-southeast-2)
-  API Gateway 통합 타임아웃 할당량                      [완료]
-  SSM 파라미터                                          [오류]
-    /wga/dev/ANTHROPIC_API_KEY을(를) 저장하지 못했습니다
-    An error occurred (AccessDeniedException) when calling the PutParameter operation: ...
+  [완료] API Gateway 통합 타임아웃 할당량
+  [오류] SSM 파라미터
+         /wga/dev/ANTHROPIC_API_KEY을(를) 저장하지 못했습니다
+         An error occurred (AccessDeniedException) when calling the PutParameter operation: ...
 ✗ 사전 설정을 끝내지 못했습니다. 원인을 해결하고 다시 실행하면 이어서 진행합니다
 ```
 
-- 하위 단계는 한 줄로 끝나고, 결과가 오른쪽에 붙습니다: `[완료]` · `[예정]`(dry-run에서 바꿀 일) · `[건너뜀]` · `[오류]`
+- 하위 단계는 한 줄로 끝나고, 결과가 점검 항목처럼 왼쪽에 붙습니다: `[완료]` · `[예정]`(dry-run에서 바꿀 일) · `[건너뜀]` · `[오류]`
 - 이미 되어 있는 단계도 `[완료]`입니다. 할 말이 있을 때만 아랫줄에 씁니다
 - 오류는 `[오류]` 아랫줄에 무엇이 실패했는지, 그 아랫줄에 **명령이 낸 오류 원문**, 그 아래 해결 안내(`→`)를 씁니다
 - 도중에 질문이나 로그가 나오는 단계는 제목을 먼저 쓰고, 끝날 때 결과 줄을 다시 씁니다
