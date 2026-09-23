@@ -149,6 +149,14 @@ def _store_parameters(ctx: Context, runner: Runner, emitter: Emitter) -> bool:
     return True
 
 
+def mask_secret(value: str) -> str:
+    """비밀 값을 확인용으로 줄여 보여 준다: 앞 7글자(sk-ant- 같은 종류 표시)와 끝 4글자, 길이.
+    짧은 값은 일부만 보여도 추측하기 쉬우므로 길이만 보여 준다."""
+    if len(value) < 20:
+        return f"({len(value)}자)"
+    return f"{value[:7]}…{value[-4:]} ({len(value)}자)"
+
+
 def _put_parameter(ctx: Context, runner: Runner, emitter: Emitter, param: SecretParam, name: str,
                    *, overwrite: bool) -> str:
     """파라미터 하나를 저장한다. 결과: stored | failed | planned(dry-run) | declined."""
@@ -161,10 +169,14 @@ def _put_parameter(ctx: Context, runner: Runner, emitter: Emitter, param: Secret
                       id_=f"put_{param.key}", reason=reason)
         return "planned"
 
-    value = runner.interaction.secret(f"secret_{param.key}", param.title)
+    prompt = param.title + (" (입력 내용이 화면에 보입니다)" if param.echo else "")
+    value = runner.interaction.secret(f"secret_{param.key}", prompt, echo=param.echo)
     # 복사해 붙여 넣을 때 딸려 온 공백·줄바꿈을 지운다 (그대로 저장하면 API 호출이 인증 오류로 실패한다)
     value = (value or "").strip()
     runner.emitter.redactor.add(value)
+    if value:
+        # 무엇이 들어갔는지 알 수 있게 앞뒤 몇 글자와 길이만 보여 준다 (보이지 않게 입력한 값도 확인할 수 있도록)
+        emitter.log(f"{param.title} 입력됨: {mask_secret(value)}", stream="info")
     if not value:
         if param.required:
             emitter.error(step, f"{param.title}이(가) 비어 있어 저장하지 않았습니다",
