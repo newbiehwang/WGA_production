@@ -18,6 +18,30 @@
         </div>
 
         <div class="message-content-wrapper">
+            <!-- 답변을 만들며 부른 도구: 왼쪽 세로줄 목록. 실패는 색이 아니라 모양(— 와 굵기)으로 구분한다 -->
+            <ol
+                v-if="message.sender === 'assistant' && steps.length"
+                class="tool-trace"
+                aria-label="사용한 도구"
+            >
+                <li
+                    v-for="(step, index) in steps"
+                    :key="index"
+                    class="tool-step"
+                    :class="{ failed: step.failed }"
+                    :title="step.name"
+                >
+                    <span class="tool-step-title"
+                        >{{ step.failed ? '—' : '✓' }} {{ step.label
+                        }}<template v-if="step.failed"> — 실패</template></span
+                    >
+                    <span v-if="step.detail" class="tool-step-detail">{{ step.detail }}</span>
+                    <span v-if="step.error" class="tool-step-detail tool-step-error">{{
+                        step.error
+                    }}</span>
+                </li>
+            </ol>
+
             <div v-if="message.isTyping" class="typing-indicator">
                 <span class="dot"></span>
                 <span class="dot"></span>
@@ -93,8 +117,9 @@
 
 <script lang="ts">
     import type { PropType } from 'vue';
-    import { defineComponent, ref } from 'vue';
+    import { computed, defineComponent, ref } from 'vue';
     import { parseMarkdown } from '@/utils/markdown';
+    import { toolSteps } from '@/utils/toolTrace';
     import type { ChatMessageType } from '@/types/chat.ts';
 
     export default defineComponent({
@@ -107,8 +132,9 @@
             },
         },
 
-        setup() {
+        setup(props) {
             const showDetails = ref(false);
+            const steps = computed(() => toolSteps(props.message.inference));
 
             const toggleDetails = () => {
                 showDetails.value = !showDetails.value;
@@ -202,6 +228,7 @@
                 formatInferenceData,
                 showDetails,
                 toggleDetails,
+                steps,
             };
         },
     });
@@ -316,10 +343,52 @@
         border-top-left-radius: 4px;
     }
 
+    /* 답변은 말풍선 없이 본문으로 (말풍선은 내 질문에만) */
     .bot-message .message-content {
-        background-color: #f5f5f5;
+        background: none;
+        border-radius: 0;
+        padding: 6px 0 0; /* 첫 줄을 아바타(36px) 가운데쯤에 맞춘다 */
         color: #333;
-        border-top-left-radius: 4px;
+    }
+
+    /* 도구 호출 목록: 왼쪽 세로줄, 본문보다 작고 옅게 */
+    .tool-trace {
+        list-style: none;
+        margin: 8px 0 12px;
+        padding: 2px 0 2px 12px;
+        border-left: 2px solid #dee2e6;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #6c757d;
+    }
+
+    .tool-step + .tool-step {
+        margin-top: 6px;
+    }
+
+    .tool-step-title {
+        display: block;
+        color: #495057;
+    }
+
+    /* 입력값만 고정폭 글꼴 (고정폭 글꼴에는 한글이 없어 이름까지 쓰면 글자 간격이 벌어진다) */
+    .tool-step-detail {
+        display: block;
+        padding-left: 1.2em; /* "✓ " 다음 글자에 맞춘다 */
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: #868e96;
+        overflow-wrap: anywhere;
+    }
+
+    /* 오류는 문장이라 본문 글꼴로 */
+    .tool-step-error {
+        font-family: inherit;
+        font-size: 12.5px;
+    }
+
+    .tool-step.failed .tool-step-title {
+        font-weight: 600;
     }
 
     .typing-indicator {

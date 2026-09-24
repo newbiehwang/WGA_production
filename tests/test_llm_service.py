@@ -78,3 +78,27 @@ def test_cors_allows_localhost_in_dev(test_config, monkeypatch):
     from common.utils import cors_headers
     monkeypatch.setitem(test_config, "env", "dev")
     assert cors_headers("http://localhost:5173")["Access-Control-Allow-Origin"] == "http://localhost:5173"
+
+
+# --- 도구 호출 기록 (화면의 도구 목록) --------------------------------------------------------------
+
+def test_tool_call_is_one_step_not_two(llm_service):
+    # 클라이언트는 호출 직전과 끝난 뒤에 tool_result를 한 번씩 남긴다. 끝난 쪽만 한 건으로 센다
+    log = [
+        {"type": "tool_result", "tool_name": "list_log_groups", "input": {"prefix": "/aws"}},
+        {"type": "tool_result", "tool_name": "list_log_groups", "input": {"prefix": "/aws"},
+         "output": {"content": [{"type": "text", "text": "..."}]}},
+        {"type": "tool_result", "tool_name": "analyze_log_group", "input": {"log_group_name": "/aws/x"}},
+        {"type": "tool_error", "tool_name": "analyze_log_group", "input": {"log_group_name": "/aws/x"},
+         "error": "도구 호출 오류: AccessDenied"},
+        {"type": "tool_result", "tool_name": "get_dashboard_summary", "input": {"dashboard_name": "d"},
+         "output": {"content": [], "isError": True}},
+        {"type": "model_reasoning", "content": "..."},
+    ]
+    steps = [s for s in (llm_service.tool_step(e) for e in log) if s]
+    assert steps == [
+        {"tool_name": "list_log_groups", "input": {"prefix": "/aws"}, "status": "ok"},
+        {"tool_name": "analyze_log_group", "input": {"log_group_name": "/aws/x"}, "status": "error",
+         "error": "도구 호출 오류: AccessDenied"},
+        {"tool_name": "get_dashboard_summary", "input": {"dashboard_name": "d"}, "status": "error"},
+    ]

@@ -144,6 +144,30 @@ def resolve_model_id(requested=None):
     return default["id"]
 
 
+def tool_step(entry):
+    """
+    디버그 로그 항목 하나를 화면에 보여 줄 도구 호출 한 건으로 바꾼다. 해당하지 않으면 None.
+
+    AnthropicMCPClient는 도구 한 번 호출에 항목을 두 개 남긴다: 호출 직전의 tool_result(output 없음)와
+    끝난 뒤의 tool_result(output 있음) 또는 tool_error. 끝난 쪽만 쓰면 호출 한 번이 한 건이 된다
+    (예전에는 둘 다 넣어서 같은 도구가 두 번씩 보였다).
+
+    Returns:
+        dict | None: {"tool_name", "input", "status": "ok"|"error", "error"?}
+    """
+    entry_type = entry.get("type")
+    if entry_type == "tool_error":
+        return {"tool_name": entry.get("tool_name"), "input": entry.get("input"),
+                "status": "error", "error": entry.get("error")}
+    if entry_type == "tool_result" and "output" in entry:
+        output = entry.get("output")
+        # MCP 도구는 실패를 예외 대신 결과의 isError로 알리기도 한다
+        failed = isinstance(output, dict) and output.get("isError") is True
+        return {"tool_name": entry.get("tool_name"), "input": entry.get("input"),
+                "status": "error" if failed else "ok"}
+    return None
+
+
 def get_session_messages_as_array(session_id: str, user_id: str) -> list:
     """
     DynamoDB에서 세션의 메시지 히스토리를 messages 배열 형식으로 가져옴
@@ -397,11 +421,10 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
                     "output_tokens": entry.get("output_tokens", 0),
                     "timestamp": entry.get("timestamp")
                 })
-            elif entry_type == "tool_result":
-                tools_used.append({
-                    "tool_name": entry.get("tool_name"),
-                    "input": entry.get("input")
-                })
+            elif entry_type in ("tool_result", "tool_error"):
+                step = tool_step(entry)
+                if step:
+                    tools_used.append(step)
             elif entry_type in ["final_response", "final_response_with_history"]:
                 # 최종 응답에서 총 토큰 사용량 추출
                 token_usage = {
