@@ -5,7 +5,7 @@ import type { ModelInfo, ModelsState } from '@/types/models';
 
 // 모델 ID를 여기 고정하지 않는다. 고정한 모델이 퇴역하면 모든 요청이 실패한다.
 // 목록을 받기 전에는 비워 두고(화면에는 '모델 선택'), 받은 뒤 백엔드가 정한 기본 모델
-// (지금 제공되는 Sonnet 중 가장 낮은 버전)을 쓴다. 비어 있는 채로 보내도 백엔드가 기본 모델을 쓴다.
+// (지금 제공되는 최신 Sonnet)을 쓴다. 비어 있는 채로 보내도 백엔드가 기본 모델을 쓴다.
 const NO_MODEL: ModelInfo = { id: '', display_name: '' };
 
 export const useModelsStore = defineStore('models', {

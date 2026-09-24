@@ -162,7 +162,7 @@ def get_models_from_api():
 
 def get_default_model_from_api():
     """
-    LLM 서비스가 정한 기본 모델 (지금 제공되는 Sonnet 중 가장 낮은 버전). 모델 ID를 여기 고정하지 않는다:
+    LLM 서비스가 정한 기본 모델 (지금 제공되는 최신 Sonnet). 모델 ID를 여기 고정하지 않는다:
     고정한 모델이 퇴역하면 /req가 모두 실패한다. 받지 못하면 None (LLM 서비스가 다시 정한다)
     """
     try:
