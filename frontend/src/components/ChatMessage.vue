@@ -8,11 +8,9 @@
             'appear-animation': message.animationState === 'appear',
         }"
     >
-        <div class="message-avatar">
-            <div v-if="message.sender === 'user'" class="avatar user-avatar">
-                <span>{{ getUserInitial() }}</span>
-            </div>
-            <div v-else class="avatar bot-avatar">
+        <!-- 내 메시지는 오른쪽에 글씨만 (아바타·상자 없음). 에이전트 답변에만 아바타를 둔다 -->
+        <div v-if="message.sender !== 'user'" class="message-avatar">
+            <div class="avatar bot-avatar">
                 <img src="@/assets/agent-logo.png" alt="Assistant" />
             </div>
         </div>
@@ -184,11 +182,6 @@
                 }
             };
 
-            const getUserInitial = (): string => {
-                const userName = localStorage.getItem('userName') || 'User';
-                return userName.charAt(0).toUpperCase();
-            };
-
             const formatMessageContent = (content: string): string => {
                 if (!content) return '';
 
@@ -221,7 +214,6 @@
             };
 
             return {
-                getUserInitial,
                 formatMessageContent,
                 formatMessageTime,
                 formatSqlQuery,
@@ -244,6 +236,7 @@
 
     .user-message {
         animation-name: sendMessage;
+        justify-content: flex-end; /* 내 메시지는 오른쪽 */
     }
 
     .bot-message {
@@ -304,9 +297,6 @@
         color: white;
     }
 
-    .user-avatar {
-        background-color: #007bff;
-    }
 
     .bot-avatar {
         background-color: #dddddd;
@@ -337,10 +327,18 @@
         overflow-x: auto;
     }
 
+    /* 내 메시지: 상자 없이 글씨만, 오른쪽에 붙인다. 긴 질문은 화면의 3/4까지만 쓰고 줄을 바꾼다 */
+    .user-message .message-content-wrapper {
+        flex: 0 1 auto;
+        max-width: 75%;
+    }
+
     .user-message .message-content {
-        background-color: #e3f2fd;
-        color: #0d47a1;
-        border-top-left-radius: 4px;
+        background: none;
+        border-radius: 0;
+        padding: 0;
+        color: #333;
+        text-align: right;
     }
 
     /* 답변은 말풍선 없이 본문으로 (말풍선은 내 질문에만) */
@@ -461,6 +459,7 @@
     :deep(.markdown-content ol) {
         padding-left: 1.5rem;
         margin: 0.5rem 0;
+        line-height: inherit; /* base.css의 전역 ol { line-height: 1.0 } 때문에 번호 목록만 좁아지지 않게 */
     }
 
     :deep(.markdown-content li) {
@@ -490,6 +489,33 @@
         padding: 0;
         white-space: pre-wrap;
         word-break: break-word;
+    }
+
+    /* 마크다운 표 (utils/markdown.ts). 폭이 좁으면 표만 가로로 스크롤한다 */
+    :deep(.markdown-table-container) {
+        overflow-x: auto;
+        margin: 8px 0 12px;
+        white-space: normal; /* 본문의 pre-wrap이 칸 사이 공백을 늘리지 않게 */
+    }
+
+    :deep(.markdown-table) {
+        border-collapse: collapse;
+        font-size: 15px;
+        line-height: 1.5;
+    }
+
+    :deep(.markdown-table th),
+    :deep(.markdown-table td) {
+        border: 1px solid #dee2e6;
+        padding: 6px 12px;
+        text-align: left;
+        vertical-align: top;
+    }
+
+    :deep(.markdown-table th) {
+        background-color: #f8f9fa;
+        font-weight: 600;
+        white-space: nowrap;
     }
 
     :deep(.markdown-content strong) {

@@ -1,5 +1,74 @@
 // src/utils/markdown.ts
 
+// ---------------------------------------------------------------- 표 (GFM 형식)
+//   | 사용자 | 요청 수 |
+//   |---|--:|          ← 구분 줄. 콜론으로 정렬 (:-- 왼쪽, :-: 가운데, --: 오른쪽)
+//   | alice | 42 |
+// 입력은 호출하는 쪽에서 HTML 특수 문자를 이미 escape한 글이다 (ChatMessage.formatMessageContent).
+
+type Align = '' | 'left' | 'center' | 'right';
+
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+const TABLE_SEPARATOR = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+const PIPE = '\u0000'; // 셀 안의 \| (글자로서의 |)를 잠시 바꿔 둘 문자
+
+const splitRow = (line: string): string[] => {
+    const body = line.trim().replace(/\\\|/g, PIPE).replace(/^\|/, '').replace(/\|$/, '');
+    return body.split('|').map((cell) => cell.trim().split(PIPE).join('|'));
+};
+
+const alignOf = (cell: string): Align => {
+    const left = cell.startsWith(':');
+    const right = cell.endsWith(':');
+    if (left && right) return 'center';
+    if (right) return 'right';
+    if (left) return 'left';
+    return '';
+};
+
+// 셀 안의 굵게·기울임·링크. 표 밖의 글에 쓰는 규칙과 같다
+const inline = (text: string): string =>
+    text
+        .replace(/&lt;br\s*\/?&gt;/gi, '<br>') // 표 칸 안의 줄바꿈은 <br>로 쓰는 경우가 많다
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+const cellHtml = (tag: 'th' | 'td', text: string, align: Align): string =>
+    `<${tag}${align ? ` style="text-align:${align}"` : ''}>${inline(text)}</${tag}>`;
+
+// 표를 찾아 HTML로 바꾸고 자리표시자(__TABLE_n__)를 남긴다. 줄바꿈이 없는 한 줄 HTML이라
+// 뒤의 문단 나누기(\n\n → </p><p>)에 걸리지 않는다
+function extractTables(text: string, tables: string[]): string {
+    const lines = text.split('\n');
+    const out: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+        if (!(TABLE_ROW.test(lines[i]) && i + 1 < lines.length && TABLE_SEPARATOR.test(lines[i + 1]))) {
+            out.push(lines[i]);
+            continue;
+        }
+        const header = splitRow(lines[i]);
+        const aligns = splitRow(lines[i + 1]).map(alignOf);
+        const rows: string[][] = [];
+        let j = i + 2;
+        for (; j < lines.length && TABLE_ROW.test(lines[j]); j++) {
+            rows.push(splitRow(lines[j]));
+        }
+        // 칸 수는 머리글에 맞춘다 (모자라면 빈 칸, 넘치면 버림)
+        const width = header.length;
+        const fit = (row: string[]) => Array.from({ length: width }, (_, k) => row[k] ?? '');
+        const thead = `<thead><tr>${header.map((c, k) => cellHtml('th', c, aligns[k] ?? '')).join('')}</tr></thead>`;
+        const tbody = rows.length
+            ? `<tbody>${rows.map((r) => `<tr>${fit(r).map((c, k) => cellHtml('td', c, aligns[k] ?? '')).join('')}</tr>`).join('')}</tbody>`
+            : '';
+        tables.push(`<div class="markdown-table-container"><table class="markdown-table">${thead}${tbody}</table></div>`);
+        // 앞뒤를 빈 줄로 띄워 표가 문단(<p>) 안에 들어가지 않게 한다
+        out.push('', `__TABLE_${tables.length - 1}__`, '');
+        i = j - 1;
+    }
+    return out.join('\n');
+}
+
 export function parseMarkdown(markdown: string): string {
     if (!markdown) return '';
 
@@ -16,6 +85,9 @@ export function parseMarkdown(markdown: string): string {
         inlineCodes.push(`<code>${code}</code>`);
         return `__INLINE_CODE_${inlineCodes.length - 1}__`;
     });
+
+    const tables: string[] = [];
+    html = extractTables(html, tables);
 
     html = html.replace(/!\[(.*?)\]\((.*?)\)/g, (match, altText, url) => {
         const cleanUrl = url.trim();
@@ -41,7 +113,11 @@ export function parseMarkdown(markdown: string): string {
     );
 
     html = html.replace(/^\s*[\-\*]\s+(.*?)$/gm, '<li>$1</li>');
-    html = html.replace(/(<li>.*?<\/li>)/gs, '<ul>$1</ul>');
+    // 이어진 항목을 목록 하나로 묶는다 (예전에는 항목마다 <ul>이 따로 생겨 사이가 벌어졌다)
+    html = html.replace(
+        /(?:^<li>.*<\/li>$(?:\n|$))+/gm,
+        (block) => `<ul>${block.replace(/\n/g, '')}</ul>${block.endsWith('\n') ? '\n' : ''}`,
+    );
 
     let listCounter = 0;
     let inOrderedList = false;
@@ -62,7 +138,8 @@ export function parseMarkdown(markdown: string): string {
                 }
             } else if (inOrderedList && line.trim() === '') {
                 inOrderedList = false;
-                return '</ol>';
+                // 목록을 끝낸 빈 줄은 문단 구분이기도 하다. 줄바꿈을 남겨 다음 글이 새 문단이 되게 한다
+                return '</ol>\n';
             } else if (inOrderedList) {
                 return line;
             } else {
@@ -76,6 +153,15 @@ export function parseMarkdown(markdown: string): string {
     }
 
     html = html.replace(/<\/ol>\s*<ol[^>]*>/g, '');
+    // 목록 태그 사이의 줄바꿈을 지운다. 본문은 white-space: pre-wrap이라 태그 사이 줄바꿈이 빈 줄로 보인다
+    html = html.replace(/(<\/li>|<ul>|<ol[^>]*>|<\/ul>)\n+(?=<li>|<\/ol>|<\/ul>|<ul>|<ol)/g, '$1');
+
+    // 표는 문단 밖에 둔다 (<p> 안의 <table>은 올바른 HTML이 아니라 브라우저가 빈 문단을 더 만든다).
+    // 코드 자리표시자보다 먼저 되돌려야 칸 안의 `코드`도 아래에서 함께 되돌아간다
+    tables.forEach((table, index) => {
+        const mark = `__TABLE_${index}__`;
+        html = html.replace(new RegExp(`\\n*${mark}\\n*`), `</p>${table}<p>`);
+    });
 
     codeBlocks.forEach((block, index) => {
         html = html.replace(`__CODE_BLOCK_${index}__`, block);
@@ -88,6 +174,7 @@ export function parseMarkdown(markdown: string): string {
     html = html.replace(/\n\s*\n/g, '</p><p>');
     html = '<p>' + html + '</p>';
     html = html.replace(/<\/p><p><\/p><p>/g, '</p><p>');
+    html = html.replace(/<p>\s*<\/p>/g, ''); // 표 앞뒤에 생긴 빈 문단
 
     return html;
 }
