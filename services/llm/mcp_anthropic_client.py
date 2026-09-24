@@ -17,13 +17,16 @@ class AnthropicMCPClient:
         Args:
             mcp_url: MCP 서버 URL
             api_key: Anthropic API 키
-            model_id: Anthropic 모델 ID (기본값: 'claude-3-7-sonnet-20250219')
+            model_id: Anthropic 모델 ID (필수. 호출하는 쪽이 llm_service.resolve_model_id로 정한다)
             session_id: 기존 세션 ID (선택 사항)
             max_retries: 작업 상태 확인을 위한 최대 재시도 횟수
             max_iterations: 도구 호출을 위한 최대 반복 횟수
         """
         self.mcp_client = MCPClient(mcp_url, None, session_id)
-        self.model_id = model_id or 'claude-3-7-sonnet-20250219'
+        if not model_id:
+            # 기본값을 여기 적어 두면 그 모델이 퇴역하는 날 조용히 실패한다
+            raise ValueError("model_id가 필요합니다")
+        self.model_id = model_id
         self.api_key = api_key
         self.api_url = "https://api.anthropic.com/v1/messages"
         self.api_headers = {

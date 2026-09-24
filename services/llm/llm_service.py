@@ -4,6 +4,7 @@ import requests
 import boto3
 import os
 import re
+import time
 from datetime import datetime, timezone
 from common.config import get_config
 from common.utils import invoke_bedrock_nova, cors_headers, cors_response
@@ -32,12 +33,22 @@ except Exception as e:
     chat_table = None
 
 
+# ---------------------------------------------------------------- 모델 선택
+# 기본 모델은 코드에 모델 ID를 적지 않고, Anthropic이 지금 제공하는 모델 목록에서 고른다.
+# 모델 ID를 고정해 두면 그 모델이 퇴역(retire)하는 날부터 모든 요청이 실패한다
+# (예전 기본값 claude-3-5-sonnet-20241022는 2025-10-28, claude-3-7-sonnet-20250219는 2026-02-19에 퇴역).
+DEFAULT_MODEL_FAMILY = "sonnet"      # 이 계열 중에서
+# 가장 먼저 나온(가장 낮은 버전의) 모델을 고른다. 퇴역한 모델은 목록에서 빠지므로 저절로 다음 모델로 넘어간다
+MODELS_CACHE_SECONDS = 3600          # 모델 목록은 자주 바뀌지 않는다. Lambda 컨테이너마다 한 시간 재사용
+_models_cache = {"at": 0.0, "models": []}
+
+
 def get_anthropic_models():
     """
-    Anthropic API에서 사용 가능한 모델 목록을 조회
+    Anthropic Models API(GET /v1/models)에서 지금 사용할 수 있는 모델 목록을 끝까지 조회한다.
 
     Returns:
-        list: 모델 정보 배열 (display_name과 id만 포함)
+        list: [{"id", "display_name", "created_at"}] (실패하면 빈 목록)
     """
     try:
         CONFIG = get_config()
@@ -53,26 +64,25 @@ def get_anthropic_models():
             "content-type": "application/json"
         }
 
-        response = requests.get(
-            "https://api.anthropic.com/v1/models",
-            headers=headers
-        )
-
-        if response.status_code != 200:
-            print(f"Anthropic Models API 오류: {response.status_code} - {response.text}")
-            return []
-
-        models_data = response.json()
-        models = models_data.get('data', [])
-
-        # display_name과 id만 추출하여 배열로 반환
+        # 목록은 최신 모델부터 나온다. 기본 모델은 가장 오래된 쪽에서 고르므로 마지막 페이지까지 받는다
         model_list = []
-        for model in models:
-            model_info = {
-                "id": model.get("id", ""),
-                "display_name": model.get("display_name", model.get("id", ""))
-            }
-            model_list.append(model_info)
+        params = {"limit": 1000}
+        while True:
+            response = requests.get("https://api.anthropic.com/v1/models", headers=headers, params=params,
+                                    timeout=10)
+            if response.status_code != 200:
+                print(f"Anthropic Models API 오류: {response.status_code} - {response.text}")
+                return []
+            page = response.json()
+            for model in page.get('data', []):
+                model_list.append({
+                    "id": model.get("id", ""),
+                    "display_name": model.get("display_name", model.get("id", "")),
+                    "created_at": model.get("created_at", ""),   # 출시일 (RFC 3339). 기본 모델 선택에 쓴다
+                })
+            if not page.get('has_more') or not page.get('last_id'):
+                break
+            params = {"limit": 1000, "after_id": page['last_id']}
 
         print(f"Anthropic 모델 {len(model_list)}개 조회 완료")
         return model_list
@@ -80,6 +90,57 @@ def get_anthropic_models():
     except Exception as e:
         print(f"Anthropic 모델 조회 중 오류: {str(e)}")
         return []
+
+
+def available_models():
+    """모델 목록 (캐시). 새로 받지 못하면 마지막으로 받은 목록을 계속 쓴다 (일시적인 오류로 채팅이 멈추지 않게)."""
+    now = time.time()
+    if _models_cache["models"] and now - _models_cache["at"] < MODELS_CACHE_SECONDS:
+        return _models_cache["models"]
+    models = get_anthropic_models()
+    if models:
+        _models_cache.update(at=now, models=models)
+    return _models_cache["models"]
+
+
+def pick_default_model(models):
+    """
+    DEFAULT_MODEL_FAMILY(sonnet) 계열 중 가장 먼저 나온 모델을 고른다.
+
+    출시일(created_at)로 비교한다. 모델 ID 형식이 세대마다 달라서(claude-3-5-sonnet-20241022,
+    claude-sonnet-4-5-20250929, claude-sonnet-5 …) ID를 잘라 버전을 비교하면 틀리기 쉽다.
+
+    Returns:
+        dict | None: {"id", "display_name", "created_at"} (해당 계열이 없으면 None)
+    """
+    candidates = [m for m in models if DEFAULT_MODEL_FAMILY in m.get("id", "")]
+    if not candidates:
+        return None
+    # 출시일이 없는 항목은 맨 뒤로 보낸다. 같은 날이면 ID 순으로 정해 결과가 매번 같게 한다
+    return min(candidates, key=lambda m: (m.get("created_at") or "9999", m["id"]))
+
+
+def resolve_model_id(requested=None):
+    """
+    요청한 모델을 실제로 쓸 모델 ID로 바꾼다.
+
+    - 요청이 없으면 기본 모델
+    - 요청한 모델이 지금 목록에 없으면(퇴역 등) 기본 모델. 웹 브라우저(localStorage)와 Slack 사용자 설정
+      (DynamoDB)에 예전 모델 ID가 남아 있어도 채팅이 실패하지 않는다
+    - 목록을 받지 못했으면 요청한 모델을 그대로 쓴다 (판단할 근거가 없다)
+    """
+    models = available_models()
+    ids = {m["id"] for m in models}
+    if requested and (not ids or requested in ids):
+        return requested
+
+    default = pick_default_model(models)
+    if default is None:
+        raise RuntimeError("사용할 모델을 정하지 못했습니다: Anthropic 모델 목록을 가져오지 못했거나 "
+                           f"'{DEFAULT_MODEL_FAMILY}' 계열 모델이 없습니다")
+    if requested:
+        print(f"요청한 모델 {requested}은(는) 지금 제공되지 않아 {default['id']}(으)로 바꿉니다")
+    return default["id"]
 
 
 def get_session_messages_as_array(session_id: str, user_id: str) -> list:
@@ -144,17 +205,19 @@ def get_client(model_id: str = None):
     """
     global client_cache
 
-    # 기본 모델 ID 설정
-    model_id = model_id or 'claude-3-7-sonnet-20250219'
+    # 사용할 클라이언트 유형 결정 (Bedrock 또는 Anthropic)
+    use_anthropic = os.environ.get('USE_ANTHROPIC_API', 'true').lower() == 'true'
+    if use_anthropic:
+        # 요청이 없거나 지금 제공되지 않는 모델이면 기본 모델(Sonnet 중 가장 낮은 버전)로 정한다
+        model_id = resolve_model_id(model_id)
+    # Bedrock은 모델 ID 형식이 달라(anthropic.claude-…) Anthropic 목록으로 고르지 않는다.
+    # 비어 있으면 BedrockMCPClient의 기본값을 쓴다
 
     # 캐시에 해당 모델 ID의 클라이언트가 없으면 생성
     if model_id not in client_cache:
         # 환경 변수에서 구성 가져오기
         CONFIG = get_config()
         mcp_url = os.environ.get('MCP_URL') or CONFIG.get('mcp', {}).get('function_url')
-
-        # 사용할 클라이언트 유형 결정 (Bedrock 또는 Anthropic)
-        use_anthropic = os.environ.get('USE_ANTHROPIC_API', 'true').lower() == 'true'
 
         if use_anthropic:
             # Anthropic API 설정

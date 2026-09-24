@@ -321,6 +321,7 @@ pytest
 | `test_mcp_client.py` | MCP Function URL 호출 시 SigV4 서명 |
 | `test_slack_security.py` | Slack 요청 서명(위조·변조·재전송), Cognito ID 토큰(aud·iss·만료·서명) 검증 |
 | `test_mcp_tools.py` | MCP 도구(로그 조회, 대시보드 조회)와 세션 저장소 동작 |
+| `test_model_selection.py` | 기본 모델 선택(지금 제공되는 Sonnet 중 가장 낮은 버전), 퇴역한 모델 요청의 대체, 모델 목록 페이지 넘김·캐시 |
 
 ### CI (`.github/workflows/ci.yml`)
 PR과 `main` 푸시마다 세 작업이 병렬로 실행됩니다. AWS 자격 증명은 사용하지 않습니다.

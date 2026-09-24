@@ -47,11 +47,13 @@ def set_user_processing_status(user_id, status):
         # 기존 설정 유지하면서 processing 상태만 업데이트
         item = {
             'user_id': user_id,
-            'selected_model': existing_item.get('selected_model', 'claude-3-5-sonnet-20241022'),
             'processing_status': status,
             'processing_timestamp': current_time if status == 'processing' else 0,
             'updated_at': current_time
         }
+        # 사용자가 고른 모델만 유지한다. 고른 적이 없으면 비워 두고 LLM 서비스의 기본 모델을 쓴다
+        if existing_item.get('selected_model'):
+            item['selected_model'] = existing_item['selected_model']
         
         user_settings_table.put_item(Item=item)
         print(f"User {user_id} processing status set to: {status}")
@@ -93,11 +95,12 @@ def clear_user_processing_status(user_id):
         if existing_item:
             item = {
                 'user_id': user_id,
-                'selected_model': existing_item.get('selected_model', 'claude-3-5-sonnet-20241022'),
                 'processing_status': 'idle',
                 'processing_timestamp': 0,
                 'updated_at': int(time.time())
             }
+            if existing_item.get('selected_model'):
+                item['selected_model'] = existing_item['selected_model']
             
             user_settings_table.put_item(Item=item)
             print(f"User {user_id} processing status cleared")
@@ -149,20 +152,30 @@ def get_models_from_api():
             data = res.json()
             if data.get("status") == "ok" and "models" in data:
                 return data["models"]
-        
-        return get_default_models()
-        
+
+        return []
+
     except Exception as e:
         print(f"Error fetching models from API: {e}")
-        return get_default_models()
+        return []
 
-def get_default_models():
+
+def get_default_model_from_api():
     """
-    API 호출 실패 시 사용할 기본 모델 목록
+    LLM 서비스가 정한 기본 모델 (지금 제공되는 Sonnet 중 가장 낮은 버전). 모델 ID를 여기 고정하지 않는다:
+    고정한 모델이 퇴역하면 /req가 모두 실패한다. 받지 못하면 None (LLM 서비스가 다시 정한다)
     """
-    return [
-        {"id": "claude-3-5-sonnet-20241022", "display_name": "Claude Sonnet 3.5 (New)"}
-    ]
+    try:
+        res = requests.get(
+            f"{CONFIG['api']['endpoint']}/health",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=10,
+        )
+        if res.status_code == 200:
+            return res.json().get("default_model")
+    except Exception as e:
+        print(f"Error fetching default model from API: {e}")
+    return None
 
 def convert_to_slack_options(models):
     """
@@ -187,6 +200,16 @@ def handle_models_command(slack_user_id):
     print("get_models_from_api 함수 실행\n")
     models = get_models_from_api()
     print(f"models: {models}\n")
+    if not models:
+        # Slack의 선택 목록은 항목이 하나도 없으면 보낼 수 없다
+        clear_user_processing_status(slack_user_id)
+        return {
+            "statusCode": 200,
+            "body": json.dumps({
+                "text": "❌ 모델 목록을 가져오지 못했습니다. 잠시 뒤 다시 시도해 주세요.",
+                "response_type": "ephemeral"
+            })
+        }
     print("convert_to_slack_options 함수 실행\n")
     available_models = convert_to_slack_options(models)
     print(f"available_models: {available_models}\n")
@@ -390,10 +413,10 @@ def get_user_model_setting(user_id):
         response = user_settings_table.get_item(
             Key={'user_id': user_id}
         )
-        return response.get('Item', {}).get('selected_model', 'claude-3-5-sonnet-20241022')
+        return response.get('Item', {}).get('selected_model') or None   # 고른 적 없으면 None → 기본 모델
     except Exception as e:
         print(f"Error getting user setting: {e}")
-        return 'claude-3-5-sonnet-20241022'
+        return None
 
 def get_model_display_name(model_id):
     """
@@ -486,9 +509,17 @@ def handle_req_command(payload):
 
     model_id = get_user_model_setting(user_id)
     question = text.strip()
-    
+
+    # 고른 모델이 없거나 지금 목록에 없으면(퇴역 등) 기본 모델로 안내한다. 실제 모델은 LLM 서비스가 한 번 더 확인한다
+    models = get_models_from_api()
+    if not model_id or (models and model_id not in {m["id"] for m in models}):
+        default = get_default_model_from_api()
+        model_id = default["id"] if default else None
+        model_name = default["display_name"] if default else "기본 모델"
+    else:
+        model_name = next((m["display_name"] for m in models if m["id"] == model_id), model_id)
+
     print(f"User: {user_id}, Model: {model_id}, Question: {question}")
-    model_name = get_model_display_name(model_id)
     print(f"model_name: {model_name}\n")
 
     client.chat_postMessage(
