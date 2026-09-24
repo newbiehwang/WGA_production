@@ -38,7 +38,8 @@ except Exception as e:
 # 모델 ID를 고정해 두면 그 모델이 퇴역(retire)하는 날부터 모든 요청이 실패한다
 # (예전 기본값 claude-3-5-sonnet-20241022는 2025-10-28, claude-3-7-sonnet-20250219는 2026-02-19에 퇴역).
 DEFAULT_MODEL_FAMILY = "sonnet"      # 이 계열 중에서
-# 가장 먼저 나온(가장 낮은 버전의) 모델을 고른다. 퇴역한 모델은 목록에서 빠지므로 저절로 다음 모델로 넘어간다
+# 가장 최근에 나온(최신) 모델을 고른다. 새 모델이 나오면 저절로 그 모델로 넘어간다
+# (최신 Sonnet이 이전 버전보다 싸다: Sonnet 5 $2/$10, Sonnet 4.x $3/$15 per MTok. 지원 중단 예고와도 거리가 멀다)
 MODELS_CACHE_SECONDS = 3600          # 모델 목록은 자주 바뀌지 않는다. Lambda 컨테이너마다 한 시간 재사용
 _models_cache = {"at": 0.0, "models": []}
 
@@ -64,7 +65,7 @@ def get_anthropic_models():
             "content-type": "application/json"
         }
 
-        # 목록은 최신 모델부터 나온다. 기본 모델은 가장 오래된 쪽에서 고르므로 마지막 페이지까지 받는다
+        # 목록 순서(최신부터)에 기대지 않도록 마지막 페이지까지 받는다. 모델 선택 화면에도 전체 목록이 필요하다
         model_list = []
         params = {"limit": 1000}
         while True:
@@ -105,7 +106,7 @@ def available_models():
 
 def pick_default_model(models):
     """
-    DEFAULT_MODEL_FAMILY(sonnet) 계열 중 가장 먼저 나온 모델을 고른다.
+    DEFAULT_MODEL_FAMILY(sonnet) 계열 중 가장 최근에 나온 모델을 고른다.
 
     출시일(created_at)로 비교한다. 모델 ID 형식이 세대마다 달라서(claude-3-5-sonnet-20241022,
     claude-sonnet-4-5-20250929, claude-sonnet-5 …) ID를 잘라 버전을 비교하면 틀리기 쉽다.
@@ -116,8 +117,8 @@ def pick_default_model(models):
     candidates = [m for m in models if DEFAULT_MODEL_FAMILY in m.get("id", "")]
     if not candidates:
         return None
-    # 출시일이 없는 항목은 맨 뒤로 보낸다. 같은 날이면 ID 순으로 정해 결과가 매번 같게 한다
-    return min(candidates, key=lambda m: (m.get("created_at") or "9999", m["id"]))
+    # 출시일이 없는 항목은 고르지 않도록 가장 이른 값("")으로 둔다. 같은 날이면 ID 순으로 정해 결과가 매번 같게 한다
+    return max(candidates, key=lambda m: (m.get("created_at") or "", m["id"]))
 
 
 def resolve_model_id(requested=None):
@@ -208,7 +209,7 @@ def get_client(model_id: str = None):
     # 사용할 클라이언트 유형 결정 (Bedrock 또는 Anthropic)
     use_anthropic = os.environ.get('USE_ANTHROPIC_API', 'true').lower() == 'true'
     if use_anthropic:
-        # 요청이 없거나 지금 제공되지 않는 모델이면 기본 모델(Sonnet 중 가장 낮은 버전)로 정한다
+        # 요청이 없거나 지금 제공되지 않는 모델이면 기본 모델(최신 Sonnet)로 정한다
         model_id = resolve_model_id(model_id)
     # Bedrock은 모델 ID 형식이 달라(anthropic.claude-…) Anthropic 목록으로 고르지 않는다.
     # 비어 있으면 BedrockMCPClient의 기본값을 쓴다
