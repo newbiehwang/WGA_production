@@ -3,15 +3,17 @@ import { defineStore } from 'pinia';
 import axios from 'axios';
 import type { ModelInfo, ModelsState } from '@/types/models';
 
+// 모델 ID를 여기 고정하지 않는다. 고정한 모델이 퇴역하면 모든 요청이 실패한다.
+// 목록을 받기 전에는 비워 두고(화면에는 '모델 선택'), 받은 뒤 백엔드가 정한 기본 모델
+// (지금 제공되는 Sonnet 중 가장 낮은 버전)을 쓴다. 비어 있는 채로 보내도 백엔드가 기본 모델을 쓴다.
+const NO_MODEL: ModelInfo = { id: '', display_name: '' };
+
 export const useModelsStore = defineStore('models', {
     state: (): ModelsState => ({
         models: [],
         loading: false,
         error: null,
-        selectedModel: {
-            display_name: 'Claude Sonnet 3.5 (New)',
-            id: 'claude-3-5-sonnet-20241022',
-        },
+        selectedModel: { ...NO_MODEL },
     }),
 
     getters: {
@@ -45,17 +47,9 @@ export const useModelsStore = defineStore('models', {
 
                 if (response.data && response.data.models) {
                     this.models = response.data.models;
-
-                    this.selectedModel = {
-                        id: 'claude-3-5-sonnet-20241022',
-                        display_name: 'Claude Sonnet 3.5 (New)',
-                    };
-                } else {
-                    this.selectedModel = {
-                        id: 'claude-3-5-sonnet-20241022',
-                        display_name: 'Claude Sonnet 3.5 (New)',
-                    };
                 }
+                // 저장해 둔 선택은 loadSelectedModelFromStorage가 지금 목록에 있을 때만 되살린다
+                this.selectedModel = response.data?.default_model ?? { ...NO_MODEL };
 
                 return this.models;
             } catch (error: any) {
@@ -89,10 +83,7 @@ export const useModelsStore = defineStore('models', {
             this.models = [];
             this.loading = false;
             this.error = null;
-            this.selectedModel = {
-                display_name: 'Claude Sonnet 3.5 (New)',
-                id: 'claude-3-5-sonnet-20241022',
-            };
+            this.selectedModel = { ...NO_MODEL };
         },
     },
 });
