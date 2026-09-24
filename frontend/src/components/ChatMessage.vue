@@ -8,16 +8,38 @@
             'appear-animation': message.animationState === 'appear',
         }"
     >
-        <div class="message-avatar">
-            <div v-if="message.sender === 'user'" class="avatar user-avatar">
-                <span>{{ getUserInitial() }}</span>
-            </div>
-            <div v-else class="avatar bot-avatar">
+        <!-- 내 메시지는 오른쪽에 글씨만 (아바타·상자 없음). 에이전트 답변에만 아바타를 둔다 -->
+        <div v-if="message.sender !== 'user'" class="message-avatar">
+            <div class="avatar bot-avatar">
                 <img src="@/assets/agent-logo.png" alt="Assistant" />
             </div>
         </div>
 
         <div class="message-content-wrapper">
+            <!-- 답변을 만들며 부른 도구: 왼쪽 세로줄 목록. 실패는 색이 아니라 모양(— 와 굵기)으로 구분한다 -->
+            <ol
+                v-if="message.sender === 'assistant' && steps.length"
+                class="tool-trace"
+                aria-label="사용한 도구"
+            >
+                <li
+                    v-for="(step, index) in steps"
+                    :key="index"
+                    class="tool-step"
+                    :class="{ failed: step.failed }"
+                    :title="step.name"
+                >
+                    <span class="tool-step-title"
+                        >{{ step.failed ? '—' : '✓' }} {{ step.label
+                        }}<template v-if="step.failed"> — 실패</template></span
+                    >
+                    <span v-if="step.detail" class="tool-step-detail">{{ step.detail }}</span>
+                    <span v-if="step.error" class="tool-step-detail tool-step-error">{{
+                        step.error
+                    }}</span>
+                </li>
+            </ol>
+
             <div v-if="message.isTyping" class="typing-indicator">
                 <span class="dot"></span>
                 <span class="dot"></span>
@@ -93,8 +115,9 @@
 
 <script lang="ts">
     import type { PropType } from 'vue';
-    import { defineComponent, ref } from 'vue';
+    import { computed, defineComponent, ref } from 'vue';
     import { parseMarkdown } from '@/utils/markdown';
+    import { toolSteps } from '@/utils/toolTrace';
     import type { ChatMessageType } from '@/types/chat.ts';
 
     export default defineComponent({
@@ -107,8 +130,9 @@
             },
         },
 
-        setup() {
+        setup(props) {
             const showDetails = ref(false);
+            const steps = computed(() => toolSteps(props.message.inference));
 
             const toggleDetails = () => {
                 showDetails.value = !showDetails.value;
@@ -158,11 +182,6 @@
                 }
             };
 
-            const getUserInitial = (): string => {
-                const userName = localStorage.getItem('userName') || 'User';
-                return userName.charAt(0).toUpperCase();
-            };
-
             const formatMessageContent = (content: string): string => {
                 if (!content) return '';
 
@@ -195,13 +214,13 @@
             };
 
             return {
-                getUserInitial,
                 formatMessageContent,
                 formatMessageTime,
                 formatSqlQuery,
                 formatInferenceData,
                 showDetails,
                 toggleDetails,
+                steps,
             };
         },
     });
@@ -217,6 +236,7 @@
 
     .user-message {
         animation-name: sendMessage;
+        justify-content: flex-end; /* 내 메시지는 오른쪽 */
     }
 
     .bot-message {
@@ -277,9 +297,6 @@
         color: white;
     }
 
-    .user-avatar {
-        background-color: #007bff;
-    }
 
     .bot-avatar {
         background-color: #dddddd;
@@ -310,16 +327,66 @@
         overflow-x: auto;
     }
 
-    .user-message .message-content {
-        background-color: #e3f2fd;
-        color: #0d47a1;
-        border-top-left-radius: 4px;
+    /* 내 메시지: 상자 없이 글씨만, 오른쪽에 붙인다. 긴 질문은 화면의 3/4까지만 쓰고 줄을 바꾼다 */
+    .user-message .message-content-wrapper {
+        flex: 0 1 auto;
+        max-width: 75%;
     }
 
-    .bot-message .message-content {
-        background-color: #f5f5f5;
+    .user-message .message-content {
+        background: none;
+        border-radius: 0;
+        padding: 0;
         color: #333;
-        border-top-left-radius: 4px;
+        text-align: right;
+    }
+
+    /* 답변은 말풍선 없이 본문으로 (말풍선은 내 질문에만) */
+    .bot-message .message-content {
+        background: none;
+        border-radius: 0;
+        padding: 6px 0 0; /* 첫 줄을 아바타(36px) 가운데쯤에 맞춘다 */
+        color: #333;
+    }
+
+    /* 도구 호출 목록: 왼쪽 세로줄, 본문보다 작고 옅게 */
+    .tool-trace {
+        list-style: none;
+        margin: 8px 0 12px;
+        padding: 2px 0 2px 12px;
+        border-left: 2px solid #dee2e6;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #6c757d;
+    }
+
+    .tool-step + .tool-step {
+        margin-top: 6px;
+    }
+
+    .tool-step-title {
+        display: block;
+        color: #495057;
+    }
+
+    /* 입력값만 고정폭 글꼴 (고정폭 글꼴에는 한글이 없어 이름까지 쓰면 글자 간격이 벌어진다) */
+    .tool-step-detail {
+        display: block;
+        padding-left: 1.2em; /* "✓ " 다음 글자에 맞춘다 */
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: #868e96;
+        overflow-wrap: anywhere;
+    }
+
+    /* 오류는 문장이라 본문 글꼴로 */
+    .tool-step-error {
+        font-family: inherit;
+        font-size: 12.5px;
+    }
+
+    .tool-step.failed .tool-step-title {
+        font-weight: 600;
     }
 
     .typing-indicator {
@@ -392,6 +459,7 @@
     :deep(.markdown-content ol) {
         padding-left: 1.5rem;
         margin: 0.5rem 0;
+        line-height: inherit; /* base.css의 전역 ol { line-height: 1.0 } 때문에 번호 목록만 좁아지지 않게 */
     }
 
     :deep(.markdown-content li) {
@@ -421,6 +489,33 @@
         padding: 0;
         white-space: pre-wrap;
         word-break: break-word;
+    }
+
+    /* 마크다운 표 (utils/markdown.ts). 폭이 좁으면 표만 가로로 스크롤한다 */
+    :deep(.markdown-table-container) {
+        overflow-x: auto;
+        margin: 8px 0 12px;
+        white-space: normal; /* 본문의 pre-wrap이 칸 사이 공백을 늘리지 않게 */
+    }
+
+    :deep(.markdown-table) {
+        border-collapse: collapse;
+        font-size: 15px;
+        line-height: 1.5;
+    }
+
+    :deep(.markdown-table th),
+    :deep(.markdown-table td) {
+        border: 1px solid #dee2e6;
+        padding: 6px 12px;
+        text-align: left;
+        vertical-align: top;
+    }
+
+    :deep(.markdown-table th) {
+        background-color: #f8f9fa;
+        font-weight: 600;
+        white-space: nowrap;
     }
 
     :deep(.markdown-content strong) {
