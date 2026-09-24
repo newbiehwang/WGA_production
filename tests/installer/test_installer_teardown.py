@@ -1,4 +1,4 @@
-"""teardown: 되돌릴 수 없는 삭제. 보호 장치(prod 거부, 이름 입력, --yes 무시)와 순서, 공유 자원 보호를 확인한다"""
+"""teardown: 되돌릴 수 없는 삭제. 보호 장치(prod 거부, 한 번뿐인 이름 입력 확인, --yes 무시)와 순서, 공유 자원 보호를 확인한다"""
 import json
 
 import pytest
@@ -74,8 +74,9 @@ ALL_GROUPS = ["delete_role_variable", "delete_stacks", "delete_ecr", "delete_buc
               "delete_parameters", "delete_github_environment"]
 
 
-def approve_all(env="dev", groups=ALL_GROUPS):
-    return responses(("text", "confirm_env", env), *(("confirm", group) for group in groups))
+def approve_all(env="dev"):
+    # 확인은 환경 이름 입력 한 번뿐이다 (단계마다 다시 묻지 않는다)
+    return responses(("text", "confirm_env", env))
 
 
 def deletions(fake):
@@ -126,22 +127,25 @@ def test_wrong_environment_name_deletes_nothing(fake):
     assert any(e["type"] == "input_required" and e["secret"] is False for e in evts)
 
 
-def test_yes_flag_does_not_skip_confirmations(fake):
-    # --yes여도 삭제는 단계마다 사람이 승인해야 한다 (응답이 없으면 거절)
+def test_yes_flag_does_not_skip_confirmation(fake):
+    # --yes여도 환경 이름은 사람이 입력해야 한다 (응답이 없으면 아무것도 지우지 않음)
     account(fake)
     github(fake)
-    code, _ = run_step(fake, teardown.run, assume_yes=True, stdin=responses(("text", "confirm_env", "dev")))
+    code, _ = run_step(fake, teardown.run, assume_yes=True)
     assert code == 1 and deletions(fake) == []
 
 
-def test_declining_a_step_stops_there(fake):
+def test_asks_only_once_and_logs_each_step(fake):
+    # 이름을 한 번 입력하면 단계마다 다시 묻지 않고 끝까지 지운다. 무엇을 지우는지는 한 줄씩 알린다
     account(fake)
     github(fake)
-    code, evts = run_step(fake, teardown.run, stdin=responses(
-        ("text", "confirm_env", "dev"), ("confirm", "delete_role_variable"), ("confirm", "delete_stacks", False)))
-    assert code == 1
-    assert deletions(fake) == [f"variable delete AWS_DEPLOY_ROLE_ARN_DEV --repo {REPO}"]
-    assert "CloudFormation 스택 단계에서 중단" in evts[-1]["summary"]
+    code, evts = run_step(fake, teardown.run, stdin=approve_all())
+    assert code == 0
+    questions = [e for e in evts if e["type"] in ("input_required", "confirm_required", "choice_required")]
+    assert [e["id"] for e in questions] == ["confirm_env"]
+    logged = [e["line"] for e in evts if e["type"] == "log"]
+    assert "자동 배포를 끄기 위해 저장소 변수 AWS_DEPLOY_ROLE_ARN_DEV을(를) 지웁니다" in logged
+    assert "GitHub Environment dev을(를) 지웁니다" in logged
 
 
 def test_shared_resources_are_kept_while_other_env_exists(fake):
@@ -168,7 +172,7 @@ def test_mcp_stack_blocked_by_ecr_images_is_retried(fake):
                                 "images"}]}))
     account(fake)
     github(fake)
-    code, evts = run_step(fake, teardown.run, stdin=approve_all(groups=[g for g in ALL_GROUPS if g != "delete_ecr"]))
+    code, evts = run_step(fake, teardown.run, stdin=approve_all())
     done = deletions(fake)
     assert code == 0, [e for e in evts if e["type"] == "error"]
     mcp = [i for i, c in enumerate(done) if "wga-mcp-dev" in c and not c.startswith("logs")]
@@ -227,7 +231,7 @@ def test_github_required_when_oidc_stack_exists(fake):
 def test_github_optional_without_oidc_stack(fake):
     account(fake, stacks=DEV_STACKS)
     github(fake, logged_in=False)
-    code, evts = run_step(fake, teardown.run, stdin=approve_all(groups=ALL_GROUPS[1:-1]))
+    code, evts = run_step(fake, teardown.run, stdin=approve_all())
     assert code == 0
     assert next(e for e in evts if e.get("id") == "target_github")["status"] == "warn"
     assert not any(c.startswith(("variable", "api")) for c in deletions(fake))

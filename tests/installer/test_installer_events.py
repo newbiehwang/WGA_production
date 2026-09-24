@@ -144,6 +144,16 @@ def test_dry_run_is_announced_once_and_planned_steps_say_planned():
     assert "dry-run" not in "\n".join(lines[2:])   # 줄마다 되풀이하지 않는다
 
 
+
+def test_multiple_commands_each_get_their_own_line():
+    # teardown처럼 명령 여러 개를 한 번에 보여 줄 때 둘째 줄부터 들여쓰기와 $가 빠지지 않는다
+    emitter, out = text_emitter(dry_run=True)
+    emitter.step_started("teardown", "WGA 정리")
+    emitter.dry_run("delete_log_groups", "aws logs delete-log-group a\naws logs delete-log-group b", "로그 그룹 2개를 지웁니다")
+    assert out.getvalue().splitlines()[2:] == ["  할 일: 로그 그룹 2개를 지웁니다",
+                                               "    $ aws logs delete-log-group a",
+                                               "    $ aws logs delete-log-group b"]
+
 def test_skipped_substep_gives_the_reason():
     emitter, out = text_emitter()
     emitter.step_started("setup", "사전 설정")

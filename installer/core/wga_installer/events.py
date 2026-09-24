@@ -271,15 +271,20 @@ class TextEmitter(Emitter):
         elif kind == "progress":
             self._out(f"{pad}[{event['phase']}] {event['label']}")
         elif kind == "confirm_required":
-            self._out(f"{pad}변경 작업: {event['reason']}", f"{pad}  $ {event['command']}")
+            self._out(f"{pad}변경 작업: {event['reason']}", *self._command_lines(event["command"], pad))
         elif kind == "dry_run":
             if self._steps:
                 self._steps[-1].planned = True
-            self._out(f"{pad}할 일: {event['reason']}", f"{pad}  $ {event['command']}")
+            self._out(f"{pad}할 일: {event['reason']}", *self._command_lines(event["command"], pad))
         elif kind == "error":
             self._error_lines(event, pad, tag=True)
         else:
             self._out(json.dumps(event, ensure_ascii=False))   # 모르는 종류는 원본 그대로
+
+    @staticmethod
+    def _command_lines(command: str, pad: str) -> list[str]:
+        """명령 여러 개가 줄바꿈으로 이어져 오면(teardown의 버킷 삭제 등) 줄마다 `$`를 붙여 같은 깊이로 쓴다."""
+        return [f"{pad}  $ {line}" for line in command.splitlines()]
 
     def _finish(self, event: dict) -> None:
         # 끝난 단계를 찾는다. 짝이 맞지 않으면(중간 단계가 끝을 알리지 않음) 그 안쪽 것도 함께 닫는다

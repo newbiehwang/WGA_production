@@ -32,7 +32,7 @@ installer/core/wga-installer teardown --env dev            # 정리 (되돌릴 �
 - **이미 있는 SSM 값은 읽지 않습니다.** 이름과 형식만 확인하고(`describe-parameters`), 유지할지 덮어쓸지 묻습니다. 기본은 유지입니다.
 - **oidc는 dev·prod만** 설정합니다 (`deploy.yml`에 두 환경의 작업만 있음). Role 변수(`AWS_DEPLOY_ROLE_ARN_<ENV>`)는 등록되는 순간부터 main push가 배포를 일으키므로 가장 마지막에 등록합니다.
 - **OIDC 공급자는 계정에 하나이고 환경들이 함께 씁니다.** 공급자를 가진 스택에는 기존 ARN을 넘기지 않습니다(넘기면 CloudFormation이 공급자를 지움). teardown은 다른 환경이 쓰는 동안 공급자를 가진 OIDC 스택을 남깁니다.
-- **teardown 안전장치:** prod는 `--allow-prod`가 필요합니다. 지울 대상을 먼저 모두 보여 주고, 환경 이름을 직접 입력해야 진행하며, 단계마다 다시 승인받습니다(`--yes` 무시). 다른 환경이 남아 있으면 공유 버킷 `wga-cloudformation-<계정ID>`는 남깁니다.
+- **teardown 안전장치:** prod는 `--allow-prod`가 필요합니다. 지울 대상을 먼저 모두 보여 주고, 환경 이름을 직접 입력하는 확인을 한 번만 받습니다(`--yes`로 건너뛸 수 없음). 확인한 뒤에는 단계마다 묻지 않고 끝까지 지우며, 무엇을 지우는지 한 줄씩 출력합니다. 실행할 명령 전체를 미리 보려면 `--dry-run`을 쓰세요. 다른 환경이 남아 있으면 공유 버킷 `wga-cloudformation-<계정ID>`는 남깁니다.
 - **취소:** `deploy` 도중 Ctrl+C(또는 SIGTERM)를 받으면 deploy.sh와 그 자식 프로세스 전체에 중단 신호를 보내고, 최대 60초 기다린 뒤 강제 종료합니다. 스택이 업데이트 도중 상태로 남을 수 있습니다.
 
 ## 실행기와 Python 선택
@@ -119,7 +119,7 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 이 도구를 실행할 수 없고,
 {"type": "text_response", "id": "confirm_env", "value": "dev"}
 ```
 
-질문(`confirm_required`·`input_required`·`choice_required`)은 하나씩 순서대로 나오므로 받은 순서대로 한 줄씩 답합니다. 여러 명령을 한 번에 승인받을 때(teardown의 각 단계 등) `command`에는 명령이 줄바꿈으로 이어져 있습니다.
+질문(`confirm_required`·`input_required`·`choice_required`)은 하나씩 순서대로 나오므로 받은 순서대로 한 줄씩 답합니다. 여러 명령을 한 번에 승인받거나 보여 줄 때(`confirm_required`·`dry_run`) `command`에는 명령이 줄바꿈으로 이어져 있습니다.
 
 응답이 없거나(stdin 닫힘) 형식이 틀리거나 `id`가 다르거나 `approved`가 정확히 `true`가 아니면 **거절**로 처리합니다.
 선택(`choice_response`)은 응답이 없거나 선택지에 없는 값이면 `default`를 씁니다. 기본값은 항상 아무것도 바꾸지 않는 쪽입니다.
