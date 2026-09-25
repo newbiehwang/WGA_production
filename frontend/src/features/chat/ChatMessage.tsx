@@ -3,13 +3,16 @@
 // 답변 위에는 답을 만든 과정(사고 요약·도구 호출)을 순서대로 보여 준다 (ProgressTrace).
 // 답을 기다리는 동안에는 같은 자리에 진행 상황과 '생각하는 중… (12초)'이 보인다.
 // AI가 AWS를 바꾸려 했으면 답변 아래에 승인 카드가 나온다 (inference.pendingActions, ApprovalCard).
+// 답변 속 ![제목](artifact://…)은 결과물(차트·다이어그램)이다. inference.artifacts로 풀어 ArtifactView로 그린다.
 import { memo, useMemo, useState } from 'react';
 import agentLogo from '@/assets/agent-logo.png';
 import type { PendingAction } from '@/types/actions';
 import type { ChatMessageType } from '@/types/chat';
+import { artifactsOf, splitArtifacts } from '@/utils/artifacts';
 import { parseMarkdown } from '@/utils/markdown';
 import { fromProgressSteps, traceSteps } from '@/utils/toolTrace';
 import { ApprovalCard } from './ApprovalCard';
+import { ArtifactView } from './ArtifactView';
 import { ProgressTrace } from './ProgressTrace';
 
 // 마크다운 파서(utils/markdown.ts)는 HTML 특수 문자를 이미 escape한 글을 받는다.
@@ -71,7 +74,15 @@ function ChatMessageView({ message }: { message: ChatMessageType }) {
     );
     // 타이핑 중이면 지금까지 보여 준 만큼만 (빈 글자일 때 전체가 잠깐 보이지 않게)
     const shownText = message.animationState === 'typing' ? (message.displayText ?? '') : message.text;
-    const html = useMemo(() => parseMarkdown(escapeHtml(shownText || '')), [shownText]);
+    // 글 조각은 마크다운으로, 결과물 조각은 컴포넌트로 (타이핑 중 참조가 덜 나왔으면 아직 글로 보인다)
+    const segments = useMemo(
+        () =>
+            splitArtifacts(shownText || '').map((segment) =>
+                segment.kind === 'text' ? { ...segment, html: parseMarkdown(escapeHtml(segment.text)) } : segment,
+            ),
+        [shownText],
+    );
+    const artifacts = useMemo(() => (isUser ? new Map() : artifactsOf(message.inference)), [isUser, message.inference]);
     const rows = useMemo(() => rowsOf(message.query_result), [message.query_result]);
     const actions = useMemo(() => (isUser ? [] : pendingActionsOf(message.inference)), [isUser, message.inference]);
     const hasMeta = !isUser && (message.elapsed_time || message.inference);
@@ -99,7 +110,15 @@ function ChatMessageView({ message }: { message: ChatMessageType }) {
                 />
 
                 {message.isTyping ? null : (
-                    <div className="message-content markdown-content" dangerouslySetInnerHTML={{ __html: html }} />
+                    <div className="message-content markdown-content">
+                        {segments.map((segment, index) =>
+                            segment.kind === 'text' ? (
+                                <div key={index} dangerouslySetInnerHTML={{ __html: segment.html }} />
+                            ) : (
+                                <ArtifactView key={index} artifact={artifacts.get(segment.ref)} title={segment.title} />
+                            ),
+                        )}
+                    </div>
                 )}
 
                 {/* 답변을 다 보여 준 뒤에 승인 카드를 보여 준다 (타이핑 중에 버튼이 먼저 보이지 않게) */}

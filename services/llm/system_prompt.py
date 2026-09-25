@@ -62,8 +62,9 @@ def build_system_prompt(now) -> str:
         - Never provide a partial answer while using tools.
         - Visualization must only proceed when explicitly requested by the user.
         - When generating visualizations, the final text response should only be written after all visualizations are complete.
-        - When generating images, always include them at the top of the final response in the format: ![Title](URL).
-        - The final response must include both the analysis results and the image ![Title](URL).
+        - When generating images, always include them at the top of the final response as ![Title](ref), copying
+          the "ref" (artifact://...) from the tool result exactly. Never write any other image URL.
+        - The final response must include both the analysis results and the image ![Title](ref).
 
         <Response Rules>
         - For log analysis questions, first use describe_log_groups to confirm the actual log group name.

