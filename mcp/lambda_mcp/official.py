@@ -5,7 +5,7 @@
 
     LLM Lambda ──HTTP(JSON-RPC)──▶ LambdaMCPServer (lambda_mcp.py, 세션·전송은 그대로)
                                       ├─ 직접 만든 도구 (app.py의 @mcp_server.tool)
-                                      └─ OfficialTools ──in-memory──▶ 공식 서버 객체 (CloudWatch, 문서, Cost Explorer, CloudTrail)
+                                      └─ OfficialTools ──in-memory──▶ 공식 서버 객체 (CloudWatch, 문서, Cost Explorer, CloudTrail, Pricing)
 
 in-memory 클라이언트로 부르는 이유
 - Cost Explorer 서버(fastmcp)는 MCP 세션이 있어야 도구가 돈다 (ctx.info가 세션을 쓴다). 서버 객체의
@@ -51,6 +51,16 @@ EXCLUDED_TOOLS = {
     "get_query_status": "CloudTrail Lake (유료)",
     "get_query_results": "CloudTrail Lake (유료)",
     "list_event_data_stores": "CloudTrail Lake (유료)",
+    # Pricing: 로컬 파일 경로를 받아 연다. Lambda 안에서는 자격 증명이 든 파일(/proc/self/environ 등)까지
+    # 읽을 수 있어, 모델이 경로를 고르는 도구는 두지 않는다 (보안)
+    "analyze_cdk_project": "로컬 파일 읽기 (보안)",
+    "analyze_terraform_project": "로컬 파일 읽기 (보안)",
+    # Pricing: 보고서를 파일로 쓴다. 보고서는 모델이 답변으로 쓰면 된다
+    "generate_cost_report": "파일 쓰기",
+    # Pricing: 수백 MB짜리 가격 파일의 내려받기 주소라 대화에 쓸모가 없다 (pricing:ListPriceLists 권한도 필요)
+    "get_price_list_urls": "가격 파일 주소",
+    # Pricing: Bedrock 설계 예시 글. 운영 질의응답과 관계가 적고 도구 목록만 늘린다
+    "get_bedrock_patterns": "운영 질문과 무관",
 }
 
 # region 인자의 기본값이 버지니아 북부 리전으로 박혀 있는 도구. 모델이 region을 생략하면 이 Lambda의 리전을 쓰게 한다.
@@ -84,7 +94,7 @@ def _inline_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def load_default_servers() -> List[Any]:
-    """이 서비스가 쓰는 공식 서버: CloudWatch, AWS 문서, Cost Explorer, CloudTrail. 부를 때 import한다 (무겁다)."""
+    """이 서비스가 쓰는 공식 서버: CloudWatch, AWS 문서, Cost Explorer, CloudTrail, Pricing. 부를 때 import한다 (무겁다)."""
     # 공식 서버는 import할 때 loguru로 로그를 남긴다. Lambda 로그가 넘치지 않게 경고 이상만 남긴다
     os.environ.setdefault("FASTMCP_LOG_LEVEL", "ERROR")
     # Lambda에서는 /tmp만 쓸 수 있고 패키지가 설치된 곳(site-packages)은 읽기 전용이다.
@@ -96,11 +106,12 @@ def load_default_servers() -> List[Any]:
     # (Lambda 응답 한도 6MB보다 작게)
     os.environ.setdefault("MCP_SQL_THRESHOLD", str(5 * 1024 * 1024))
     from awslabs.aws_documentation_mcp_server.server_aws import mcp as documentation
+    from awslabs.aws_pricing_mcp_server.server import mcp as pricing
     from awslabs.billing_cost_management_mcp_server.tools.cost_explorer_tools import cost_explorer_server
     from awslabs.cloudtrail_mcp_server.server import mcp as cloudtrail
     from awslabs.cloudwatch_mcp_server.server import mcp as cloudwatch
 
-    return [cloudwatch, documentation, cost_explorer_server, cloudtrail]
+    return [cloudwatch, documentation, cost_explorer_server, cloudtrail, pricing]
 
 
 class OfficialTools:

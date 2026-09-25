@@ -40,6 +40,11 @@ const LABELS: Record<string, string> = {
     'cost-explorer': '비용 조회',
     // AWS 공식 CloudTrail MCP 서버
     lookup_events: 'CloudTrail 이벤트 조회',
+    // AWS 공식 Pricing MCP 서버
+    get_pricing_service_codes: '가격표 서비스 목록',
+    get_pricing_service_attributes: '가격표 속성 조회',
+    get_pricing_attribute_values: '가격표 속성 값 조회',
+    get_pricing: '가격 조회',
     // 직접 둔 도구
     list_cloudwatch_dashboards: '대시보드 목록',
     get_dashboard_summary: '대시보드 요약',

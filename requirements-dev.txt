@@ -10,6 +10,7 @@ awslabs.cloudwatch-mcp-server==0.3.1
 awslabs.aws-documentation-mcp-server==1.2.1
 awslabs.billing-cost-management-mcp-server==0.0.38
 awslabs.cloudtrail-mcp-server==0.1.1
+awslabs.aws-pricing-mcp-server==1.1.1
 fastmcp==4.0.9
 mcp==2.2.0
 pydantic

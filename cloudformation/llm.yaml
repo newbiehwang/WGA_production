@@ -133,6 +133,14 @@ Resources:
                 Action:
                   - cloudtrail:LookupEvents
                 Resource: '*'
+              # AWS 공식 Pricing MCP 서버의 가격표 조회 (공개 가격, 무료). 가격 파일 주소 도구는 빼서
+              # pricing:ListPriceLists·GetPriceListFileUrl은 주지 않는다. Pricing API는 리소스 수준 권한 미지원
+              - Effect: Allow
+                Action:
+                  - pricing:DescribeServices
+                  - pricing:GetAttributeValues
+                  - pricing:GetProducts
+                Resource: '*'
               # MCP 세션 테이블 (lambda_mcp/session.py)
               - Effect: Allow
                 Action:

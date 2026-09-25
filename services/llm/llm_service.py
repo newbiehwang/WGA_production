@@ -400,6 +400,10 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
              (last 90 days of management events, filter by EventName, Username, ResourceName, EventSource, ...).
              Omit region to use this deployment's region. To verify a change executed after approval, look up its
              EventName and match the event's requestID with the request ID from the change result.
+        5-2. Price estimates (AWS official Pricing MCP tools): "how much would this cost per month?" (public list prices,
+             not this account's bill - use cost-explorer for actual spend). get_pricing_service_codes →
+             get_pricing_service_attributes → get_pricing_attribute_values → get_pricing (filter by region, e.g.
+             this deployment's region). Show unit price × usage = total and state assumptions.
         6. Visualization: Generate charts/AWS diagrams (only if the user explicitly requests visualization)
         7. Changes (only when the user asks to change something): setLogRetention (WGA Lambda log group retention),
            setAlarmActions (turn WGA alarm notifications on/off). Calling them does NOT change anything yet: it creates

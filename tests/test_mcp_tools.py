@@ -230,6 +230,7 @@ def test_official_servers_start_when_package_dir_is_read_only(tmp_path):
     assert result["billing_file"].startswith(str(read_only))  # 정말 읽기 전용 폴더에서 불러왔는지
     assert "cost-explorer" in result["names"] and "describe_log_groups" in result["names"]
     assert "lookup_events" in result["names"]  # CloudTrail 서버도 읽기 전용 폴더에서 뜬다
+    assert "get_pricing" in result["names"]  # Pricing 서버도
     assert result["is_error"] is False
 
 
