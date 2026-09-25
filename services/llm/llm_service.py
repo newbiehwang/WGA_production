@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from common.config import get_config
 from common.utils import invoke_bedrock_nova, cors_headers, cors_response
 from slack_sdk import WebClient
+from llm_progress import REQUEST_ID, ProgressReporter, read_progress
 
 # Lambda 환경에서 효율적인 재사용을 위한 클라이언트 캐싱
 client = None
@@ -32,6 +33,10 @@ except Exception as e:
     print(f"DynamoDB 초기화 오류: {str(e)}")
     chat_table = None
 
+# 답변을 만드는 동안의 진행 상황 (llm_progress.py). 테이블이 없으면 진행 상황 없이 답변만 만든다
+LLM_PROGRESS_TABLE = os.environ.get("LLM_PROGRESS_TABLE")
+progress_table = boto3.resource("dynamodb").Table(LLM_PROGRESS_TABLE) if LLM_PROGRESS_TABLE else None
+
 
 # ---------------------------------------------------------------- 모델 선택
 # 기본 모델은 코드에 모델 ID를 적지 않고, Anthropic이 지금 제공하는 모델 목록에서 고른다.
@@ -49,7 +54,7 @@ def get_anthropic_models():
     Anthropic Models API(GET /v1/models)에서 지금 사용할 수 있는 모델 목록을 끝까지 조회한다.
 
     Returns:
-        list: [{"id", "display_name", "created_at"}] (실패하면 빈 목록)
+        list: [{"id", "display_name", "created_at", "thinking"}] (실패하면 빈 목록)
     """
     try:
         CONFIG = get_config()
@@ -80,6 +85,7 @@ def get_anthropic_models():
                     "id": model.get("id", ""),
                     "display_name": model.get("display_name", model.get("id", "")),
                     "created_at": model.get("created_at", ""),   # 출시일 (RFC 3339). 기본 모델 선택에 쓴다
+                    "thinking": thinking_mode(model),             # 지원하는 사고 방식 (thinking_config에 쓴다)
                 })
             if not page.get('has_more') or not page.get('last_id'):
                 break
@@ -91,6 +97,41 @@ def get_anthropic_models():
     except Exception as e:
         print(f"Anthropic 모델 조회 중 오류: {str(e)}")
         return []
+
+
+def thinking_mode(model):
+    """
+    Models API가 알려 주는 모델의 사고(extended thinking) 지원 방식: "adaptive" | "enabled" | None.
+
+    모델마다 받는 설정이 다르다. 최신 모델(Sonnet 5, Opus 4.6 이후 등)은 adaptive만 받고 budget_tokens를
+    보내면 400이다. 예전 모델(Haiku 4.5 등)은 enabled + budget_tokens만 받는다. 모델 ID로 나누면 새 모델이
+    나올 때마다 고쳐야 하므로, Models API의 capabilities를 그대로 따른다.
+    """
+    types = (((model.get("capabilities") or {}).get("thinking") or {}).get("types")) or {}
+    if (types.get("adaptive") or {}).get("supported"):
+        return "adaptive"
+    if (types.get("enabled") or {}).get("supported"):
+        return "enabled"
+    return None
+
+
+THINKING_BUDGET_TOKENS = 4000  # enabled 방식(예전 모델)의 사고 예산. MAX_TOKENS(16000)보다 작아야 한다
+
+
+def thinking_config(model_id):
+    """
+    요청에 넣을 사고 설정. 화면에 사고 과정을 보여 주려면 사고 요약을 받아야 한다.
+    - adaptive: 사고 요약은 요청해야 온다(display: summarized). 없으면 최신 모델은 빈 사고 블록을 준다
+    - enabled: 예전 모델은 사고 요약을 기본으로 준다
+    - 모델이 사고를 지원하지 않거나 모델 정보를 모르면 넣지 않는다
+    """
+    model = next((m for m in available_models() if m.get("id") == model_id), None)
+    mode = model.get("thinking") if model else None
+    if mode == "adaptive":
+        return {"type": "adaptive", "display": "summarized"}
+    if mode == "enabled":
+        return {"type": "enabled", "budget_tokens": THINKING_BUDGET_TOKENS}
+    return None
 
 
 def available_models():
@@ -253,7 +294,8 @@ def get_client(model_id: str = None):
             client_cache[model_id] = AnthropicMCPClient(
                 mcp_url=mcp_url,
                 api_key=anthropic_api_key,
-                model_id=model_id
+                model_id=model_id,
+                thinking=thinking_config(model_id),
             )
         else:
             # Bedrock 설정
@@ -352,8 +394,14 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
         </Rules>
         """
 
+        # 진행 상황: 화면이 보낸 requestId로 단계마다 기록한다 (웹 요청만. Slack 봇은 기록할 곳 없이 단계만 모은다)
+        request_id = body.get('requestId')
+        can_save = bool(progress_table is not None and caller_id and REQUEST_ID.match(request_id or ""))
+        progress = ProgressReporter(progress_table if can_save else None, request_id, caller_id)
+
         # MCP 클라이언트 가져오기
         client = get_client(model_id)
+        client.progress = progress
 
         # 사용자 입력 처리 시작 시간 기록
         question_time = datetime.now(timezone.utc)
@@ -456,8 +504,11 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
                 "output_tokens": step.get("output_tokens", 0)
             })
 
+        progress.finished(True)
         debug_info = {
             "tools_used": tools_used,
+            # 사고 요약과 도구 호출을 일어난 순서대로 (화면이 Claude Code처럼 순서대로 보여 준다)
+            "steps": progress.saved_steps(),
             "reasoning": reasoning_content,
             "session_cached": is_cached and session_id is not None and chat_table is not None,
             "session_id": session_id if is_cached else None,
@@ -498,10 +549,25 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
 
     except Exception as e:
         print(f"MCP 처리 중 오류: {str(e)}")
+        if 'progress' in locals():
+            progress.finished(False)
         return cors_response(500, {
             "error": "MCP 처리 중 오류 발생",
             "answer": str(e)
         }, origin)
+
+
+def handle_progress(request_id, caller_id, origin):
+    """GET /llm1/progress/{requestId}: 답변을 만드는 동안의 진행 상황 (요청한 사람만 볼 수 있다)."""
+    try:
+        progress = read_progress(progress_table, request_id, caller_id)
+    except Exception as e:
+        print(f"진행 상황 조회 오류: {str(e)}")
+        progress = None
+    if progress is None:
+        # 아직 시작 전이거나(첫 기록 전) 남의 것이다. 화면은 404면 조금 뒤 다시 묻는다
+        return cors_response(404, {"error": "진행 상황이 없습니다."}, origin)
+    return cors_response(200, progress, origin)
 
 
 def get_table_registry():

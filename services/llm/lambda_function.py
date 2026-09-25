@@ -1,6 +1,6 @@
 # llm/lambda_function.py
 import requests
-from llm_service import parse_body, handle_llm1_with_mcp, available_models, pick_default_model
+from llm_service import parse_body, handle_llm1_with_mcp, handle_progress, available_models, pick_default_model
 from common.config import get_config
 from common.utils import cors_response
 
@@ -38,6 +38,11 @@ def lambda_handler(event, context):
                 body.pop("user_id", None)
                 body.pop("previous_questions", None)
             return handle_llm1_with_mcp(body, origin, caller_id)
+
+        elif path.startswith("/llm1/progress/") and http_method == "GET":
+            # 답변을 만드는 동안의 진행 상황 (화면이 /llm1 응답을 기다리며 1초마다 묻는다)
+            claims = (event.get("requestContext") or {}).get("authorizer", {}).get("claims") or {}
+            return handle_progress(path.rsplit("/", 1)[-1], claims.get("sub"), origin)
 
         else:
             return cors_response(404, {"error": f"Route {http_method} {path} not found."}, origin)
