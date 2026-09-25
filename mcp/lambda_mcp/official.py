@@ -92,7 +92,9 @@ REGION_FROM_ENV_TOOLS = {"lookup_events"}
 # IAM 1.1.1의 list_users·get_user는 ctx의 타입을 MCP 문맥(Context)이 아니라 CallToolResult로 잘못 적어 두어,
 # MCP SDK가 ctx를 모델이 채워야 할 필수 입력값으로 만든다 (그대로 두면 부를 때마다 검증 오류).
 # 함수 안에서는 ctx를 쓰지 않으므로 CallToolResult 형식의 빈 값을 넣는다.
-# 원래 스키마에 그 인자가 있을 때만 보정하므로, 공식 서버가 고쳐지면 아무 일도 하지 않는다
+# 원래 스키마에 그 인자가 있을 때만 보정하므로, 공식 서버가 고쳐지면 아무 일도 하지 않는다.
+# 제보: https://github.com/awslabs/mcp/issues/4675 (이전 제보 #1463·수정 PR #1464는 고쳐지지 않고 자동으로 닫혔다).
+# 공식 서버가 고쳐진 버전으로 올리면 이 항목을 지운다
 HIDDEN_ARGUMENTS: Dict[str, Dict[str, Any]] = {
     "list_users": {"ctx": {"content": []}},
     "get_user": {"ctx": {"content": []}},
