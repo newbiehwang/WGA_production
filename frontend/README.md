@@ -19,7 +19,7 @@ npm run build      # tsc 타입 검사 + vite 빌드 → dist/ (deploy.sh가 Amp
 | `src/stores/` | 대화 목록·메시지(`chatStore`), 모델 목록(`modelsStore`) — Zustand |
 | `src/components/layout/` | 위쪽 내비게이션, 프로필 메뉴, 로그인 화면 (AXPI) |
 | `src/components/panel.css` | 패널·목록 행·버튼·확인창 (AXPI) |
-| `src/features/home/` | 홈: 질문 입력(누르면 예시 질문이 펼쳐짐), 내 대화 목록 |
+| `src/features/home/` | 홈: 큰 제목·설명·큰 입력칸 (FinGate-X 첫 화면 구성, 누르면 예시 질문이 펼쳐짐) |
 | `src/features/chat/` | 대화: 메시지, 질문 입력칸, 대화 목록 팝업창 |
 | `src/utils/markdown.ts` | 답변 마크다운 → HTML (표·코드 블록·목록) |
 | `src/utils/toolTrace.ts` | 답변을 만들며 부른 MCP 도구 목록 |

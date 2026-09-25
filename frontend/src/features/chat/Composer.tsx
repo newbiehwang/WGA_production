@@ -3,12 +3,17 @@
 //
 // suggestions를 주면(홈), 입력칸을 누를 때 입력칸 아래에 붙어서 예시 질문이 펼쳐진다.
 // 입력칸과 예시 목록 밖으로 포커스가 나가면 접히는 효과를 보여 준 뒤 사라진다.
+//
+// 홈(variant="home")은 FinGate-X 첫 화면의 입력창 모양이다: 2줄 입력칸, 아래 줄 왼쪽에 키 안내
+// (빈칸이면 'Tab 예시 넣기', 글이 있으면 'Enter 보내기'), 오른쪽에 모델 선택과 보내기.
 import { type FocusEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useModelsStore } from '@/stores/modelsStore';
 
 const MAX_HEIGHT = 150; // 입력칸이 늘어나는 최대 높이
 const CLOSE_MS = 160; // 예시 목록이 접히는 시간 (CSS의 composer-suggest-out과 같게)
+const SUGGEST_MAX = 360; // 예시 목록의 최대 높이
+const SUGGEST_MIN = 160; // 카드 아래 공간이 좁아도 이만큼은 보여 주고 목록 안에서 스크롤한다
 
 export interface Suggestion {
     category: string;
@@ -29,7 +34,9 @@ export function Composer({
     const [text, setText] = useState('');
     // 예시 목록: 'closed' → (포커스) 'open' → (포커스가 나감) 'closing' → CLOSE_MS 뒤 'closed'
     const [suggest, setSuggest] = useState<'closed' | 'open' | 'closing'>('closed');
+    const [suggestMaxHeight, setSuggestMaxHeight] = useState(SUGGEST_MAX);
     const closeTimer = useRef<number>();
+    const wrapRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const waiting = useChatStore((s) => s.waitingForResponse);
     const models = useModelsStore((s) => s.models);
@@ -51,6 +58,13 @@ export function Composer({
     const openSuggestions = () => {
         if (!hasSuggestions) return;
         window.clearTimeout(closeTimer.current); // 접히는 중에 다시 누르면 그대로 다시 편다
+        // 흰 카드는 넘치는 부분을 잘라 낸다. 입력칸 아래에서 카드 바닥까지 남은 높이 안에서 펼친다
+        const wrap = wrapRef.current;
+        const card = wrap?.closest('.plan-panel');
+        if (wrap && card) {
+            const space = card.getBoundingClientRect().bottom - wrap.getBoundingClientRect().bottom - 16;
+            setSuggestMaxHeight(Math.max(SUGGEST_MIN, Math.min(SUGGEST_MAX, space)));
+        }
         setSuggest('open');
     };
 
@@ -74,6 +88,12 @@ export function Composer({
     const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
         // 한글을 조합하는 중의 Enter는 글자를 확정하는 Enter다. 이때 보내면 마지막 글자가 두 번 들어간다
         if (event.nativeEvent.isComposing) return;
+        // Tab: 빈칸이면 첫 예시 질문을 채운다 (placeholder에 보이는 문장). 글이 있으면 보통의 Tab(포커스 이동)
+        if (event.key === 'Tab' && !event.shiftKey && !text.trim() && hasSuggestions) {
+            event.preventDefault();
+            setText(suggestions![0].question);
+            return;
+        }
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             submit(text);
@@ -84,12 +104,12 @@ export function Composer({
     };
 
     return (
-        <div className={`composer-wrap composer-wrap--${variant}`} onBlur={handleBlur}>
-            <div className={`composer${suggest !== 'closed' ? ' is-suggesting' : ''}`}>
+        <div ref={wrapRef} className={`composer-wrap composer-wrap--${variant}`} onBlur={handleBlur}>
+            <div className={`composer composer--${variant}${suggest !== 'closed' ? ' is-suggesting' : ''}`}>
                 <textarea
                     ref={inputRef}
                     className="composer-input"
-                    rows={1}
+                    rows={variant === 'home' ? 2 : 1}
                     placeholder={placeholder}
                     value={text}
                     onChange={(event) => setText(event.target.value)}
@@ -98,6 +118,19 @@ export function Composer({
                     aria-label="질문"
                 />
                 <div className="composer-actions">
+                    {variant === 'home' ? (
+                        <p className="composer-hint" aria-hidden="true">
+                            {text.trim() === '' && hasSuggestions ? (
+                                <>
+                                    <kbd>Tab</kbd> 예시 넣기
+                                </>
+                            ) : (
+                                <>
+                                    <kbd>Enter</kbd> 보내기
+                                </>
+                            )}
+                        </p>
+                    ) : null}
                     {models.length > 0 ? (
                         <select
                             className="composer-model"
@@ -143,7 +176,10 @@ export function Composer({
             </div>
 
             {hasSuggestions && suggest !== 'closed' ? (
-                <div className={`composer-suggestions${suggest === 'closing' ? ' is-closing' : ''}`}>
+                <div
+                    className={`composer-suggestions${suggest === 'closing' ? ' is-closing' : ''}`}
+                    style={{ maxHeight: suggestMaxHeight }}
+                >
                     <p className="composer-suggestions-title">예시 질문</p>
                     <ul>
                         {suggestions!.map(({ category, question }) => (

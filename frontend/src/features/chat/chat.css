@@ -25,6 +25,28 @@
   margin-bottom: 12px;
 }
 
+/* 새 대화·다른 대화로 바꿀 때: AXPI 탭 전환(slide-forward-new)처럼 오른쪽에서 살짝 밀려 들어오며 나타난다 */
+.chat-stage {
+  animation: chat-stage-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes chat-stage-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-stage {
+    animation: none;
+  }
+}
+
 .chat-body {
   flex: 1;
   min-height: 0;
@@ -204,15 +226,26 @@
   justify-content: flex-end;
 }
 
-/* 내 질문: 상자 없이 글씨만, 오른쪽. 긴 질문은 3/4까지만 쓰고 줄을 바꾼다 */
+/* 내 질문: 오른쪽의 하늘색 둥근 상자. 긴 질문은 3/4까지만 쓰고 줄을 바꾼다 (답변은 상자 없이 본문으로) */
 .user-message .message-body {
   max-width: 75%;
 }
 
 .user-message .message-content {
-  text-align: right;
-  font-weight: 600;
+  background: #e7f1ff;
+  border: 1px solid #d3e4fb;
+  border-radius: 16px;
+  padding: 9px 14px;
   color: var(--color-ink);
+}
+
+/* 마크다운 문단 여백이 상자 안에 빈 줄처럼 남지 않게 */
+.user-message .message-content > :first-child {
+  margin-top: 0;
+}
+
+.user-message .message-content > :last-child {
+  margin-bottom: 0;
 }
 
 .bot-message .message-body {
@@ -606,10 +639,6 @@
 .composer-wrap {
   position: relative;
   z-index: 20; /* 아래 대화 목록 행 위에 겹쳐 보이게 */
-}
-
-.composer-wrap--home {
-  margin-bottom: 18px;
 }
 
 .composer.is-suggesting {

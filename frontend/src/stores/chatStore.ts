@@ -26,6 +26,9 @@ const TYPING_MAX_MS = 2000; // 긴 답변도 이 시간 안에 다 보여 준다
 interface ChatState {
     sessions: ChatSession[]; // 목록에는 메시지 없이 요약만 둔다
     currentSession: ChatSession | null; // null이면 새 대화 (첫 질문을 보낼 때 만든다)
+    // 대화 화면을 바꾼 횟수 (새 대화 · 다른 대화 열기). 화면이 이 값으로 전환 효과를 다시 튼다.
+    // 세션 ID로 하지 않는 이유: 새 대화에 첫 질문을 보내면 세션이 만들어지며 ID가 생기는데, 그때는 효과를 틀면 안 된다
+    viewNonce: number;
     loaded: boolean; // 목록을 한 번이라도 받았는지
     loading: boolean;
     error: string | null;
@@ -113,6 +116,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     return {
         sessions: [],
         currentSession: null,
+        viewNonce: 0,
         loaded: false,
         loading: false,
         error: null,
@@ -155,7 +159,10 @@ export const useChatStore = create<ChatState>((set, get) => {
                     axios.get(`/sessions/${sessionId}`),
                     axios.get(`/sessions/${sessionId}/messages`),
                 ]);
-                set({ currentSession: { ...session.data, messages: messages.data.messages || [] } });
+                set((state) => ({
+                    currentSession: { ...session.data, messages: messages.data.messages || [] },
+                    viewNonce: state.viewNonce + 1,
+                }));
             } catch (error) {
                 set({ error: '대화를 불러오지 못했습니다.' });
                 throw error;
@@ -164,7 +171,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             }
         },
 
-        newChat: () => set({ currentSession: null, error: null }),
+        newChat: () => set((state) => ({ currentSession: null, error: null, viewNonce: state.viewNonce + 1 })),
 
         sendMessage: async (text) => {
             const question = text.trim();

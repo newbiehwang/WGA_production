@@ -1,22 +1,14 @@
-// 홈: 질문 입력칸 + 내 대화 목록 (예전 StartChatPage.vue).
-// 모양은 AXPI의 추진 계획서 목록 화면: 패널 머리 아래에 행 목록.
-// 예시 질문은 입력칸을 누르면 입력칸 아래에 펼쳐진다 (Composer의 suggestions).
-import { useEffect } from 'react';
+// 홈: 흰 카드(AXPI 패널) 안에 FinGate-X 첫 화면의 구성을 넣었다.
+//   큰 글씨 2줄(가는 글씨 · 굵은 파랑) → 작은 글씨 설명 → 큰 입력창
+// 예시 질문은 입력칸을 누르면 입력칸 아래에 펼쳐진다 (Composer의 suggestions). 지난 대화는 대화 탭의 '대화 목록'에서 본다.
 import { useNavigate } from 'react-router-dom';
 import { Composer } from '@/features/chat/Composer';
 import { useChatStore } from '@/stores/chatStore';
-import { formatKoreanDateTime } from '@/utils/formatters';
 import { EXAMPLE_QUESTIONS } from './examples';
 import './home.css';
 
 export function HomePage() {
     const navigate = useNavigate();
-    const sessions = useChatStore((s) => s.sessions);
-    const loaded = useChatStore((s) => s.loaded);
-
-    useEffect(() => {
-        if (!useChatStore.getState().loaded) useChatStore.getState().fetchSessions().catch(() => {});
-    }, []);
 
     // 새 대화로 질문을 보내고 대화 화면으로 간다. 답변은 대화 화면에서 이어서 보인다
     const ask = (question: string) => {
@@ -28,75 +20,30 @@ export function HomePage() {
         navigate('/chat');
     };
 
-    const open = (sessionId: string) => {
-        const store = useChatStore.getState();
-        // 답변을 기다리는 중이면 그 대화를 그대로 보여 준다 (옮기면 질문이 취소된다)
-        if (!store.waitingForResponse && store.currentSession?.sessionId !== sessionId)
-            store.selectSession(sessionId).catch(() => {});
-        navigate('/chat');
-    };
-
     return (
         <section className="plan-panel home-panel" aria-label="홈">
-            <div className="plan-panel-header">
-                <p className="plan-panel-eyebrow">대화 목록</p>
-            </div>
+            <div className="home-hero">
+                {/* 읽는 순서대로 한 줄씩 떠오른다. 지연 시간을 줄마다 적어 두어 순서가 마크업에 보이게 했다 (FinGate-X) */}
+                <h1 className="home-headline">
+                    <span className="reveal" style={{ animationDelay: '60ms' }}>
+                        로그 찾고, 콘솔 열고, 비용 표 뒤지고?
+                    </span>
+                    <b className="reveal" style={{ animationDelay: '220ms' }}>
+                        한 문장으로 물어보세요.
+                    </b>
+                </h1>
+                <p className="home-standfirst reveal" style={{ animationDelay: '430ms' }}>
+                    CloudWatch 로그·알람·대시보드와 비용, AWS 문서를 MCP 도구로 찾아 답합니다. 어떤 도구를
+                    썼는지는 답마다 함께 보여 드립니다.
+                </p>
 
-            <Composer
-                variant="home"
-                placeholder="AWS 클라우드 운영에 관한 질문을 물어보세요!"
-                onSend={ask}
-                suggestions={EXAMPLE_QUESTIONS}
-            />
-
-            <div className="plan-table home-sessions">
-                <div className="plan-table-header">
-                    <span className="plan-table-col-project">대화</span>
-                    <span className="home-col-date">마지막 대화</span>
-                    <span className="plan-table-col-action" />
-                </div>
-
-                {!loaded ? (
-                    <div className="plan-panel-loading home-sessions-state">
-                        <div>
-                            <div className="plan-inline-spinner" />
-                            <p>대화 목록을 불러오는 중...</p>
-                        </div>
-                    </div>
-                ) : sessions.length === 0 ? (
-                    <div className="plan-panel-empty home-sessions-state">
-                        <p>아직 대화가 없습니다. 위 입력칸에 질문해 보세요.</p>
-                    </div>
-                ) : (
-                    <ul className="plan-table-body home-session-list">
-                        {sessions.map((session) => (
-                            <li
-                                key={session.sessionId}
-                                className="plan-table-row is-clickable"
-                                role="button"
-                                tabIndex={0}
-                                aria-label={`${session.title} 대화 열기`}
-                                onClick={() => open(session.sessionId)}
-                                onKeyDown={(event) => {
-                                    if (event.key === 'Enter' || event.key === ' ') {
-                                        event.preventDefault();
-                                        open(session.sessionId);
-                                    }
-                                }}
-                            >
-                                <div className="plan-row-project">
-                                    <span className="plan-row-name home-session-title">{session.title}</span>
-                                </div>
-                                <div className="plan-row-date home-col-date">
-                                    {formatKoreanDateTime(session.updatedAt)}
-                                </div>
-                                <div className="plan-row-action home-row-arrow" aria-hidden="true">
-                                    ›
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                )}
+                {/* 입력창은 떠오르지 않는다: 손이 기다려야 하는 컨트롤은 처음부터 그 자리에 있어야 한다 */}
+                <Composer
+                    variant="home"
+                    placeholder={`편하게 물어보세요. 예: ${EXAMPLE_QUESTIONS[0].question}`}
+                    onSend={ask}
+                    suggestions={EXAMPLE_QUESTIONS}
+                />
             </div>
         </section>
     );

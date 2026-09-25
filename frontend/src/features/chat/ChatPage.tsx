@@ -16,6 +16,7 @@ export function ChatPage() {
     const waiting = useChatStore((s) => s.waitingForResponse);
     const error = useChatStore((s) => s.error);
     const loading = useChatStore((s) => s.loading);
+    const viewNonce = useChatStore((s) => s.viewNonce);
     const [isListOpen, setIsListOpen] = useState(false);
     const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
     const messagesRef = useRef<HTMLDivElement>(null);
@@ -32,10 +33,10 @@ export function ChatPage() {
         if (box && stickToBottom.current) box.scrollTop = box.scrollHeight;
     }, [messages]);
 
-    // 다른 대화를 열면 맨 아래부터 보여 준다
+    // 다른 대화를 열거나 새 대화를 시작하면 맨 아래부터 보여 준다
     useEffect(() => {
         stickToBottom.current = true;
-    }, [currentSession?.sessionId]);
+    }, [viewNonce]);
 
     const openSession = (sessionId: string) => {
         if (sessionId === currentSession?.sessionId) return;
@@ -57,7 +58,8 @@ export function ChatPage() {
     return (
         <section className="plan-panel chat-panel" aria-label="대화">
             <div className="plan-panel-header chat-header">
-                <h1 className="plan-panel-eyebrow chat-title" title={currentSession?.title}>
+                {/* key가 바뀌면(새 대화·다른 대화) 새로 그려지며 전환 효과(chat-stage)가 다시 나온다 */}
+                <h1 key={viewNonce} className="plan-panel-eyebrow chat-title chat-stage" title={currentSession?.title}>
                     {currentSession?.title ?? '새 대화'}
                 </h1>
                 <div className="chat-header-actions">
@@ -87,7 +89,8 @@ export function ChatPage() {
             <div className="chat-body">
                 <div className="chat-conversation">
                     <div
-                        className="chat-messages"
+                        key={viewNonce}
+                        className="chat-messages chat-stage"
                         ref={messagesRef}
                         onScroll={(event) => {
                             const box = event.currentTarget;
