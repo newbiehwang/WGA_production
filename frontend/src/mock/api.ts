@@ -11,6 +11,7 @@ import type {
   AxiosResponse,
   InternalAxiosRequestConfig,
 } from "axios";
+import type { PendingAction } from "../types/actions";
 import type { AuditQuery, AuditRecord } from "../types/audit";
 
 interface MockMessage {
@@ -64,7 +65,19 @@ interface MockTool {
 
 // 답변 예시. 보낼 때마다 차례로 돌아가며, 화면에서 자주 고치는 요소(사고 요약·도구 목록·표·목록·코드·실패한 도구)를 모두 담았다.
 // thinking: 도구를 부르기 전과 뒤의 사고 요약
-const ANSWERS: { answer: string; tools: MockTool[]; thinking: string[] }[] = [
+interface MockEntry {
+  answer: string;
+  tools: MockTool[];
+  thinking: string[];
+  // 변경 도구를 부른 답변: 실행하지 않고 승인 요청을 만든다 (services/llm/approvals.py)
+  approval?: () => Omit<
+    PendingAction,
+    "actionId" | "status" | "createdAt" | "expiresAt"
+  >;
+  actionId?: string; // 승인한 작업의 결과 설명 (/llm1 {actionId})
+}
+
+const ANSWERS: MockEntry[] = [
   {
     answer: [
       "지난 7일 동안 **wga-llm-dev** 함수의 오류는 3건입니다.",
@@ -147,12 +160,96 @@ const ANSWERS: { answer: string; tools: MockTool[]; thinking: string[] }[] = [
   },
 ];
 
+// ---------------------------------------------------------------- 변경 작업 승인 (/actions, services/llm/approvals.py)
+// 질문에 '보존'이나 '알람'이 들어 있으면 AI가 변경 도구를 부른 것처럼 승인 요청을 만든다.
+// 승인하면 가짜 리소스 상태를 바꾸고, 이어서 /llm1 {actionId}로 결과 설명을 돌려준다
+
+const MOCK_LOG_GROUP = "/aws/lambda/wga-llm-dev";
+const MOCK_ALARM = "wga-dev-api-5xx";
+const mockResources = { retention: 30 as number | null, alarmActions: true };
+const actions = new Map<string, PendingAction>();
+const APPROVAL_TTL_S = 600;
+
+const retentionText = (days: number | null) =>
+  days === null ? "영구 보관" : `${days}일`;
+const actionsText = (enabled: boolean) => (enabled ? "알림 켜짐" : "알림 꺼짐");
+
+const APPROVAL_ENTRIES: Record<"retention" | "alarm", MockEntry> = {
+  retention: {
+    answer: [
+      "`/aws/lambda/wga-llm-dev` 로그 그룹의 보존 기간을 **14일**로 줄이려면 승인이 필요합니다.",
+      "",
+      "아래 승인 요청에서 바뀌는 내용을 확인한 뒤 승인해 주세요. 보존 기간을 줄이면 14일보다 오래된 로그는 지워집니다.",
+    ].join("\n"),
+    tools: [
+      {
+        tool_name: "setLogRetention",
+        input: { log_group_name: MOCK_LOG_GROUP, retention_days: 14 },
+        status: "ok",
+      },
+    ],
+    thinking: [
+      "로그 보존 기간을 줄여 달라는 요청이다. AWS를 바꾸는 작업이라 바로 실행되지 않고 승인 요청이 만들어진다.",
+      "승인 대기 중이다. 무엇이 바뀌는지와 승인이 필요하다는 것을 알린다.",
+    ],
+    approval: () => ({
+      tool: "setLogRetention",
+      args: { log_group_name: MOCK_LOG_GROUP, retention_days: 14 },
+      before: retentionText(mockResources.retention),
+      after: "14일",
+      summary: `${MOCK_LOG_GROUP} 로그 보존 기간 ${retentionText(mockResources.retention)} → 14일 (지난 로그 일부가 지워질 수 있습니다)`,
+    }),
+  },
+  alarm: {
+    answer:
+      "점검하는 동안 `wga-dev-api-5xx` 알람의 알림을 끄려면 승인이 필요합니다. 알림을 끄면 알람이 울려도 메일이 가지 않습니다.",
+    tools: [
+      {
+        tool_name: "setAlarmActions",
+        input: { alarm_name: MOCK_ALARM, enabled: false },
+        status: "ok",
+      },
+    ],
+    thinking: [
+      "점검 중 알람 알림을 꺼 달라는 요청이다. 변경 작업이라 승인 요청을 만든다.",
+    ],
+    approval: () => ({
+      tool: "setAlarmActions",
+      args: { alarm_name: MOCK_ALARM, enabled: false },
+      before: actionsText(mockResources.alarmActions),
+      after: actionsText(false),
+      summary: `${MOCK_ALARM} ${actionsText(mockResources.alarmActions)} → ${actionsText(false)} (알람이 울려도 알림이 가지 않습니다)`,
+    }),
+  },
+};
+
+// 승인한 작업의 결과 설명 (실제로는 서버가 저장된 결과로 질문을 만들어 모델이 설명한다)
+const explanationEntry = (action: PendingAction): MockEntry => ({
+  answer:
+    action.status === "executed"
+      ? `승인하신 변경을 실행했습니다: **${action.after}** (이전: ${action.before}).\n\n감사 로그 탭에서 누가 요청하고 승인했는지 확인할 수 있습니다.`
+      : "승인하신 변경을 실행하지 못했습니다. 권한이나 리소스 상태를 확인해 주세요.",
+  tools: [],
+  thinking: ["승인된 변경 작업의 실행 결과를 사용자에게 설명한다."],
+  actionId: action.actionId,
+});
+
+const publicAction = (action: PendingAction): PendingAction =>
+  action.status === "pending" && action.expiresAt <= Date.now() / 1000
+    ? { ...action, status: "expired" }
+    : action;
+
 const newId = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
-const inferenceOf = (tools: object[], steps: object[] = []) =>
+const inferenceOf = (
+  tools: object[],
+  steps: object[] = [],
+  pendingActions: PendingAction[] = [],
+) =>
   JSON.stringify({
     tools_used: tools,
     steps, // 사고 요약과 도구 호출을 순서대로 (services/llm/llm_progress.py와 같은 모양)
+    pendingActions, // 승인을 기다리는 변경 작업 (답변 아래 승인 카드)
     reasoning: [],
     session_cached: false,
     token_usage: {},
@@ -171,7 +268,7 @@ interface Run {
   started: number;
   plan: PlannedStep[];
   total: number; // 답이 오는 때
-  entry: (typeof ANSWERS)[number];
+  entry: MockEntry;
 }
 
 const runs = new Map<string, Run>();
@@ -214,8 +311,21 @@ const stepsAt = (run: Omit<Run, "started">, elapsed: number) =>
         : p.step,
     );
 
-const startRun = (requestId?: string): Run => {
-  const entry = ANSWERS[answerIndex++ % ANSWERS.length];
+// 질문에 맞는 답변: 승인한 작업의 설명 → 변경 요청(보존·알람) → 나머지는 예시를 돌아가며
+const entryFor = (body: RequestBody): MockEntry => {
+  const action = body.actionId ? actions.get(body.actionId) : undefined;
+  if (action) return explanationEntry(action);
+  const text = body.text || body.question || "";
+  if (text.includes("보존")) return APPROVAL_ENTRIES.retention;
+  if (text.includes("알람") && /끄|꺼|멈|중지/.test(text))
+    return APPROVAL_ENTRIES.alarm;
+  return ANSWERS[answerIndex++ % ANSWERS.length];
+};
+
+const startRun = (
+  requestId?: string,
+  entry: MockEntry = ANSWERS[answerIndex++ % ANSWERS.length],
+): Run => {
   const run = { started: Date.now(), ...planRun(entry) };
   if (requestId) runs.set(requestId, run);
   return run;
@@ -387,6 +497,31 @@ const seedAudit = (): AuditRecord[] => {
 
 let auditRecords = seedAudit();
 
+// 변경 작업의 사건 하나 (services/llm/audit.py의 action_event와 같은 모양)
+const actionAuditRecord = (
+  action: PendingAction,
+  event: "requested" | "approved" | "denied" | "executed",
+  offsetMs: number,
+): AuditRecord => {
+  const time = new Date(Date.now() + offsetMs);
+  return {
+    userId: MOCK_USER_ID,
+    email: "demo@example.com",
+    source: "web",
+    at: auditAt(time, `action#${action.actionId}#${event}`),
+    day: time.toISOString().slice(0, 10),
+    kind: "action",
+    event,
+    actionId: action.actionId,
+    tool: action.tool,
+    input: action.args,
+    summary: action.summary,
+    status: "ok",
+    ...(event !== "requested" && { decidedBy: MOCK_USER_ID }),
+    ...(event === "executed" && action.result && { result: action.result }),
+  };
+};
+
 const queryAudit = (query: AuditQuery): Result => {
   const days = (value: string) => new Date(`${value}T00:00:00Z`).getTime();
   const to = query.to ?? new Date().toISOString().slice(0, 10);
@@ -429,6 +564,7 @@ interface RequestBody {
   elapsed_time?: string;
   inference?: string;
   requestId?: string; // /llm1: 진행 상황을 찾을 열쇠
+  actionId?: string; // /llm1: 승인한 변경 작업의 결과 설명
   question?: string; // /llm1: 질문
 }
 
@@ -550,9 +686,75 @@ const route = (
       }
     }
   }
+  if (path.startsWith("/actions/")) {
+    const [, , actionId, decision] = path.split("/");
+    const action = actions.get(actionId);
+    if (!action) return [404, { error: "승인 요청을 찾을 수 없습니다" }];
+    if (method === "get" && !decision) return [200, publicAction(action)];
+    if (method === "post" && (decision === "approve" || decision === "deny")) {
+      const current = publicAction(action);
+      if (current.status === "expired")
+        return [
+          409,
+          { error: "승인 시간(10분)이 지났습니다. 다시 요청해 주세요" },
+        ];
+      if (current.status !== "pending")
+        return [
+          409,
+          { error: `이미 결정된 요청입니다 (상태: ${current.status})` },
+        ];
+      const decidedAt = Math.floor(Date.now() / 1000);
+      Object.assign(action, { decidedBy: MOCK_USER_ID, decidedAt });
+      const events: ("approved" | "denied" | "executed")[] = [];
+      if (decision === "deny") {
+        action.status = "denied";
+        events.push("denied");
+      } else {
+        // 가짜 리소스를 바꾼다 (실제로는 MCP Lambda가 승인을 다시 확인하고 한 번만 실행한다)
+        if (action.tool === "setLogRetention") mockResources.retention = 14;
+        else mockResources.alarmActions = false;
+        action.status = "executed";
+        action.result = JSON.stringify({
+          status: "success",
+          target: action.args.log_group_name ?? action.args.alarm_name,
+          before: action.before,
+          after: action.after,
+        });
+        events.push("approved", "executed");
+      }
+      auditRecords = [
+        ...events
+          .map((event, index) => actionAuditRecord(action, event, index))
+          .reverse(),
+        ...auditRecords,
+      ];
+      return [200, action];
+    }
+  }
   if (method === "post" && path === "/llm1") {
-    const run = (body.requestId && runs.get(body.requestId)) || startRun();
+    const run =
+      (body.requestId && runs.get(body.requestId)) ||
+      startRun(undefined, entryFor(body));
     const { answer, tools } = run.entry;
+    // 변경 도구를 부른 답변이면 승인 요청을 만든다
+    const pending: PendingAction[] = [];
+    if (run.entry.approval) {
+      const created = Math.floor(Date.now() / 1000);
+      const action: PendingAction = {
+        ...run.entry.approval(),
+        actionId: newId(),
+        status: "pending",
+        requesterId: MOCK_USER_ID,
+        createdAt: created,
+        expiresAt: created + APPROVAL_TTL_S,
+      };
+      actions.set(action.actionId, action);
+      pending.push(action);
+      auditRecords = [
+        actionAuditRecord(action, "requested", 0),
+        ...auditRecords,
+      ];
+    }
     // 감사 로그에도 이 질문과 도구 호출을 남긴다 (실제 백엔드처럼 답이 끝난 뒤에 보인다)
     auditRecords = [
       ...auditRecordsOf(
@@ -568,7 +770,9 @@ const route = (
       {
         answer,
         elapsed_time: `${Math.round(run.total / 1000)}초`,
-        inference: JSON.parse(inferenceOf(tools, stepsAt(run, Infinity))),
+        inference: JSON.parse(
+          inferenceOf(tools, stepsAt(run, Infinity), pending),
+        ),
       },
     ];
   }
@@ -583,7 +787,7 @@ const mockAdapter: AxiosAdapter = (config) =>
     // 질문이면 시간표를 만들고 마지막 단계가 끝난 뒤에 답한다
     const delay =
       method === "post" && path === "/llm1"
-        ? startRun(body.requestId).total
+        ? startRun(body.requestId, entryFor(body)).total
         : 100;
 
     const timer = setTimeout(() => {

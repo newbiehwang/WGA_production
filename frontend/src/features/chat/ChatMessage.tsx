@@ -2,11 +2,14 @@
 // 내 질문은 오른쪽에 글씨만, 답변은 말풍선 없이 본문으로.
 // 답변 위에는 답을 만든 과정(사고 요약·도구 호출)을 순서대로 보여 준다 (ProgressTrace).
 // 답을 기다리는 동안에는 같은 자리에 진행 상황과 '생각하는 중… (12초)'이 보인다.
+// AI가 AWS를 바꾸려 했으면 답변 아래에 승인 카드가 나온다 (inference.pendingActions, ApprovalCard).
 import { memo, useMemo, useState } from 'react';
 import agentLogo from '@/assets/agent-logo.png';
+import type { PendingAction } from '@/types/actions';
 import type { ChatMessageType } from '@/types/chat';
 import { parseMarkdown } from '@/utils/markdown';
 import { fromProgressSteps, traceSteps } from '@/utils/toolTrace';
+import { ApprovalCard } from './ApprovalCard';
 import { ProgressTrace } from './ProgressTrace';
 
 // 마크다운 파서(utils/markdown.ts)는 HTML 특수 문자를 이미 escape한 글을 받는다.
@@ -43,6 +46,20 @@ const rowsOf = (value: unknown): Record<string, unknown>[] => {
     return [];
 };
 
+// 답변의 승인 요청 (저장된 메시지에서는 inference가 JSON 문자열이다)
+const pendingActionsOf = (inference: unknown): PendingAction[] => {
+    let data = inference;
+    if (typeof data === 'string') {
+        try {
+            data = JSON.parse(data);
+        } catch {
+            return [];
+        }
+    }
+    const actions = (data as { pendingActions?: unknown } | null)?.pendingActions;
+    return Array.isArray(actions) ? (actions as PendingAction[]) : [];
+};
+
 function ChatMessageView({ message }: { message: ChatMessageType }) {
     const [showDetails, setShowDetails] = useState(false);
     const isUser = message.sender === 'user';
@@ -56,6 +73,7 @@ function ChatMessageView({ message }: { message: ChatMessageType }) {
     const shownText = message.animationState === 'typing' ? (message.displayText ?? '') : message.text;
     const html = useMemo(() => parseMarkdown(escapeHtml(shownText || '')), [shownText]);
     const rows = useMemo(() => rowsOf(message.query_result), [message.query_result]);
+    const actions = useMemo(() => (isUser ? [] : pendingActionsOf(message.inference)), [isUser, message.inference]);
     const hasMeta = !isUser && (message.elapsed_time || message.inference);
 
     return (
@@ -83,6 +101,11 @@ function ChatMessageView({ message }: { message: ChatMessageType }) {
                 {message.isTyping ? null : (
                     <div className="message-content markdown-content" dangerouslySetInnerHTML={{ __html: html }} />
                 )}
+
+                {/* 답변을 다 보여 준 뒤에 승인 카드를 보여 준다 (타이핑 중에 버튼이 먼저 보이지 않게) */}
+                {actions.length > 0 && !message.isTyping && message.animationState !== 'typing'
+                    ? actions.map((action) => <ApprovalCard key={action.actionId} action={action} />)
+                    : null}
 
                 {hasMeta ? (
                     <div className="query-metadata">

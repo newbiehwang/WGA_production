@@ -6,6 +6,7 @@
 //   GET/POST        /sessions/{id}/messages    메시지 목록 / 메시지 저장
 //   POST            /llm1                      답변 만들기 (MCP 도구 호출 포함, 수십 초 걸릴 수 있다)
 //   GET             /llm1/progress/{requestId} 답변을 만드는 동안의 진행 상황 (사고 요약·도구 호출)
+//   POST            /llm1 {actionId}           승인한 변경 작업의 결과 설명 (질문은 서버가 저장된 기록으로 만든다)
 // 사용자는 백엔드가 ID 토큰의 sub로 구분한다 (예전처럼 userId를 보내지 않는다).
 //
 // 질문 하나를 보내는 순서: 내 메시지 저장 → 화면에 '생각하는 중' → /llm1 → 답변 저장 → 타이핑하듯 보여 주기.
@@ -43,6 +44,8 @@ interface ChatState {
     selectSession: (sessionId: string) => Promise<void>;
     newChat: () => void;
     sendMessage: (text: string) => Promise<void>;
+    // 승인한 변경 작업의 결과를 모델이 설명하게 한다. note는 대화에 남길 내 메시지 (예: "승인: 보존 기간 30일 → 14일")
+    explainAction: (actionId: string, note: string) => Promise<void>;
     cancelRequest: () => void;
     renameSession: (sessionId: string, title: string) => Promise<void>;
     deleteSession: (sessionId: string) => Promise<void>;
@@ -148,6 +151,108 @@ export const useChatStore = create<ChatState>((set, get) => {
         tick();
     };
 
+    // 질문 하나를 보내고 답을 받는다. actionId가 있으면 승인한 변경 작업의 결과 설명을 받는다
+    // (text는 대화에 남길 내 메시지이고, 모델에 보낼 질문은 서버가 저장된 기록으로 만든다)
+    const ask = async (text: string, actionId?: string) => {
+        const question = text.trim();
+        if (!question || get().waitingForResponse) return;
+        // 취소 버튼은 보내자마자 보이므로, 취소 신호도 처음부터 만들어 모든 요청에 건다
+        const cancelSource = axios.CancelToken.source();
+        set({ waitingForResponse: true, error: null, cancelSource });
+
+        let sessionId = '';
+        const loadingId = newId();
+        // 이 질문의 진행 상황을 찾을 열쇠. /llm1과 진행 상황 조회에 같은 값을 보낸다
+        const requestId = crypto.randomUUID();
+        let progressTimer: number | undefined;
+        try {
+            // 새 대화면 첫 질문을 제목으로 만든다
+            let session = get().currentSession;
+            if (!session) {
+                const created = (
+                    await axios.post('/sessions', { title: shortTitle(question) }, { cancelToken: cancelSource.token })
+                ).data;
+                session = { ...created, messages: [] } as ChatSession;
+                set((state) => ({ currentSession: session, sessions: [session!, ...state.sessions] }));
+            }
+            sessionId = session.sessionId;
+            const isFirstMessage = session.messages.length === 0;
+
+            const userMessage = await saveMessage(sessionId, { sender: 'user', text: question }, cancelSource);
+            updateMessages(sessionId, (messages) => [
+                ...messages,
+                { ...userMessage, animationState: 'appear' },
+                {
+                    id: loadingId,
+                    sender: 'assistant',
+                    text: '...',
+                    timestamp: new Date().toISOString(), // 화면의 '(12초)'는 이 시각부터 센다
+                    isTyping: true,
+                    progress: { phase: 'thinking', steps: [] },
+                },
+            ]);
+            progressTimer = watchProgress(sessionId, loadingId, requestId, cancelSource);
+            // 예전에 만든 빈 대화('새 대화')에 처음 질문하면 제목을 질문으로 바꾼다
+            if (isFirstMessage && session.title !== shortTitle(question)) {
+                await axios.put(`/sessions/${sessionId}`, { title: shortTitle(question) });
+                touchSession(sessionId, { title: shortTitle(question) });
+            }
+
+            const response = await axios.post(
+                '/llm1',
+                {
+                    text: question,
+                    sessionId,
+                    modelId: useModelsStore.getState().selectedModel.id,
+                    // 대화 컨텍스트는 항상 기억한다: 백엔드가 이 세션의 이전 대화를 함께 모델에 보낸다.
+                    // 백엔드는 값이 없으면 false로 보므로 반드시 true를 보낸다
+                    isCached: true,
+                    requestId,
+                    ...(actionId && { actionId }),
+                },
+                { cancelToken: cancelSource.token },
+            );
+            const answer = toBotResponse(response.data);
+
+            const saved = await saveMessage(sessionId, {
+                sender: 'assistant',
+                text: answer.text,
+                ...(answer.query_string && { query_string: answer.query_string }),
+                ...(answer.query_result?.length && { query_result: JSON.stringify(answer.query_result) }),
+                ...(answer.elapsed_time && { elapsed_time: answer.elapsed_time }),
+                ...(answer.inference && { inference: JSON.stringify(answer.inference) }),
+            });
+            // 저장한 메시지에는 JSON 문자열로 들어가므로, 화면에는 받은 그대로의 값을 쓴다
+            const botMessage: ChatMessageType = {
+                ...saved,
+                ...answer,
+                displayText: '',
+                animationState: 'typing',
+            };
+            updateMessages(sessionId, (messages) => [...messages.filter((m) => m.id !== loadingId), botMessage]);
+            touchSession(sessionId, { updatedAt: new Date().toISOString() });
+            typeOut(sessionId, botMessage.id, answer.text);
+        } catch (error) {
+            const cancelled = axios.isCancel(error);
+            const notice: ChatMessageType = {
+                id: newId(),
+                sender: 'assistant',
+                text: cancelled ? CANCEL_ANSWER : ERROR_ANSWER,
+                timestamp: new Date().toISOString(),
+                animationState: 'appear',
+            };
+            if (sessionId) {
+                updateMessages(sessionId, (messages) => [...messages.filter((m) => m.id !== loadingId), notice]);
+                // 다시 열었을 때도 무슨 일이 있었는지 보이도록 안내 문구도 저장한다
+                saveMessage(sessionId, { sender: 'assistant', text: notice.text }).catch(() => {});
+            }
+            if (!cancelled) set({ error: '메시지를 전송하는 중 오류가 발생했습니다.' });
+        } finally {
+            window.clearInterval(progressTimer);
+            set({ waitingForResponse: false, cancelSource: null });
+        }
+    };
+
     return {
         sessions: [],
         currentSession: null,
@@ -208,104 +313,9 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         newChat: () => set((state) => ({ currentSession: null, error: null, viewNonce: state.viewNonce + 1 })),
 
-        sendMessage: async (text) => {
-            const question = text.trim();
-            if (!question || get().waitingForResponse) return;
-            // 취소 버튼은 보내자마자 보이므로, 취소 신호도 처음부터 만들어 모든 요청에 건다
-            const cancelSource = axios.CancelToken.source();
-            set({ waitingForResponse: true, error: null, cancelSource });
+        sendMessage: (text) => ask(text),
 
-            let sessionId = '';
-            const loadingId = newId();
-            // 이 질문의 진행 상황을 찾을 열쇠. /llm1과 진행 상황 조회에 같은 값을 보낸다
-            const requestId = crypto.randomUUID();
-            let progressTimer: number | undefined;
-            try {
-                // 새 대화면 첫 질문을 제목으로 만든다
-                let session = get().currentSession;
-                if (!session) {
-                    const created = (
-                        await axios.post('/sessions', { title: shortTitle(question) }, { cancelToken: cancelSource.token })
-                    ).data;
-                    session = { ...created, messages: [] } as ChatSession;
-                    set((state) => ({ currentSession: session, sessions: [session!, ...state.sessions] }));
-                }
-                sessionId = session.sessionId;
-                const isFirstMessage = session.messages.length === 0;
-
-                const userMessage = await saveMessage(sessionId, { sender: 'user', text: question }, cancelSource);
-                updateMessages(sessionId, (messages) => [
-                    ...messages,
-                    { ...userMessage, animationState: 'appear' },
-                    {
-                        id: loadingId,
-                        sender: 'assistant',
-                        text: '...',
-                        timestamp: new Date().toISOString(), // 화면의 '(12초)'는 이 시각부터 센다
-                        isTyping: true,
-                        progress: { phase: 'thinking', steps: [] },
-                    },
-                ]);
-                progressTimer = watchProgress(sessionId, loadingId, requestId, cancelSource);
-                // 예전에 만든 빈 대화('새 대화')에 처음 질문하면 제목을 질문으로 바꾼다
-                if (isFirstMessage && session.title !== shortTitle(question)) {
-                    await axios.put(`/sessions/${sessionId}`, { title: shortTitle(question) });
-                    touchSession(sessionId, { title: shortTitle(question) });
-                }
-
-                const response = await axios.post(
-                    '/llm1',
-                    {
-                        text: question,
-                        sessionId,
-                        modelId: useModelsStore.getState().selectedModel.id,
-                        // 대화 컨텍스트는 항상 기억한다: 백엔드가 이 세션의 이전 대화를 함께 모델에 보낸다.
-                        // 백엔드는 값이 없으면 false로 보므로 반드시 true를 보낸다
-                        isCached: true,
-                        requestId,
-                    },
-                    { cancelToken: cancelSource.token },
-                );
-                const answer = toBotResponse(response.data);
-
-                const saved = await saveMessage(sessionId, {
-                    sender: 'assistant',
-                    text: answer.text,
-                    ...(answer.query_string && { query_string: answer.query_string }),
-                    ...(answer.query_result?.length && { query_result: JSON.stringify(answer.query_result) }),
-                    ...(answer.elapsed_time && { elapsed_time: answer.elapsed_time }),
-                    ...(answer.inference && { inference: JSON.stringify(answer.inference) }),
-                });
-                // 저장한 메시지에는 JSON 문자열로 들어가므로, 화면에는 받은 그대로의 값을 쓴다
-                const botMessage: ChatMessageType = {
-                    ...saved,
-                    ...answer,
-                    displayText: '',
-                    animationState: 'typing',
-                };
-                updateMessages(sessionId, (messages) => [...messages.filter((m) => m.id !== loadingId), botMessage]);
-                touchSession(sessionId, { updatedAt: new Date().toISOString() });
-                typeOut(sessionId, botMessage.id, answer.text);
-            } catch (error) {
-                const cancelled = axios.isCancel(error);
-                const notice: ChatMessageType = {
-                    id: newId(),
-                    sender: 'assistant',
-                    text: cancelled ? CANCEL_ANSWER : ERROR_ANSWER,
-                    timestamp: new Date().toISOString(),
-                    animationState: 'appear',
-                };
-                if (sessionId) {
-                    updateMessages(sessionId, (messages) => [...messages.filter((m) => m.id !== loadingId), notice]);
-                    // 다시 열었을 때도 무슨 일이 있었는지 보이도록 안내 문구도 저장한다
-                    saveMessage(sessionId, { sender: 'assistant', text: notice.text }).catch(() => {});
-                }
-                if (!cancelled) set({ error: '메시지를 전송하는 중 오류가 발생했습니다.' });
-            } finally {
-                window.clearInterval(progressTimer);
-                set({ waitingForResponse: false, cancelSource: null });
-            }
-        },
+        explainAction: (actionId, note) => ask(note, actionId),
 
         cancelRequest: () => {
             get().cancelSource?.cancel('사용자가 요청을 취소했습니다.');

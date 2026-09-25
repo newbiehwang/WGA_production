@@ -59,6 +59,9 @@ const LABELS: Record<string, string> = {
     generate_network_graph: '네트워크 그래프 생성',
     generate_flow_diagram: '흐름도 생성',
     generate_fishbone_diagram: '피시본 다이어그램 생성',
+    // 변경 도구: 부르면 실행되지 않고 승인 요청이 만들어진다 (답변 아래의 승인 카드)
+    set_log_retention: '로그 보존 기간 변경 요청',
+    set_alarm_actions: '알람 알림 변경 요청',
 };
 
 // listCloudwatchDashboards → list_cloudwatch_dashboards. 도구 이름·입력 요약은 감사 로그 화면(features/audit)도 쓴다

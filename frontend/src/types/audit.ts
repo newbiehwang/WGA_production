@@ -1,6 +1,6 @@
 // 감사 로그 (GET /audit, services/llm/audit.py)와 같은 모양
 
-export type AuditKind = 'tool' | 'request';
+export type AuditKind = 'tool' | 'request' | 'action';
 export type AuditStatus = 'ok' | 'error';
 export type AuditScope = 'mine' | 'all' | 'user';
 
@@ -26,6 +26,12 @@ export interface AuditRecord {
     model?: string;
     toolCount?: number;
     redacted?: Record<string, number>; // Claude로 보내기 전에 가린 값의 수 (종류별)
+    // 변경 작업의 사건 (kind: 'action', services/llm/approvals.py)
+    event?: 'requested' | 'approved' | 'denied' | 'executed' | 'failed';
+    actionId?: string;
+    summary?: string; // 예: "보존 기간 30일 → 14일"
+    decidedBy?: string; // 승인·거절한 사람 (Cognito sub)
+    result?: string; // 실행 결과
 }
 
 export interface AuditPage {

@@ -899,3 +899,162 @@
     max-width: 90%;
   }
 }
+
+/* ---------------------------------------------------------------- 변경 작업 승인 카드 (ApprovalCard.tsx)
+   답변 아래에 둔다. 승인을 기다리는 동안은 주황 테두리로 눈에 띄게, 끝나면 차분한 회색으로 */
+
+.approval-card {
+  margin-top: 12px;
+  border: 1px solid rgba(255, 153, 0, 0.55);
+  border-radius: 12px;
+  background: #fffaf2;
+  padding: 14px 16px;
+  display: grid;
+  gap: 8px;
+  animation: menu-in 160ms ease both;
+}
+
+.approval-card:not(.is-pending) {
+  border-color: var(--color-line);
+  background: #f8fafc;
+}
+
+.approval-card.is-executed {
+  border-color: rgba(88, 167, 121, 0.45);
+  background: #f4fbf6;
+}
+
+.approval-card.is-failed {
+  border-color: rgba(220, 53, 69, 0.35);
+  background: #fdf5f6;
+}
+
+.approval-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.approval-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(255, 153, 0, 0.18);
+  color: #9a5b00;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.approval-card:not(.is-pending) .approval-badge {
+  background: rgba(120, 120, 120, 0.14);
+  color: #5f6670;
+}
+
+.approval-tool {
+  font-family: var(--font-label);
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #1f2933;
+}
+
+.approval-timer {
+  margin-left: auto;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 600;
+  color: #9a5b00;
+  font-variant-numeric: tabular-nums;
+}
+
+.approval-summary {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #1f2933;
+  overflow-wrap: anywhere;
+}
+
+.approval-change {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-label);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.approval-before {
+  color: #6c757d;
+}
+
+.approval-arrow {
+  color: #9aa4b1;
+}
+
+.approval-after {
+  color: var(--color-primary);
+}
+
+.approval-args {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.approval-arg {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
+  gap: 10px;
+  font-size: 12px;
+}
+
+.approval-arg dt {
+  color: #6c757d;
+  font-family: var(--font-label);
+  font-weight: 600;
+}
+
+.approval-arg dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.approval-arg code {
+  color: #3c4650;
+}
+
+.approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.approval-status,
+.approval-result,
+.approval-error {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.approval-status {
+  font-family: var(--font-label);
+  font-weight: 600;
+  color: #3c4650;
+}
+
+.approval-card.is-executed .approval-status {
+  color: #3f8a61;
+}
+
+.approval-result,
+.approval-error {
+  color: #b02a37;
+  overflow-wrap: anywhere;
+}
