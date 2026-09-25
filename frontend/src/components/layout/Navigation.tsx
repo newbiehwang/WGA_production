@@ -1,4 +1,4 @@
-// 위쪽 내비게이션: 로고 · 가운데 탭(홈, 대화) · 오른쪽 프로필 (AXPI Navigation.tsx)
+// 위쪽 내비게이션: 로고 · 가운데 탭(홈, 대화, 감사 로그) · 오른쪽 프로필 (AXPI Navigation.tsx)
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import type { AuthUser } from '@/auth/authClient';
@@ -10,6 +10,7 @@ import { ProfileDropdown } from './ProfileDropdown';
 const NAV_ITEMS = [
     { label: '홈', to: '/' },
     { label: '대화', to: '/chat' },
+    { label: '감사 로그', to: '/audit' },
 ];
 
 export function Navigation({

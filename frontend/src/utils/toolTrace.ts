@@ -61,9 +61,9 @@ const LABELS: Record<string, string> = {
     generate_fishbone_diagram: '피시본 다이어그램 생성',
 };
 
-// listCloudwatchDashboards → list_cloudwatch_dashboards
+// listCloudwatchDashboards → list_cloudwatch_dashboards. 도구 이름·입력 요약은 감사 로그 화면(features/audit)도 쓴다
 const toSnake = (name: string) => name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
-const labelOf = (name: string) => LABELS[name] ?? LABELS[toSnake(name)] ?? name;
+export const labelOf = (name: string) => LABELS[name] ?? LABELS[toSnake(name)] ?? name;
 
 const MAX_VALUE = 40; // 값 하나의 최대 길이
 const MAX_DETAIL = 100; // 한 줄 전체의 최대 길이
@@ -71,7 +71,7 @@ const MAX_DETAIL = 100; // 한 줄 전체의 최대 길이
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
 // 입력값 중 글자·숫자·참거짓만 " · "로 잇는다. 차트 데이터 같은 배열·객체는 길어서 뺀다
-const summarize = (input: unknown): string => {
+export const summarize = (input: unknown): string => {
     if (!input || typeof input !== 'object') return '';
     const values = Object.values(input as Record<string, unknown>)
         .filter((v) => ['string', 'number', 'boolean'].includes(typeof v) && String(v).trim() !== '')

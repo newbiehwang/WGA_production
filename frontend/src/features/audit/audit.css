@@ -1,0 +1,282 @@
+/* 감사 로그 화면. 패널·목록 행·상태 배지·보조 버튼은 AXPI(components/panel.css)를 그대로 쓰고,
+   여기에는 열 너비(표 머리와 행이 같은 격자), 거르기 버튼, 펼친 상세만 둔다 */
+
+.audit-panel {
+  gap: 0;
+}
+
+/* ---------------------------------------------------------------- 거르기 */
+
+.audit-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  margin-bottom: 14px;
+}
+
+.audit-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-filter-label {
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 600;
+  color: #6c757d;
+  letter-spacing: 0.04em;
+}
+
+.audit-segment {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: #f5f8fc;
+}
+
+.audit-segment-btn {
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #4a5563;
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  font-weight: 600;
+  height: 28px;
+  padding: 0 10px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.audit-segment-btn:hover:not(.is-active) {
+  background: #eaf2fc;
+}
+
+.audit-segment-btn.is-active {
+  background: #fff;
+  color: var(--color-primary);
+  box-shadow: 0 1px 3px rgba(35, 47, 62, 0.12);
+}
+
+.audit-segment-btn:focus-visible,
+.audit-select:focus-visible,
+.audit-row-button:focus-visible {
+  outline: 2px solid rgba(0, 123, 255, 0.32);
+  outline-offset: 2px;
+}
+
+.audit-select {
+  height: 34px;
+  min-width: 160px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: #fff;
+  color: #3c4650;
+  font-family: var(--font-label);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0 10px;
+}
+
+/* ---------------------------------------------------------------- 표: 머리와 행이 같은 열 너비를 쓴다 */
+
+.audit-table-header,
+.audit-row-button {
+  display: grid;
+  /* 시각 · 요청자 · 도구 · 요약(남는 폭) · 결과 · 표시 */
+  grid-template-columns: 170px minmax(96px, 170px) 124px minmax(140px, 1fr) 100px 76px;
+  align-items: center;
+  gap: 12px;
+}
+
+/* AXPI 목록은 넘치는 행을 숨긴다(overflow: hidden). 감사 로그는 길어지므로 목록 안에서 스크롤한다 */
+.audit-table-body {
+  overflow-y: auto;
+  padding-bottom: 4px;
+}
+
+.audit-row {
+  display: block;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.audit-row.is-open {
+  border-color: rgba(0, 123, 255, 0.3);
+}
+
+.audit-row-button {
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  padding: 12px 16px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.audit-row-button > span {
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audit-col-time,
+.audit-col-user {
+  color: #555;
+}
+
+.audit-row-button .audit-col-tool {
+  font-family: var(--font-label);
+  font-weight: 700;
+  color: #1f2933;
+}
+
+.audit-kind-request {
+  color: var(--color-secondary);
+}
+
+.audit-col-summary {
+  color: #3c4650;
+}
+
+.audit-col-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audit-status-error {
+  background: rgba(220, 53, 69, 0.12);
+  color: #b02a37;
+}
+
+.audit-ms,
+.audit-muted {
+  font-size: 12px;
+  color: #8a94a0;
+}
+
+.audit-row-button .audit-col-flags {
+  display: inline-flex;
+  flex-wrap: wrap; /* Slack과 가림이 함께 있으면 두 줄로 */
+  gap: 4px;
+  white-space: normal;
+}
+
+.audit-flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(120, 120, 120, 0.12);
+  color: #5f6670;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.audit-flag.is-redacted {
+  background: rgba(255, 153, 0, 0.14);
+  color: #9a5b00;
+}
+
+/* ---------------------------------------------------------------- 펼친 상세 */
+
+.audit-row-details {
+  border-top: 1px solid #edf1f6;
+  padding: 12px 16px 14px;
+  animation: menu-in 140ms ease both;
+}
+
+.audit-details {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 8px 16px;
+  font-size: 13px;
+}
+
+.audit-details dt {
+  font-family: var(--font-label);
+  font-weight: 600;
+  color: #6c757d;
+}
+
+.audit-details dd {
+  margin: 0;
+  min-width: 0;
+  color: #1f2933;
+  overflow-wrap: anywhere;
+}
+
+.audit-details code {
+  font-size: 12px;
+  color: #3c4650;
+}
+
+.audit-code {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f5f8fc;
+  border: 1px solid #e8edf3;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.audit-error-text {
+  color: #b02a37;
+}
+
+.audit-more {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 2px;
+}
+
+/* ---------------------------------------------------------------- 좁은 화면: 행을 두 줄로 */
+
+@media (max-width: 860px) {
+  .audit-table-header {
+    display: none;
+  }
+
+  .audit-row-button {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "tool status"
+      "summary summary"
+      "time flags"
+      "user user";
+    gap: 4px 10px;
+  }
+
+  .audit-row-button .audit-col-time { grid-area: time; }
+  .audit-row-button .audit-col-user { grid-area: user; }
+  .audit-row-button .audit-col-tool { grid-area: tool; }
+  .audit-row-button .audit-col-summary { grid-area: summary; }
+  .audit-row-button .audit-col-status { grid-area: status; }
+  .audit-row-button .audit-col-flags { grid-area: flags; justify-content: flex-end; }
+
+  .audit-details {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .audit-details dd {
+    margin-bottom: 8px;
+  }
+}

@@ -1,4 +1,4 @@
-// 앱 틀: 로그인하지 않았으면 로그인 화면, 했으면 위쪽 내비게이션 + 화면(홈 / 대화)
+// 앱 틀: 로그인하지 않았으면 로그인 화면, 했으면 위쪽 내비게이션 + 화면(홈 / 대화 / 감사 로그)
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { setUnauthorizedHandler } from './api/http';
@@ -7,6 +7,7 @@ import { useAuthStore } from './auth/authStore';
 import { LoginPage } from './components/layout/LoginPage';
 import { LogoutOverlay } from './components/layout/LogoutOverlay';
 import { Navigation } from './components/layout/Navigation';
+import { AuditPage } from './features/audit/AuditPage';
 import { ChatPage } from './features/chat/ChatPage';
 import { HomePage } from './features/home/HomePage';
 import { useChatStore } from './stores/chatStore';
@@ -75,6 +76,7 @@ export default function App() {
                     <Routes>
                         <Route path="/" element={<HomePage />} />
                         <Route path="/chat" element={<ChatPage />} />
+                        <Route path="/audit" element={<AuditPage />} />
                         {/* 예전 주소(/start-chat, /dashboard, /login)와 로그인·로그아웃 뒤 돌아오는 /redirect는 홈으로 */}
                         <Route path="*" element={<Navigate to="/" replace />} />
                     </Routes>
