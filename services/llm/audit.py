@@ -118,9 +118,10 @@ class AuditLog:
         self.suspicious_count = 0  # 지시문처럼 보이는 문구가 든 도구 결과 수 (injection.py)
 
     # ---------------------------------------------------------------- 도구 반복에서 부르는 메서드
-    def tool_started(self, tool_id: str, name: str, tool_input: Any) -> None:
-        # 모델이 준 입력에는 가명이 들어 있을 수 있다. 도구가 실제로 받은 값으로 되돌린 뒤 비밀 값만 가린다
-        actual = self._redactor.secrets_only(self._redactor.restore(tool_input))
+    def tool_started(self, tool_id: str, name: str, tool_input: Any, restore: bool = True) -> None:
+        # 모델이 준 입력에는 가명이 들어 있을 수 있다. 도구가 실제로 받은 값으로 되돌린 뒤 비밀 값만 가린다.
+        # restore=False: 가명 그대로 받은 도구 (차트 등 결과물 도구. mcp_anthropic_client)
+        actual = self._redactor.secrets_only(self._redactor.restore(tool_input) if restore else tool_input)
         self._tools[tool_id] = (_now(), name, actual)
 
     def tool_finished(self, tool_id: str, ok: bool, error: Optional[str] = None,
