@@ -57,6 +57,8 @@ Resources:
           ENV: !Ref Environment
           MCP_SESSION_TABLE: !Sub 'wga-mcp-sessions-${Environment}'
           DIAGRAM_BUCKET: !Sub 'wga-diagrambucket-${AWS::AccountId}-${Environment}'
+          # 변경 도구 실행 직전의 승인 재확인 (lambda_mcp/approval.py)
+          PENDING_ACTIONS_TABLE: !Ref PendingActionsTable
           # AWS 공식 MCP 서버(awslabs)의 로그(loguru)는 오류만 남긴다
           FASTMCP_LOG_LEVEL: ERROR
           # Lambda에서 쓸 수 있는 곳은 /tmp뿐이다. 라이브러리(fastmcp 등)가 홈 폴더에 설정·캐시를 만들 때 쓰인다
@@ -134,6 +136,25 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
                 Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/wga-mcp-sessions-${Environment}'
+              # 변경 도구 (app.py의 set_log_retention · set_alarm_actions). 승인된 작업만 실행되고,
+              # 이 환경의 WGA 리소스로만 한정한다 (도구 안의 이름 확인과 같은 범위)
+              - Effect: Allow
+                Action:
+                  - logs:PutRetentionPolicy
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/wga-*-${Environment}'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/wga-*-${Environment}:*'
+              - Effect: Allow
+                Action:
+                  - cloudwatch:EnableAlarmActions
+                  - cloudwatch:DisableAlarmActions
+                Resource: !Sub 'arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:wga-${Environment}-*'
+              # 승인 재확인: 승인 상태 확인 + 실행 표시(조건부 쓰기)와 결과 기록 (lambda_mcp/approval.py)
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt PendingActionsTable.Arn
               # 다이어그램 이미지 업로드 및 presigned URL 발급 (lambda_mcp/diagram_utils.py)
               - Effect: Allow
                 Action:
@@ -227,6 +248,13 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !GetAtt AuditLogGroup.Arn
+              # 변경 작업 승인 요청 저장·조회·결정 (approvals.py). AWS를 바꾸는 권한은 이 역할에 없다 (MCP 역할에만)
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt PendingActionsTable.Arn
 
   # 답변을 만드는 동안의 진행 상황 (생각 중·도구 실행 중·사고 요약). 화면이 답을 기다리며 1초마다 읽는다.
   # 답을 기다리는 동안만 쓰는 임시 기록이라 한 시간 뒤 TTL로 지워지고, 백업(PITR)·고객 관리 KMS 키를 두지 않는다
@@ -314,6 +342,33 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
+  # 변경 작업 승인 요청 (approvals.py). 10분 안에 승인하지 않으면 만료되고, 30일 뒤 TTL로 지워진다.
+  # 오래 볼 기록(누가 요청·승인했고 무엇이 실행됐나)은 감사 로그에 있다
+  PendingActionsTable:
+    Type: AWS::DynamoDB::Table
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_28
+            comment: 짧게 쓰는 승인 대기 기록이다. 모든 사건은 감사 로그(시점 복구 켬)에 남는다
+          - id: CKV_AWS_119
+            comment: AWS 소유 키 암호화(기본값)를 쓴다. 고객 관리 KMS 키는 월 비용이 들어 두지 않는다
+    Properties:
+      TableName: !Sub 'wga-pending-actions-${Environment}'
+      AttributeDefinitions:
+        - AttributeName: 'actionId'
+          AttributeType: S
+      KeySchema:
+        - AttributeName: 'actionId'
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: 'ttl'
+        Enabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
   LlmLambdaLayer:
     Type: AWS::Lambda::LayerVersion
     Properties:
@@ -354,6 +409,8 @@ Resources:
           # 감사 로그 (audit.py)
           AUDIT_TABLE: !Ref AuditTable
           AUDIT_LOG_GROUP: !Ref AuditLogGroup
+          # 변경 작업 승인 (approvals.py)
+          PENDING_ACTIONS_TABLE: !Ref PendingActionsTable
       Layers:
         - !Ref LlmLambdaLayer
       Tags:
@@ -499,6 +556,121 @@ Resources:
       FunctionName: !Ref LlmLambdaFunction
       Principal: 'apigateway.amazonaws.com'
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayId}/*/*/audit'
+
+  # 변경 작업 승인 API (llm_service.handle_action)
+  #   GET  /actions/{actionId}          상태
+  #   POST /actions/{actionId}/approve  승인하고 실행
+  #   POST /actions/{actionId}/deny     거절
+  ActionsApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ParentId: !Ref ApiGatewayRootResourceId
+      PathPart: 'actions'
+
+  ActionApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ParentId: !Ref ActionsApiResource
+      PathPart: '{actionId}'
+
+  ActionGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref ActionApiResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LlmLambdaFunction.Arn}/invocations'
+
+  ActionOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref ActionApiResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LlmLambdaFunction.Arn}/invocations'
+
+  ActionApproveResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ParentId: !Ref ActionApiResource
+      PathPart: 'approve'
+
+  ActionApproveMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref ActionApproveResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LlmLambdaFunction.Arn}/invocations'
+
+  ActionApproveOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref ActionApproveResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LlmLambdaFunction.Arn}/invocations'
+
+  ActionDenyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ParentId: !Ref ActionApiResource
+      PathPart: 'deny'
+
+  ActionDenyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref ActionDenyResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LlmLambdaFunction.Arn}/invocations'
+
+  ActionDenyOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref ActionDenyResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LlmLambdaFunction.Arn}/invocations'
+
+  LlmLambdaPermissionForActions:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref LlmLambdaFunction
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayId}/*/*/actions/*'
 
   Llm2ApiResource:
     Type: AWS::ApiGateway::Resource

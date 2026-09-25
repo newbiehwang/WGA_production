@@ -1,0 +1,94 @@
+"""도구 위험도 목록: 어떤 도구가 AWS를 바꾸는지의 기준은 여기 한 곳이다.
+
+    tools/list ──▶ 도구 정의에 위험도를 붙여 내보낸다 (MCP 표준 annotations + _meta["wga/risk"])
+                     └─▶ LLM Lambda가 읽고, 변경 도구면 실행하지 않고 승인을 기다린다
+    tools/call ──▶ 변경 도구면 승인된 작업인지 다시 확인한 뒤에만 실행한다 (lambda_mcp.py)
+
+위험도
+- read     : 조회만 한다.
+- artifact : AWS 리소스는 바꾸지 않고 결과물(다이어그램 이미지, 차트 주소)만 만든다.
+- write    : AWS 리소스를 바꾼다. 사람이 승인해야 실행된다.
+
+목록에 없는 도구는 write로 본다 (안전하게 실패). 공식 MCP 서버를 올리다가 새 도구가 생겨도 승인 없이는 돌지 않는다.
+공식 서버들은 MCP 표준의 annotations(readOnlyHint 등)를 비워 두어 그대로 믿을 수 없다. 그래서 여기서 채운다.
+"""
+from typing import Any, Dict
+
+READ = "read"
+ARTIFACT = "artifact"
+WRITE = "write"
+
+RISK_META_KEY = "wga/risk"
+
+TOOL_RISK: Dict[str, str] = {
+    # AWS 공식 CloudWatch MCP 서버
+    "describe_log_groups": READ,
+    "analyze_log_group": READ,
+    "execute_log_insights_query": READ,  # 쿼리 시작도 조회다 (StartQuery)
+    "get_logs_insight_query_results": READ,
+    "cancel_logs_insight_query": READ,  # 자기가 시작한 쿼리를 멈출 뿐 리소스는 그대로
+    "get_metric_data": READ,
+    "get_metric_metadata": READ,
+    "analyze_metric": READ,
+    "get_recommended_metric_alarms": READ,
+    "get_active_alarms": READ,
+    "get_alarm_history": READ,
+    # AWS 공식 문서 MCP 서버
+    "search_documentation": READ,
+    "read_documentation": READ,
+    "read_sections": READ,
+    "search_table": READ,
+    "recommend": READ,
+    # AWS 공식 Billing and Cost Management MCP 서버 (Cost Explorer)
+    "cost-explorer": READ,
+    # 직접 둔 도구 (app.py, 이름은 camelCase로 등록된다)
+    "listCloudwatchDashboards": READ,
+    "getDashboardSummary": READ,
+    "getDiagramCodeExamples": READ,
+    "listAvailableDiagramIcons": READ,
+    "generateArchitectureDiagram": ARTIFACT,  # 다이어그램 버킷에 이미지를 올린다
+    "generateLineChart": ARTIFACT,
+    "generateBarChart": ARTIFACT,
+    "generatePieChart": ARTIFACT,
+    "generateScatterChart": ARTIFACT,
+    "generateAreaChart": ARTIFACT,
+    "generateWordCloudChart": ARTIFACT,
+    "generateRadarChart": ARTIFACT,
+    "generateColumnChart": ARTIFACT,
+    "generateHistogramChart": ARTIFACT,
+    "generateTreemapChart": ARTIFACT,
+    "generateDualAxesChart": ARTIFACT,
+    "generateMindMap": ARTIFACT,
+    "generateNetworkGraph": ARTIFACT,
+    "generateFlowDiagram": ARTIFACT,
+    "generateFishboneDiagram": ARTIFACT,
+    # 변경 도구 (app.py). 승인된 작업만 실행된다
+    "setLogRetention": WRITE,
+    "setAlarmActions": WRITE,
+}
+
+# MCP 표준 annotations (2025-03-26 이후). 클라이언트에게 주는 힌트이고, 실제 통제는 승인 확인과 IAM이 한다
+_ANNOTATIONS = {
+    READ: {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
+    ARTIFACT: {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
+    WRITE: {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
+}
+
+
+def risk_of(name: str) -> str:
+    """도구의 위험도. 목록에 없으면 write (안전하게 실패)."""
+    return TOOL_RISK.get(name, WRITE)
+
+
+def needs_approval(name: str) -> bool:
+    return risk_of(name) == WRITE
+
+
+def annotate(tool: Dict[str, Any]) -> Dict[str, Any]:
+    """tools/list에 내보낼 도구 정의에 위험도를 붙인 사본."""
+    risk = risk_of(tool.get("name", ""))
+    return {
+        **tool,
+        "annotations": {**tool.get("annotations", {}), **_ANNOTATIONS[risk]},
+        "_meta": {**tool.get("_meta", {}), RISK_META_KEY: risk},
+    }

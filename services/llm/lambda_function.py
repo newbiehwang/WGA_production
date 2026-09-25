@@ -1,7 +1,7 @@
 # llm/lambda_function.py
 import requests
-from llm_service import (parse_body, handle_llm1_with_mcp, handle_progress, handle_audit, available_models,
-                         pick_default_model)
+from llm_service import (parse_body, handle_llm1_with_mcp, handle_progress, handle_audit, handle_action,
+                         available_models, pick_default_model)
 from common.config import get_config
 from common.utils import cors_response
 
@@ -49,6 +49,16 @@ def lambda_handler(event, context):
             # 감사 로그 (누가 어떤 도구를 불렀나). 관리자 여부는 ID 토큰의 cognito:groups로 판단한다
             claims = (event.get("requestContext") or {}).get("authorizer", {}).get("claims") or {}
             return handle_audit(event.get("queryStringParameters") or {}, claims.get("sub"), claims, origin)
+
+        elif path.startswith("/actions/"):
+            # 변경 작업 승인: GET /actions/{id}, POST /actions/{id}/approve, POST /actions/{id}/deny
+            claims = (event.get("requestContext") or {}).get("authorizer", {}).get("claims") or {}
+            parts = path.strip("/").split("/")
+            if len(parts) == 2 and http_method == "GET":
+                return handle_action(parts[1], "get", claims, origin)
+            if len(parts) == 3 and parts[2] in ("approve", "deny") and http_method == "POST":
+                return handle_action(parts[1], parts[2], claims, origin)
+            return cors_response(404, {"error": f"Route {http_method} {path} not found."}, origin)
 
         else:
             return cors_response(404, {"error": f"Route {http_method} {path} not found."}, origin)

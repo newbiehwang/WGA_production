@@ -11,7 +11,10 @@ from common.utils import invoke_bedrock_nova, cors_headers, cors_response
 from slack_sdk import WebClient
 from llm_progress import REQUEST_ID, ProgressReporter, read_progress
 from redaction import Redactor
-from audit import AuditLog, AuditQueryError, CloudWatchSink, query_audit
+from audit import AuditLog, AuditQueryError, CloudWatchSink, groups_of, query_audit
+from approvals import (APPROVED, DENIED, FINISHED, ApprovalError, ApprovalRequester, ApprovalStore, approval_mode,
+                       can_view, check_decision, execute_approved, follow_up_prompt, public_view)
+from mcp_client import MCPClient
 
 # Lambda 환경에서 효율적인 재사용을 위한 클라이언트 캐싱
 client = None
@@ -44,6 +47,9 @@ ACCOUNT_ID = os.environ.get("ACCOUNT_ID", "")
 AUDIT_TABLE = os.environ.get("AUDIT_TABLE")
 audit_table = boto3.resource("dynamodb").Table(AUDIT_TABLE) if AUDIT_TABLE else None
 audit_sink = CloudWatchSink(os.environ.get("AUDIT_LOG_GROUP"))
+# 변경 작업 승인 (approvals.py). 테이블이 없으면 변경 도구는 쓸 수 없다 (승인 요청을 만들지 못해 거절된다)
+PENDING_ACTIONS_TABLE = os.environ.get("PENDING_ACTIONS_TABLE")
+approval_store = ApprovalStore(boto3.resource("dynamodb").Table(PENDING_ACTIONS_TABLE)) if PENDING_ACTIONS_TABLE else None
 
 
 # ---------------------------------------------------------------- 모델 선택
@@ -361,6 +367,16 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
         print(f"chat_table 상태: {chat_table is not None}")
         print(f"전체 body: {json.dumps(body, ensure_ascii=False)}")
 
+        # 승인한(또는 거절한) 변경 작업의 결과를 설명해 달라는 요청: 질문은 서버가 저장된 기록으로 만든다
+        action_id = body.get("actionId")
+        if action_id:
+            action = approval_store.get(action_id) if approval_store else None
+            if not action or not caller_id or action.get("requesterId") != caller_id:
+                return cors_response(404, {"error": "변경 작업을 찾을 수 없습니다."}, origin)
+            if public_view(action)["status"] not in FINISHED:
+                return cors_response(409, {"error": "아직 결정되지 않은 변경 작업입니다."}, origin)
+            user_input = follow_up_prompt(action)
+
         if not user_input:
             return cors_response(400, {"error": "사용자 입력이 제공되지 않았습니다."}, origin)
 
@@ -379,6 +395,10 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
         4. Documentation Search (AWS official documentation MCP tools): search_documentation → read_documentation (recommend for related pages)
         5. Cost Analysis (AWS official Cost Explorer MCP tool): cost-explorer (operation "getCostAndUsage" etc.)
         6. Visualization: Generate charts/AWS diagrams (only if the user explicitly requests visualization)
+        7. Changes (only when the user asks to change something): setLogRetention (WGA Lambda log group retention),
+           setAlarmActions (turn WGA alarm notifications on/off). Calling them does NOT change anything yet: it creates
+           an approval request, and the change runs only after the user approves it on the screen.
+           Tell the user what will change and that approval is needed. Never claim the change is done.
         </Tools>
 
         <Critical Rules - Response Generation Order>
@@ -426,6 +446,11 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
         client.progress = progress
         client.redactor = redactor
         client.audit = audit
+        # 변경 도구는 승인 화면이 있는 웹 요청에서만 요청할 수 있다 (Slack 봇·요청자를 모르는 경로는 None → 거절)
+        approvals = (ApprovalRequester(approval_store, requester_id=caller_id, requester_email=caller_email,
+                                       request_id=request_id, session_id=session_id, audit=audit)
+                     if caller_id and approval_store is not None else None)
+        client.approvals = approvals
         audit.model_id = getattr(client, "model_id", None) or model_id  # 요청한 모델이 없으면 기본 모델로 바뀐다
 
         # 사용자 입력 처리 시작 시간 기록
@@ -545,6 +570,8 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
             "token_usage": token_usage,
             # 이번 요청에서 가린 값의 수 (종류별, 서로 다른 값 기준)
             "redacted": dict(redactor.counts),
+            # 승인을 기다리는 변경 작업. 화면이 승인 카드로 보여 준다. 실제로 실행될 인자를 그대로 보여 줘야 하므로 가리지 않는다
+            "pendingActions": [public_view(item) for item in approvals.created] if approvals else [],
         })
         audit.request_finished(True)
 
@@ -611,6 +638,62 @@ def handle_audit(params, caller_id, claims, origin):
     try:
         return cors_response(200, query_audit(audit_table, caller_id, claims, params), origin)
     except AuditQueryError as error:
+        return cors_response(error.status, {"error": str(error)}, origin)
+
+
+def _mcp_url():
+    return os.environ.get('MCP_URL') or get_config().get('mcp', {}).get('function_url')
+
+
+def call_mcp_tool(tool, args, meta=None):
+    """MCP 도구 하나를 부른다 (승인된 변경 작업 실행용). 세션을 열고 부른 뒤 닫는다."""
+    mcp = MCPClient(_mcp_url())
+    try:
+        return mcp.call_tool(tool, args, meta=meta)
+    finally:
+        try:
+            mcp.close()
+        except Exception as error:
+            print(f"MCP 세션 닫기 실패 (무시): {error}")
+
+
+def handle_action(action_id, operation, claims, origin):
+    """변경 작업 승인 API (approvals.py).
+    GET /actions/{id}: 상태 · POST /actions/{id}/approve: 승인하고 실행 · POST /actions/{id}/deny: 거절"""
+    caller_id = (claims or {}).get("sub")
+    groups = groups_of(claims)
+    try:
+        if approval_store is None:
+            raise ApprovalError(503, "변경 작업 승인 테이블이 설정되지 않았습니다")
+        item = approval_store.get(action_id)
+        if operation == "get":
+            if not caller_id or not item or not can_view(item, caller_id, groups):
+                raise ApprovalError(404, "승인 요청을 찾을 수 없습니다")
+            return cors_response(200, public_view(item), origin)
+
+        approve = operation == "approve"
+        item = check_decision(item, caller_id, groups, approve, approval_mode(os.environ.get("ENV", "dev")))
+        auditor = AuditLog(audit_table, audit_sink, Redactor([ACCOUNT_ID]), user_id=caller_id,
+                           email=(claims or {}).get("email"), source="web", request_id=item.get("requestId"),
+                           session_id=item.get("sessionId"), model_id=None, question="")
+        # 결정을 감사 로그에 먼저 남긴다. 남기지 못하면 승인하지 않는다 (기록 없이 AWS가 바뀌지 않게)
+        try:
+            auditor.action_event("approved" if approve else "denied", item, decided_by=caller_id)
+        except Exception as error:
+            print(f"감사 로그 저장 실패로 결정을 멈춤: {error}")
+            raise ApprovalError(503, "감사 로그를 남기지 못해 처리하지 않았습니다. 잠시 뒤 다시 시도해 주세요")
+        approval_store.set_decision(action_id, APPROVED if approve else DENIED, caller_id)
+        if not approve:
+            return cors_response(200, public_view(approval_store.get(action_id) or item), origin)
+
+        latest = execute_approved(approval_store, item, call_mcp_tool)
+        try:
+            auditor.action_event(latest.get("status", "failed"), latest, decided_by=caller_id,
+                                 result=latest.get("result"))
+        except Exception as error:  # 이미 실행되었다. 결과는 승인 테이블과 MCP 로그에 남아 있다
+            print(f"실행 결과 감사 로그 저장 실패: {error}")
+        return cors_response(200, public_view(latest), origin)
+    except ApprovalError as error:
         return cors_response(error.status, {"error": str(error)}, origin)
 
 
