@@ -32,7 +32,7 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 - **Database**: DynamoDB, Athena
 - **Storage**: S3 (정적 파일, 로그, 다이어그램 이미지 저장)
 - **Monitoring 대상**: CloudWatch Logs(Logs Insights), CloudWatch 메트릭·알람·대시보드, Cost Explorer
-- **MCP 도구**: AWS 공식 MCP 서버(awslabs) — CloudWatch, AWS Documentation, Billing and Cost Management(Cost Explorer), CloudTrail, Pricing
+- **MCP 도구**: AWS 공식 MCP 서버(awslabs) — CloudWatch, AWS Documentation, Billing and Cost Management(Cost Explorer), CloudTrail, Pricing, IAM(읽기 전용)
 - **Authentication**: AWS Cognito (User Pool, Identity Pool)
 - **Infrastructure**: CloudFormation (Nested Stack 포함)
 - **배포**: `deploy.sh` 배포 스크립트, CodeBuild(MCP 이미지 빌드), ECR, Amplify Hosting
@@ -361,11 +361,12 @@ MCP의 HTTP+SSE(Server-Sent Events) 방식은 연결을 오래 유지해야 해�
 | 비용·사용량 조회, 예측 | `awslabs.billing-cost-management-mcp-server`의 Cost Explorer 부분 |
 | 누가 언제 어떤 AWS API를 불렀나 (최근 90일 관리 이벤트) | `awslabs.cloudtrail-mcp-server`의 `lookup_events` |
 | 이 설정이면 월 얼마인가 (공개 가격표) | `awslabs.aws-pricing-mcp-server`의 가격표 조회 도구 4개 |
+| IAM 사용자·역할·그룹·정책 조회, 권한 시뮬레이션 (AccessDenied 원인 설명) | `awslabs.iam-mcp-server`의 조회 도구 12개 (읽기 전용) |
 | CloudWatch 대시보드 목록·요약 | 직접 둠 (공식 CloudWatch 서버에 대시보드 도구가 없음) |
 | 아키텍처 다이어그램 | 직접 둠 (공식 diagram 서버는 PyPI에서 폐기됨. 폐기 전 공식 서버를 옮겨 온 코드) |
 | 차트 15종 | 직접 둠 (AntV 차트 서비스) |
 
-공식 도구 중 PromQL, 로그 인덱스 추천, 일괄 Insights 쿼리는 뺐습니다(권한이 문서에 없거나 쓰임이 겹침). CloudTrail Lake 도구 4개(`lake_query` 등)도 뺐습니다(쿼리한 데이터만큼 비용이 들고 유료 이벤트 데이터 저장소가 필요). CloudTrail 조회 도구는 region 기본값이 버지니아 북부 리전으로 박혀 있어, 생략하면 이 배포의 리전을 쓰도록 바꿔 붙입니다. Pricing 서버에서는 로컬 파일 경로를 받아 여는 CDK·Terraform 분석 도구를 뺐습니다(Lambda 안에서는 자격 증명이 든 파일까지 읽을 수 있어서). 파일을 쓰는 보고서 도구, 가격 파일 주소 도구, Bedrock 설계 예시 도구도 뺐습니다. 공식 도구는 설명과 스키마가 길어서 도구 목록이 커지므로, Anthropic 요청에서는 도구 목록을 프롬프트 캐시에 올립니다. 이전 버전에서는 공개 MCP 서버의 로그 조회 도구를 옮겨 와 쓰면서 결함을 고쳐 원작자 저장소에 Pull Request를 보냈고, 이후 AWS 공식 서버로 바꿨습니다.
+공식 도구 중 PromQL, 로그 인덱스 추천, 일괄 Insights 쿼리는 뺐습니다(권한이 문서에 없거나 쓰임이 겹침). CloudTrail Lake 도구 4개(`lake_query` 등)도 뺐습니다(쿼리한 데이터만큼 비용이 들고 유료 이벤트 데이터 저장소가 필요). CloudTrail 조회 도구는 region 기본값이 버지니아 북부 리전으로 박혀 있어, 생략하면 이 배포의 리전을 쓰도록 바꿔 붙입니다. Pricing 서버에서는 로컬 파일 경로를 받아 여는 CDK·Terraform 분석 도구를 뺐습니다(Lambda 안에서는 자격 증명이 든 파일까지 읽을 수 있어서). 파일을 쓰는 보고서 도구, 가격 파일 주소 도구, Bedrock 설계 예시 도구도 뺐습니다. IAM 서버는 조회만 씁니다: 변경 도구 17개(사용자·역할 생성, 정책 붙이기, 액세스 키 발급 등)를 빼고, 서버 자체의 읽기 전용 모드를 켜고, 위험도 목록에 없는 도구는 MCP가 거절하고, IAM 쓰기 권한을 주지 않는 네 겹으로 막습니다. IAM 1.1.1의 `list_users`·`get_user`는 `ctx` 인자의 타입이 잘못 적혀 필수 입력값으로 드러나는 결함이 있어, 스키마에서 빼고 부를 때 채워 넣습니다(`HIDDEN_ARGUMENTS`). 공식 도구는 설명과 스키마가 길어서 도구 목록이 커지므로, Anthropic 요청에서는 도구 목록을 프롬프트 캐시에 올립니다. 이전 버전에서는 공개 MCP 서버의 로그 조회 도구를 옮겨 와 쓰면서 결함을 고쳐 원작자 저장소에 Pull Request를 보냈고, 이후 AWS 공식 서버로 바꿨습니다.
 
 ### 답변 진행 상황과 사고 과정
 답변을 만드는 동안 지금 무엇을 하는지(생각 중, 어떤 도구를 실행 중인지)와 모델의 사고 요약을 화면에 보여 줍니다. `/llm1`은 API Gateway REST의 동기 요청이라 답이 다 만들어진 뒤에 한 번만 응답하므로, 진행 상황은 따로 기록하고 화면이 따로 읽어 갑니다.

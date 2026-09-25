@@ -404,6 +404,10 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
              not this account's bill - use cost-explorer for actual spend). get_pricing_service_codes →
              get_pricing_service_attributes → get_pricing_attribute_values → get_pricing (filter by region, e.g.
              this deployment's region). Show unit price × usage = total and state assumptions.
+        5-3. IAM (AWS official IAM MCP tools, read-only): list_users/get_user, list_roles, list_role_policies/
+             get_role_policy, list_policies/get_managed_policy_document, list_groups/get_group, and
+             simulate_principal_policy ("can this role do X on Y?" - use it to explain AccessDenied errors).
+             You cannot change IAM; if the user asks to, explain what should be changed and let them do it.
         6. Visualization: Generate charts/AWS diagrams (only if the user explicitly requests visualization)
         7. Changes (only when the user asks to change something): setLogRetention (WGA Lambda log group retention),
            setAlarmActions (turn WGA alarm notifications on/off). Calling them does NOT change anything yet: it creates

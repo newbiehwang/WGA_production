@@ -5,7 +5,7 @@
 
     LLM Lambda ──HTTP(JSON-RPC)──▶ LambdaMCPServer (lambda_mcp.py, 세션·전송은 그대로)
                                       ├─ 직접 만든 도구 (app.py의 @mcp_server.tool)
-                                      └─ OfficialTools ──in-memory──▶ 공식 서버 객체 (CloudWatch, 문서, Cost Explorer, CloudTrail, Pricing)
+                                      └─ OfficialTools ──in-memory──▶ 공식 서버 객체 (CloudWatch, 문서, Cost Explorer, CloudTrail, Pricing, IAM)
 
 in-memory 클라이언트로 부르는 이유
 - Cost Explorer 서버(fastmcp)는 MCP 세션이 있어야 도구가 돈다 (ctx.info가 세션을 쓴다). 서버 객체의
@@ -61,11 +61,42 @@ EXCLUDED_TOOLS = {
     "get_price_list_urls": "가격 파일 주소",
     # Pricing: Bedrock 설계 예시 글. 운영 질의응답과 관계가 적고 도구 목록만 늘린다
     "get_bedrock_patterns": "운영 질문과 무관",
+    # IAM: 조회(목록·조회·인라인 정책·권한 시뮬레이션)만 쓴다. 사용자·역할·그룹 생성과 삭제, 정책 붙이기,
+    # 액세스 키 발급 같은 변경 도구는 목록에서 뺀다. 막는 곳은 네 겹이다:
+    #   1. 여기서 뺀다 → 2. 서버 자체의 읽기 전용 모드를 켠다 (load_default_servers)
+    #   3. 위험도 목록에 없어 MCP가 변경 도구로 보고 거절한다 (risk.py) → 4. IAM 쓰기 권한이 없다 (llm.yaml)
+    "add_user_to_group": "IAM 변경",
+    "attach_group_policy": "IAM 변경",
+    "attach_user_policy": "IAM 변경",
+    "create_access_key": "IAM 변경",
+    "create_group": "IAM 변경",
+    "create_role": "IAM 변경",
+    "create_user": "IAM 변경",
+    "delete_access_key": "IAM 변경",
+    "delete_group": "IAM 변경",
+    "delete_role_policy": "IAM 변경",
+    "delete_user": "IAM 변경",
+    "delete_user_policy": "IAM 변경",
+    "detach_group_policy": "IAM 변경",
+    "detach_user_policy": "IAM 변경",
+    "put_role_policy": "IAM 변경",
+    "put_user_policy": "IAM 변경",
+    "remove_user_from_group": "IAM 변경",
 }
 
 # region 인자의 기본값이 버지니아 북부 리전으로 박혀 있는 도구. 모델이 region을 생략하면 이 Lambda의 리전을 쓰게 한다.
 # (CloudWatch 도구들은 이미 AWS_REGION을 기본으로 쓴다. CloudTrail 조회는 리전별이라 다른 리전을 보면 '기록 없음'이 된다)
 REGION_FROM_ENV_TOOLS = {"lookup_events"}
+
+# 공식 서버의 결함 보정: 도구 스키마에서 빼고, 부를 때 대신 채워 넣는 인자.
+# IAM 1.1.1의 list_users·get_user는 ctx의 타입을 MCP 문맥(Context)이 아니라 CallToolResult로 잘못 적어 두어,
+# MCP SDK가 ctx를 모델이 채워야 할 필수 입력값으로 만든다 (그대로 두면 부를 때마다 검증 오류).
+# 함수 안에서는 ctx를 쓰지 않으므로 CallToolResult 형식의 빈 값을 넣는다.
+# 원래 스키마에 그 인자가 있을 때만 보정하므로, 공식 서버가 고쳐지면 아무 일도 하지 않는다
+HIDDEN_ARGUMENTS: Dict[str, Dict[str, Any]] = {
+    "list_users": {"ctx": {"content": []}},
+    "get_user": {"ctx": {"content": []}},
+}
 
 
 def _inline_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -94,7 +125,7 @@ def _inline_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def load_default_servers() -> List[Any]:
-    """이 서비스가 쓰는 공식 서버: CloudWatch, AWS 문서, Cost Explorer, CloudTrail, Pricing. 부를 때 import한다 (무겁다)."""
+    """이 서비스가 쓰는 공식 서버: CloudWatch, AWS 문서, Cost Explorer, CloudTrail, Pricing, IAM. 부를 때 import한다 (무겁다)."""
     # 공식 서버는 import할 때 loguru로 로그를 남긴다. Lambda 로그가 넘치지 않게 경고 이상만 남긴다
     os.environ.setdefault("FASTMCP_LOG_LEVEL", "ERROR")
     # Lambda에서는 /tmp만 쓸 수 있고 패키지가 설치된 곳(site-packages)은 읽기 전용이다.
@@ -110,18 +141,28 @@ def load_default_servers() -> List[Any]:
     from awslabs.billing_cost_management_mcp_server.tools.cost_explorer_tools import cost_explorer_server
     from awslabs.cloudtrail_mcp_server.server import mcp as cloudtrail
     from awslabs.cloudwatch_mcp_server.server import mcp as cloudwatch
+    from awslabs.iam_mcp_server.context import Context as IamContext
+    from awslabs.iam_mcp_server.server import mcp as iam
 
-    return [cloudwatch, documentation, cost_explorer_server, cloudtrail, pricing]
+    # IAM 서버 자체의 읽기 전용 모드. 기본값이 켜짐이고 --allow-write로 실행할 때만 꺼지지만(main),
+    # 같은 프로세스에서 import해 쓰므로 여기서 명시적으로 켜고 확인한다 (켜지지 않았으면 서버를 붙이지 않는다)
+    IamContext.set_readonly(True)
+    if not IamContext.is_readonly():
+        raise RuntimeError("IAM MCP 서버의 읽기 전용 모드를 켜지 못했습니다")
+
+    return [cloudwatch, documentation, cost_explorer_server, cloudtrail, pricing, iam]
 
 
 class OfficialTools:
     """공식 서버 여러 개의 도구를 하나로 모아 목록을 주고, 이름으로 해당 서버에 호출을 넘긴다."""
 
     def __init__(self, load_servers: Callable[[], List[Any]], excluded: Optional[Dict[str, str]] = None,
-                 region_from_env: Optional[set] = None):
+                 region_from_env: Optional[set] = None, hidden_arguments: Optional[Dict[str, Dict[str, Any]]] = None):
         self._load_servers = load_servers  # 서버 목록을 돌려주는 함수. 도구 목록이 처음 필요할 때 부른다
         self._excluded = excluded or {}
         self._region_from_env = region_from_env or set()
+        self._hidden_arguments = hidden_arguments or {}
+        self._injected: Dict[str, Dict[str, Any]] = {}  # 도구 이름 → 부를 때 채워 넣을 인자 (스키마에 있던 것만)
         self._loop = asyncio.new_event_loop()
         self._schemas: Optional[Dict[str, Dict[str, Any]]] = None  # 도구 이름 → MCP 도구 정의
         self._routes: Dict[str, Any] = {}  # 도구 이름 → 서버 객체
@@ -129,7 +170,21 @@ class OfficialTools:
     @classmethod
     def default(cls) -> "OfficialTools":
         """이 서비스가 쓰는 공식 서버를 붙인다. 여기서는 불러오지 않는다 (위 모듈 설명)."""
-        return cls(load_default_servers, EXCLUDED_TOOLS, REGION_FROM_ENV_TOOLS)
+        return cls(load_default_servers, EXCLUDED_TOOLS, REGION_FROM_ENV_TOOLS, HIDDEN_ARGUMENTS)
+
+    def _without_hidden(self, name: str, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """HIDDEN_ARGUMENTS의 인자를 스키마에서 뺀다. 실제로 있던 인자만 부를 때 채워 넣는다."""
+        hidden = {arg: value for arg, value in self._hidden_arguments.get(name, {}).items()
+                  if arg in schema.get("properties", {})}
+        if not hidden:
+            return schema
+        self._injected[name] = hidden
+        schema = copy.deepcopy(schema)
+        for arg in hidden:
+            schema["properties"].pop(arg, None)
+        if "required" in schema:
+            schema["required"] = [arg for arg in schema["required"] if arg not in hidden]
+        return schema
 
     def _region(self) -> Optional[str]:
         return os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
@@ -163,8 +218,8 @@ class OfficialTools:
                     schemas[tool.name] = {
                         "name": tool.name,
                         "description": definition.get("description", ""),
-                        "inputSchema": self._with_env_region(
-                            tool.name, _inline_refs(definition.get("inputSchema", {"type": "object"}))),
+                        "inputSchema": self._without_hidden(tool.name, self._with_env_region(
+                            tool.name, _inline_refs(definition.get("inputSchema", {"type": "object"})))),
                     }
                     self._routes[tool.name] = server
         self._schemas = schemas
@@ -184,6 +239,9 @@ class OfficialTools:
         from fastmcp import Client
 
         server = self._routes[name]
+        # 스키마에서 뺀 인자를 채워 넣는다 (공식 서버 결함 보정). 모델이 같은 이름을 보내도 보정 값이 이긴다
+        if name in self._injected:
+            arguments = {**(arguments or {}), **copy.deepcopy(self._injected[name])}
         # region을 생략하면 서버 기본값(버지니아 북부) 대신 이 Lambda의 리전을 넘긴다
         if name in self._region_from_env and not (arguments or {}).get("region") and self._region():
             arguments = {**(arguments or {}), "region": self._region()}

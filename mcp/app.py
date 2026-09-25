@@ -7,6 +7,7 @@
    - 비용: Cost Explorer (billing-cost-management 서버의 Cost Explorer 부분만)
    - CloudTrail: 최근 90일 관리 이벤트 조회 (누가 언제 어떤 API를 불렀나. 유료인 CloudTrail Lake 도구는 뺐다)
    - Pricing: 공개 가격표 조회 (이 설정이면 월 얼마인지. 로컬 파일을 읽거나 쓰는 도구는 뺐다)
+   - IAM: 사용자·역할·그룹·정책 조회와 권한 시뮬레이션 (읽기 전용. 변경 도구는 뺐다)
 2. 이 파일에 직접 둔 도구 (공식 서버가 없거나 폐기된 것)
    - CloudWatch 대시보드 목록·요약 (공식 CloudWatch 서버에 대시보드 도구가 없다)
    - 아키텍처 다이어그램 (공식 diagram 서버는 PyPI에서 폐기되었다. 폐기 전 공식 서버를 옮겨 온 코드)
