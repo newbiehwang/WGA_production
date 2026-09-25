@@ -9,6 +9,9 @@
    - Pricing: 공개 가격표 조회 (이 설정이면 월 얼마인지. 로컬 파일을 읽거나 쓰는 도구는 뺐다)
    - IAM: 사용자·역할·그룹·정책 조회와 권한 시뮬레이션 (읽기 전용. 변경 도구는 뺐다)
    - 네트워크: VPC·서브넷·보안 그룹·NACL·라우팅·ENI 조회, VPC 흐름 로그, 경로 추적 (모두 조회)
+3. S3 조회 도구 (공식 S3 서버가 없다. S3 Tables 서버는 일반 버킷용이 아니다)
+   - 버킷 목록, 버킷 보안 점검, 버킷 크기·객체 수(CloudWatch 지표), 객체 목록(이름·크기·날짜)
+   - 객체 내용은 읽지 않는다: 데이터가 계정 밖(Claude)으로 나가지 않게. IAM도 s3:GetObject를 명시적으로 거부한다
 2. 이 파일에 직접 둔 도구 (공식 서버가 없거나 폐기된 것)
    - CloudWatch 대시보드 목록·요약 (공식 CloudWatch 서버에 대시보드 도구가 없다)
    - 아키텍처 다이어그램 (공식 diagram 서버는 PyPI에서 폐기되었다. 폐기 전 공식 서버를 옮겨 온 코드)
@@ -23,7 +26,9 @@
 import os
 import json
 import boto3
-from typing import Dict, Any
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Any, List, Optional
+from botocore.exceptions import ClientError
 from lambda_mcp.approval import ApprovalGate
 from lambda_mcp.lambda_mcp import LambdaMCPServer
 from lambda_mcp.official import OfficialTools
@@ -118,6 +123,243 @@ def get_dashboard_summary(dashboard_name: str) -> Dict[str, Any]:
             'widgets_summary': widgets_summary
         }
 
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+# ---------------------------------------------------------------- S3 조회 (객체 내용은 읽지 않는다)
+# 버킷 이름·설정·크기·객체 이름만 본다. 객체 내용(GetObject)은 코드에서 읽지 않고, IAM에서도 명시적으로 거부한다
+# (llm.yaml). 계정 밖(Claude)으로 나가는 것은 메타데이터뿐이다.
+
+S3_OBJECT_LIMIT = 100  # 객체 목록 한 번에 최대
+S3_AUDIT_LIMIT = 50  # 버킷을 지정하지 않은 보안 점검에서 볼 최대 버킷 수
+_s3_clients: Dict[str, Any] = {}
+_cloudwatch_clients: Dict[str, Any] = {}
+
+
+def _s3(region: Optional[str] = None):
+    """리전별 S3 클라이언트 (버킷 설정 조회는 버킷이 있는 리전으로 보내야 한다)."""
+    region = region or aws_region
+    if region not in _s3_clients:
+        _s3_clients[region] = boto3.client('s3', region_name=region)
+    return _s3_clients[region]
+
+
+def _cloudwatch(region: str):
+    """리전별 CloudWatch 클라이언트 (S3 지표는 버킷이 있는 리전에 쌓인다)."""
+    if region == aws_region:
+        return cloudwatch_client
+    if region not in _cloudwatch_clients:
+        _cloudwatch_clients[region] = boto3.client('cloudwatch', region_name=region)
+    return _cloudwatch_clients[region]
+
+
+def _bucket_region(bucket_name: str) -> str:
+    """버킷의 리전. HeadBucket 응답 헤더(x-amz-bucket-region)는 어느 리전 버킷이든 실제 리전을 알려 준다
+    (GetBucketLocation은 한 리전을 빈 값으로 돌려줘 리전 이름을 코드에 적어야 한다)."""
+    try:
+        response = _s3().head_bucket(Bucket=bucket_name)
+        headers = response.get('ResponseMetadata', {}).get('HTTPHeaders', {})
+    except ClientError as error:  # 다른 리전 버킷이면 301과 함께 리전을 알려 준다
+        headers = error.response.get('ResponseMetadata', {}).get('HTTPHeaders', {})
+        if 'x-amz-bucket-region' not in headers:
+            raise
+    return headers.get('x-amz-bucket-region') or aws_region
+
+
+def _error_code(error: ClientError) -> str:
+    return error.response.get('Error', {}).get('Code', '')
+
+
+@mcp_server.tool()
+def list_s3_buckets() -> Dict[str, Any]:
+    """
+    Lists the S3 buckets in this AWS account with their region and creation date. Object contents are never read.
+
+    Returns:
+        The buckets (name, region, creation date).
+    """
+    try:
+        buckets = []
+        for page in _s3().get_paginator('list_buckets').paginate():
+            for bucket in page.get('Buckets', []):
+                buckets.append({'name': bucket['Name'],
+                                'region': bucket.get('BucketRegion') or _bucket_region(bucket['Name']),
+                                'created': bucket.get('CreationDate')})
+        return {'status': 'success', 'bucket_count': len(buckets), 'buckets': buckets}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+def _security_of(bucket_name: str) -> Dict[str, Any]:
+    """버킷 하나의 보안 설정과 눈여겨볼 점 (조회만)."""
+    region = _bucket_region(bucket_name)
+    s3 = _s3(region)
+    result: Dict[str, Any] = {'bucket': bucket_name, 'region': region}
+    findings: List[str] = []
+
+    try:
+        block = s3.get_public_access_block(Bucket=bucket_name)['PublicAccessBlockConfiguration']
+    except ClientError as error:
+        if _error_code(error) != 'NoSuchPublicAccessBlockConfiguration':
+            raise
+        block = {}
+    result['public_access_block'] = block
+    off = [key for key in ('BlockPublicAcls', 'IgnorePublicAcls', 'BlockPublicPolicy', 'RestrictPublicBuckets')
+           if not block.get(key)]
+    if off:
+        findings.append(f"퍼블릭 액세스 차단이 꺼진 항목: {', '.join(off)} (계정 수준 설정은 따로 확인)")
+
+    try:
+        result['policy_is_public'] = bool(
+            s3.get_bucket_policy_status(Bucket=bucket_name).get('PolicyStatus', {}).get('IsPublic', False))
+    except ClientError as error:
+        if _error_code(error) != 'NoSuchBucketPolicy':
+            raise
+        result['policy_is_public'] = False  # 버킷 정책이 없다
+    if result['policy_is_public']:
+        findings.append("버킷 정책이 공개(퍼블릭)입니다")
+
+    try:
+        rules = s3.get_bucket_encryption(Bucket=bucket_name)['ServerSideEncryptionConfiguration']['Rules']
+        result['encryption'] = [rule.get('ApplyServerSideEncryptionByDefault', {}).get('SSEAlgorithm') for rule in rules]
+    except ClientError as error:
+        if _error_code(error) != 'ServerSideEncryptionConfigurationNotFoundError':
+            raise
+        result['encryption'] = []
+    if not result['encryption']:
+        findings.append("기본 암호화 설정이 없습니다")
+
+    versioning = s3.get_bucket_versioning(Bucket=bucket_name)
+    result['versioning'] = versioning.get('Status', 'Disabled')
+    result['mfa_delete'] = versioning.get('MFADelete', 'Disabled')
+    if result['versioning'] != 'Enabled':
+        findings.append("버전 관리가 꺼져 있습니다 (실수로 지우거나 덮어쓰면 되돌릴 수 없음)")
+
+    try:
+        ownership = s3.get_bucket_ownership_controls(Bucket=bucket_name)['OwnershipControls']['Rules']
+        result['object_ownership'] = ownership[0].get('ObjectOwnership') if ownership else None
+    except ClientError as error:
+        if _error_code(error) != 'OwnershipControlsNotFoundError':
+            raise
+        result['object_ownership'] = None
+    if result['object_ownership'] != 'BucketOwnerEnforced':
+        findings.append("ACL이 꺼져 있지 않습니다 (객체 소유권이 BucketOwnerEnforced가 아님)")
+
+    try:
+        result['lifecycle_rules'] = len(s3.get_bucket_lifecycle_configuration(Bucket=bucket_name).get('Rules', []))
+    except ClientError as error:
+        if _error_code(error) != 'NoSuchLifecycleConfiguration':
+            raise
+        result['lifecycle_rules'] = 0
+
+    result['findings'] = findings
+    return result
+
+
+@mcp_server.tool()
+def check_s3_bucket_security(bucket_name: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Checks the security settings of an S3 bucket: public access block, whether the bucket policy is public, default
+    encryption, versioning (and MFA delete), object ownership (ACLs disabled) and lifecycle rules, with a list of
+    findings. Omit bucket_name to check every bucket in the account (useful for "do we have any public buckets?").
+    Object contents are never read.
+
+    Args:
+        bucket_name: Bucket to check. Omit to check all buckets (up to 50).
+
+    Returns:
+        The settings and findings for each bucket.
+    """
+    try:
+        names = [bucket_name] if bucket_name else [
+            bucket['Name'] for page in _s3().get_paginator('list_buckets').paginate()
+            for bucket in page.get('Buckets', [])]
+        checked, skipped = [], []
+        for name in names[:S3_AUDIT_LIMIT]:
+            try:
+                checked.append(_security_of(name))
+            except ClientError as error:  # 권한이 없거나 막힌 버킷은 건너뛰고 이유를 남긴다
+                skipped.append({'bucket': name, 'error': _error_code(error) or str(error)})
+        return {'status': 'success', 'checked': len(checked), 'total_buckets': len(names),
+                'buckets_with_findings': sum(1 for bucket in checked if bucket['findings']),
+                'buckets': checked, 'skipped': skipped,
+                **({'note': f'버킷이 많아 처음 {S3_AUDIT_LIMIT}개만 점검했습니다'} if len(names) > S3_AUDIT_LIMIT else {})}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@mcp_server.tool()
+def get_s3_bucket_size(bucket_name: str) -> Dict[str, Any]:
+    """
+    Gets the size (bytes) and object count of an S3 bucket from the daily CloudWatch storage metrics that S3 publishes
+    for free (BucketSizeBytes, NumberOfObjects). Does not list objects. The metrics are updated once a day.
+
+    Args:
+        bucket_name: The bucket name.
+
+    Returns:
+        Size per storage class, total size and object count, with the metric date.
+    """
+    try:
+        region = _bucket_region(bucket_name)
+        cloudwatch = _cloudwatch(region)
+        metrics = []
+        for page in cloudwatch.get_paginator('list_metrics').paginate(
+                Namespace='AWS/S3', Dimensions=[{'Name': 'BucketName', 'Value': bucket_name}]):
+            metrics += [m for m in page.get('Metrics', []) if m['MetricName'] in ('BucketSizeBytes', 'NumberOfObjects')]
+        if not metrics:
+            return {'status': 'success', 'bucket': bucket_name, 'region': region,
+                    'message': 'S3 저장소 지표가 아직 없습니다 (하루에 한 번 발행되며 빈 버킷은 없을 수 있음)'}
+        end = datetime.now(timezone.utc)
+        queries = [{'Id': f'm{index}', 'ReturnData': True,
+                    'MetricStat': {'Metric': metric, 'Period': 86400, 'Stat': 'Average'}}
+                   for index, metric in enumerate(metrics)]
+        data = cloudwatch.get_metric_data(MetricDataQueries=queries, StartTime=end - timedelta(days=3), EndTime=end)
+        sizes, objects, dates = {}, None, []
+        results = {result['Id']: result for result in data['MetricDataResults']}  # 결과는 Id로 짝짓는다
+        for query in queries:
+            result = results.get(query['Id'], {})
+            if not result.get('Values'):
+                continue
+            latest = max(range(len(result['Timestamps'])), key=lambda i: result['Timestamps'][i])
+            dates.append(result['Timestamps'][latest])
+            metric = query['MetricStat']['Metric']
+            storage = next((d['Value'] for d in metric['Dimensions'] if d['Name'] == 'StorageType'), '')
+            if metric['MetricName'] == 'BucketSizeBytes':
+                sizes[storage] = int(result['Values'][latest])
+            else:
+                objects = int(result['Values'][latest])
+        return {'status': 'success', 'bucket': bucket_name, 'region': region, 'size_bytes_by_storage_type': sizes,
+                'total_size_bytes': sum(sizes.values()), 'object_count': objects,
+                'metric_date': max(dates) if dates else None}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@mcp_server.tool()
+def list_s3_objects(bucket_name: str, prefix: Optional[str] = None, max_keys: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Lists objects under a prefix in an S3 bucket, one "folder" level at a time: object keys with size, last modified
+    date and storage class, plus sub-prefixes. Object contents are never read.
+
+    Args:
+        bucket_name: The bucket name.
+        prefix: Key prefix (folder), e.g. logs/2026/. Omit for the top level.
+        max_keys: Maximum number of objects to return (1-100, default 50).
+
+    Returns:
+        Objects and sub-prefixes under the prefix, and whether more objects exist.
+    """
+    try:
+        limit = max(1, min(int(max_keys or 50), S3_OBJECT_LIMIT))
+        response = _s3(_bucket_region(bucket_name)).list_objects_v2(
+            Bucket=bucket_name, Prefix=prefix or '', Delimiter='/', MaxKeys=limit)
+        return {'status': 'success', 'bucket': bucket_name, 'prefix': prefix or '',
+                'objects': [{'key': o['Key'], 'size_bytes': o['Size'], 'last_modified': o['LastModified'],
+                             'storage_class': o.get('StorageClass')} for o in response.get('Contents', [])],
+                'prefixes': [p['Prefix'] for p in response.get('CommonPrefixes', [])],
+                'is_truncated': response.get('IsTruncated', False)}
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
 

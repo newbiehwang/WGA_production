@@ -71,6 +71,11 @@ TOOL_RISK: Dict[str, str] = {
     # 직접 둔 도구 (app.py, 이름은 camelCase로 등록된다)
     "listCloudwatchDashboards": READ,
     "getDashboardSummary": READ,
+    # S3 조회 (객체 내용은 읽지 않는다)
+    "listS3Buckets": READ,
+    "checkS3BucketSecurity": READ,
+    "getS3BucketSize": READ,
+    "listS3Objects": READ,
     "getDiagramCodeExamples": READ,
     "listAvailableDiagramIcons": READ,
     "generateArchitectureDiagram": ARTIFACT,  # 다이어그램 버킷에 이미지를 올린다

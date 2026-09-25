@@ -411,6 +411,9 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
         5-4. Network (AWS official network MCP tools, read-only): for connectivity questions ("why can't X reach Y?")
              call get_path_trace_methodology first, then find_ip_address → get_eni_details (security groups, NACLs,
              route tables) → get_vpc_network; list_vpcs; get_vpc_flow_logs to confirm ACCEPT/REJECT traffic.
+        5-5. S3 (read-only, object contents are never read): listS3Buckets, checkS3BucketSecurity (omit bucket_name
+             to audit all buckets, e.g. "any public buckets?"), getS3BucketSize (daily CloudWatch storage metrics),
+             listS3Objects (keys, sizes, dates under a prefix).
         6. Visualization: Generate charts/AWS diagrams (only if the user explicitly requests visualization)
         7. Changes (only when the user asks to change something): setLogRetention (WGA Lambda log group retention),
            setAlarmActions (turn WGA alarm notifications on/off). Calling them does NOT change anything yet: it creates

@@ -364,6 +364,7 @@ MCP의 HTTP+SSE(Server-Sent Events) 방식은 연결을 오래 유지해야 해�
 | IAM 사용자·역할·그룹·정책 조회, 권한 시뮬레이션 (AccessDenied 원인 설명) | `awslabs.iam-mcp-server`의 조회 도구 12개 (읽기 전용) |
 | 연결 문제 추적: VPC·서브넷·보안 그룹·NACL·라우팅·ENI 조회, VPC 흐름 로그 | `awslabs.aws-network-mcp-server`의 도구 6개 (모두 조회) |
 | CloudWatch 대시보드 목록·요약 | 직접 둠 (공식 CloudWatch 서버에 대시보드 도구가 없음) |
+| S3 버킷 목록, 버킷 보안 점검(퍼블릭 액세스 차단·정책 공개 여부·암호화·버전 관리·ACL·수명 주기), 버킷 크기·객체 수(CloudWatch 저장소 지표), 객체 목록 | 직접 둠 (공식 S3 서버가 없음). **객체 내용은 읽지 않고**, IAM에서도 다이어그램 버킷 말고는 `s3:GetObject`를 명시적으로 거부 |
 | 아키텍처 다이어그램 | 직접 둠 (공식 diagram 서버는 PyPI에서 폐기됨. 폐기 전 공식 서버를 옮겨 온 코드) |
 | 차트 15종 | 직접 둠 (AntV 차트 서비스) |
 

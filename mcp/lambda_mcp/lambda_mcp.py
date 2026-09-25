@@ -13,7 +13,7 @@ from .approval import ACTION_ID_META, PREVIEW_META
 from .risk import annotate, needs_approval
 import json
 import logging
-from typing import Optional, Any, Dict, Callable, get_type_hints, List, TypeVar, Generic
+from typing import Optional, Any, Dict, Callable, get_type_hints, List, TypeVar, Generic, Union, get_args, get_origin
 import inspect
 import functools
 from contextvars import ContextVar
@@ -136,6 +136,8 @@ class LambdaMCPServer:
             
             # Get type hints
             hints = get_type_hints(func)
+            # 기본값이 있는 인자는 필수가 아니다 (예: 버킷을 주지 않으면 모든 버킷을 점검)
+            parameters = inspect.signature(func).parameters
             return_type = hints.pop('return', Any)
             
             # Build input schema from type hints and docstring
@@ -160,6 +162,10 @@ class LambdaMCPServer:
 
             # Build properties from type hints
             for param_name, param_type in hints.items():
+                # Optional[int] 등은 안쪽 타입으로 본다
+                if get_origin(param_type) is Union:
+                    inner = [arg for arg in get_args(param_type) if arg is not type(None)]
+                    param_type = inner[0] if inner else str
                 param_schema = {"type": "string"}  # Default to string
                 if param_type == int:
                     param_schema["type"] = "integer"
@@ -172,7 +178,11 @@ class LambdaMCPServer:
                     param_schema["description"] = arg_descriptions[param_name]
                     
                 properties[param_name] = param_schema
-                required.append(param_name)
+                default = parameters[param_name].default if param_name in parameters else inspect.Parameter.empty
+                if default is inspect.Parameter.empty:
+                    required.append(param_name)
+                elif default is not None:
+                    param_schema["default"] = default
             
             # Create tool schema
             tool_schema = {
@@ -405,7 +415,10 @@ class LambdaMCPServer:
                 
                 try:
                     result = self.tool_implementations[tool_name](**tool_args)
-                    content = [TextContent(text=str(result)).model_dump()]
+                    # 사전·목록은 JSON으로 보낸다 (Python 표현 str(dict)보다 모델이 읽기 쉽고, 날짜 등도 글자로 바뀐다)
+                    text = (json.dumps(result, ensure_ascii=False, default=str) if isinstance(result, (dict, list))
+                            else str(result))
+                    content = [TextContent(text=text).model_dump()]
                     return self._create_success_response({"content": content}, request.id, session_id)
                 except Exception as e:
                     logger.error(f"Error executing tool {tool_name}: {e}")
