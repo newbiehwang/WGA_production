@@ -105,11 +105,18 @@ export function parseMarkdown(markdown: string): string {
     const tables: string[] = [];
     html = extractTables(html, tables);
 
+    // 답변 속 이미지 주소는 열지 않고 누를 수 있는 링크로만 보인다. 결과물(차트·다이어그램)은 artifact:// 참조로 오고
+    // ChatMessage가 서버가 준 주소(inference.artifacts)로 따로 그린다.
+    // 모델이 쓴 주소를 이미지로 열면, 주소에 데이터를 실어 밖으로 보내는 통로가 된다 (간접 프롬프트 인젝션 → 화면을
+    // 여는 순간 브라우저가 요청). 버킷 이름 모양으로 허용하지도 않는다: S3 버킷 이름은 누구나 만들 수 있다
     html = html.replace(/!\[(.*?)\]\((.*?)\)/g, (match, altText, url) => {
         const cleanUrl = url.trim();
         try {
-            new URL(cleanUrl);
-            return `<div class="markdown-image-container"><a href="${cleanUrl}" target="_blank" rel="noopener noreferrer"><img src="${cleanUrl}" alt="${altText}" class="markdown-image" /></a></div>`;
+            const parsed = new URL(cleanUrl);
+            if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+                return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer nofollow" class="markdown-image-link">[이미지] ${altText || parsed.hostname}</a>`;
+            }
+            return match;
         } catch (e) {
             return match;
         }

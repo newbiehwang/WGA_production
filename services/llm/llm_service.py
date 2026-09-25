@@ -17,6 +17,7 @@ from approvals import (APPROVED, DENIED, FINISHED, ApprovalError, ApprovalReques
 from mcp_client import MCPClient
 import metrics
 from system_prompt import build_system_prompt
+from artifacts import Artifacts
 
 # Lambda 환경에서 효율적인 재사용을 위한 클라이언트 캐싱
 client = None
@@ -409,6 +410,9 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
         client.progress = progress
         client.redactor = redactor
         client.audit = audit
+        # 결과물(차트·다이어그램): 모델에는 참조만, 주소와 그릴 내용은 답변 정보로 (artifacts.py)
+        artifacts = Artifacts()
+        client.artifacts = artifacts
         # 변경 도구는 승인 화면이 있는 웹 요청에서만 요청할 수 있다 (Slack 봇·요청자를 모르는 경로는 None → 거절)
         approvals = (ApprovalRequester(approval_store, requester_id=caller_id, requester_email=caller_email,
                                        request_id=request_id, session_id=session_id, audit=audit)
@@ -539,6 +543,9 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
             "redacted": dict(redactor.counts),
             # 승인을 기다리는 변경 작업. 화면이 승인 카드로 보여 준다. 실제로 실행될 인자를 그대로 보여 줘야 하므로 가리지 않는다
             "pendingActions": [public_view(item) for item in approvals.created] if approvals else [],
+            # 답변 속 ![제목](artifact://…)의 실제 주소와 그릴 내용. 화면에서 이미지로 열어야 하므로 가리지 않는다
+            # (서버가 만든 presigned URL이고, 모델이 쓴 주소가 아니다)
+            "artifacts": artifacts.public(),
         })
         audit.request_finished(True)
         emit_request_metrics(progress, redactor, approvals)
@@ -552,7 +559,8 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
         # 최종 결과를 Slack으로 전송
         if slack_user_id:
             try:
-                send_slack_dm(slack_user_id, response_text)
+                # Slack은 참조를 풀 수 없어 실제 주소로 바꿔 보낸다
+                send_slack_dm(slack_user_id, artifacts.with_urls(response_text))
                 # 성공 응답 반환 (도구 사용 과정 및 결과 포함)
                 return cors_response(200, {
                     "answer": response_text,

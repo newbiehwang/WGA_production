@@ -12,6 +12,7 @@ import type {
   InternalAxiosRequestConfig,
 } from "axios";
 import type { PendingAction } from "../types/actions";
+import type { Artifact } from "../types/artifacts";
 import type { AuditQuery, AuditRecord } from "../types/audit";
 
 interface MockMessage {
@@ -78,6 +79,8 @@ interface MockEntry {
   actionId?: string; // 승인한 작업의 결과 설명 (/llm1 {actionId})
   // 도구 검색 (services/llm/tool_search.py): 처음부터 싣지 않는 도구는 모델이 찾아 불러온 뒤 부른다
   search?: { query: string; found: string[] };
+  // 결과물(차트): 답변에는 ![제목](artifact://…) 참조만, 주소와 그릴 내용은 inference.artifacts로 (services/llm/artifacts.py)
+  artifacts?: Artifact[];
 }
 
 const ANSWERS: MockEntry[] = [
@@ -228,6 +231,119 @@ const APPROVAL_ENTRIES: Record<"retention" | "alarm", MockEntry> = {
   },
 };
 
+// 차트를 그린 답변 (질문에 '차트'·'그려'가 있으면). 브라우저가 ECharts로 그린다 (features/chat/ArtifactView).
+// 주소는 목업이라 열리지 않는다 (PNG로 열기). 실제로는 서버가 만든 presigned URL이다
+const chartArtifact = (name: string, type: string, options: Record<string, unknown>): Artifact => ({
+  ref: `artifact://charts/mock/${name}.png`,
+  url: `https://example.invalid/charts/mock/${name}.png`,
+  kind: "chart",
+  spec: { type, options },
+});
+
+const CHART_ENTRY: MockEntry = {
+  answer: [
+    "지난 7일 동안 Lambda 오류와 서비스별 비용을 차트로 그렸습니다.",
+    "",
+    "![Lambda 오류 수](artifact://charts/mock/errors.png)",
+    "",
+    "9월 4일에 `wga-llm-dev` 오류가 8건으로 가장 많았습니다.",
+    "",
+    "![서비스별 비용](artifact://charts/mock/cost.png)",
+    "",
+    "![질문을 처리하는 흐름](artifact://charts/mock/flow.png)",
+    "",
+    "![오류 키워드](artifact://charts/mock/words.png)",
+  ].join("\n"),
+  tools: [
+    { tool_name: "get_metric_data", input: { metric_name: "Errors", namespace: "AWS/Lambda" }, status: "ok" },
+    { tool_name: "generateLineChart", input: { title: "Lambda 오류 수" }, status: "ok" },
+    { tool_name: "generateBarChart", input: { title: "서비스별 비용 (USD)" }, status: "ok" },
+    { tool_name: "generateFlowDiagram", input: {}, status: "ok" },
+    { tool_name: "generateWordCloudChart", input: { title: "오류 키워드" }, status: "ok" },
+  ],
+  thinking: ["오류 수와 비용을 조회한 뒤 차트로 그린다."],
+  artifacts: [
+    chartArtifact("errors", "line", {
+      title: "Lambda 오류 수 (지난 7일)",
+      axisXTitle: "날짜",
+      axisYTitle: "오류",
+      data: ["09-01", "09-02", "09-03", "09-04", "09-05", "09-06", "09-07"].flatMap((time, i) => [
+        { time, value: [3, 5, 2, 8, 6, 4, 7][i], group: "wga-llm-dev" },
+        { time, value: [1, 2, 1, 4, 3, 2, 3][i], group: "wga-mcp-dev" },
+      ]),
+    }),
+    chartArtifact("cost", "bar", {
+      title: "서비스별 비용 (USD)",
+      data: [
+        { category: "EC2", value: 320.5 },
+        { category: "RDS", value: 210 },
+        { category: "S3", value: 45.2 },
+        { category: "CloudWatch", value: 30 },
+        { category: "Lambda", value: 12 },
+      ],
+    }),
+    chartArtifact("flow", "flow-diagram", {
+      data: {
+        nodes: ["질문", "도구 선택", "변경 도구?", "승인 요청", "실행", "답변"].map((name) => ({ name })),
+        edges: [
+          { source: "질문", target: "도구 선택" },
+          { source: "도구 선택", target: "변경 도구?" },
+          { source: "변경 도구?", target: "승인 요청", name: "예" },
+          { source: "변경 도구?", target: "실행", name: "아니오" },
+          { source: "승인 요청", target: "실행", name: "승인" },
+          { source: "실행", target: "답변" },
+          { source: "답변", target: "질문", name: "다음 질문" },
+        ],
+      },
+    }),
+    chartArtifact("words", "word-cloud", {
+      title: "오류 키워드",
+      data: [
+        ["Timeout", 40], ["AccessDenied", 30], ["ThrottlingException", 25], ["메모리 부족", 20], ["5XX", 15],
+        ["ConnectionReset", 12], ["NoSuchKey", 10], ["콜드 스타트", 9], ["ValidationError", 8], ["재시도", 6],
+      ].map(([text, value]) => ({ text, value })),
+    }),
+  ],
+};
+
+// 차트 15종을 한 번에 (질문에 '갤러리'가 있으면). 화면에서 차트 모양을 고칠 때 본다
+const GALLERY_CHARTS: [string, string, Record<string, unknown>][] = [
+  ["area", "area", { title: "DynamoDB 용량 (스택)", stack: true, data: ["0시", "3시", "6시", "9시", "12시", "15시"].flatMap(
+    (time, i) => [{ time, value: [1, 3, 4, 8, 6, 5][i], group: "읽기" }, { time, value: [1, 3, 4, 8, 6, 5][i], group: "쓰기" }]) }],
+  ["column", "column", { title: "환경별 월 비용", group: true, axisYTitle: "USD", data: ["7월", "8월", "9월"].flatMap(
+    (category) => [{ category, value: 40, group: "dev" }, { category, value: 120, group: "prod" }]) }],
+  ["pie", "pie", { title: "비용 비중", innerRadius: 0.5, data: [{ category: "EC2", value: 55 }, { category: "RDS", value: 25 },
+    { category: "S3", value: 10 }, { category: "기타", value: 10 }] }],
+  ["scatter", "scatter", { title: "CPU와 지연", axisXTitle: "CPU %", axisYTitle: "ms",
+    data: Array.from({ length: 40 }, (_, i) => ({ x: i * 2.5, y: 20 + ((i * 37) % 60) + i })) }],
+  ["histogram", "histogram", { title: "응답 시간 분포", axisXTitle: "ms", binNumber: 12,
+    data: Array.from({ length: 300 }, (_, i) => 50 + ((i * 7919) % 97) + ((i * 31) % 53)) }],
+  ["radar", "radar", { title: "Well-Architected 점수", data: [["보안", 80], ["비용", 60], ["안정성", 90], ["성능", 70],
+    ["운영", 75]].map(([name, value]) => ({ name, value })) }],
+  ["dual", "dual-axes", { title: "요청과 오류율", categories: ["7월", "8월", "9월"], series: [
+    { type: "column", data: [91.9, 99.1, 101.6], axisYTitle: "요청 수(만)" }, { type: "line", data: [0.055, 0.06, 0.062], axisYTitle: "오류율" }] }],
+  ["treemap", "treemap", { title: "비용 트리맵", data: [{ name: "EC2", value: 300, children: [{ name: "t3.large", value: 200 },
+    { name: "m5.xlarge", value: 100 }] }, { name: "RDS", value: 150 }, { name: "S3", value: 50, children: [
+    { name: "로그 버킷", value: 30 }, { name: "이미지", value: 20 }] }] }],
+  ["mind", "mind-map", { data: { name: "장애 대응", children: [{ name: "탐지", children: [{ name: "알람" }, { name: "로그" }] },
+    { name: "분석", children: [{ name: "CloudTrail" }, { name: "지표" }] }, { name: "복구" }] } }],
+  ["fishbone", "fishbone-diagram", { data: { name: "API 지연 증가", children: [{ name: "Lambda", children: [
+    { name: "콜드 스타트" }, { name: "메모리 부족" }] }, { name: "DynamoDB", children: [{ name: "스로틀링" }] },
+    { name: "네트워크", children: [{ name: "NAT 게이트웨이" }] }, { name: "외부 API" }] } }],
+  ["network", "network-graph", { data: { nodes: ["API Gateway", "LLM Lambda", "MCP Lambda", "DynamoDB", "Claude API"].map(
+    (name) => ({ name })), edges: [{ source: "API Gateway", target: "LLM Lambda", name: "호출" }, { source: "LLM Lambda",
+    target: "MCP Lambda", name: "SigV4" }, { source: "LLM Lambda", target: "Claude API" }, { source: "MCP Lambda",
+    target: "DynamoDB" }] } }],
+];
+
+const GALLERY_ENTRY: MockEntry = {
+  answer: ["차트 15종입니다 (나머지 4종은 '차트 그려줘').", "", ...GALLERY_CHARTS.map(([name, type]) =>
+    `![${type}](artifact://charts/mock/${name}.png)`)].join("\n\n"),
+  tools: GALLERY_CHARTS.map(([, type]) => ({ tool_name: "generateBarChart", input: { title: type }, status: "ok" as const })),
+  thinking: ["차트 종류를 모두 그린다."],
+  artifacts: GALLERY_CHARTS.map(([name, type, options]) => chartArtifact(name, type, options)),
+};
+
 // 로그에 AI를 노린 지시문이 심겨 있던 경우 (질문에 '인젝션'·'의심'이 있으면). 진행 과정과 감사 로그에 '의심 문구'가 보인다
 const INJECTION_ENTRY: MockEntry = {
   answer: [
@@ -279,8 +395,10 @@ const inferenceOf = (
   tools: object[],
   steps: object[] = [],
   pendingActions: PendingAction[] = [],
+  artifacts: Artifact[] = [],
 ) =>
   JSON.stringify({
+    artifacts,
     tools_used: tools,
     steps, // 사고 요약과 도구 호출을 순서대로 (services/llm/llm_progress.py와 같은 모양)
     pendingActions, // 승인을 기다리는 변경 작업 (답변 아래 승인 카드)
@@ -356,6 +474,8 @@ const entryFor = (body: RequestBody): MockEntry => {
   if (action) return explanationEntry(action);
   const text = body.text || body.question || "";
   if (text.includes("인젝션") || text.includes("의심")) return INJECTION_ENTRY;
+  if (text.includes("갤러리")) return GALLERY_ENTRY;
+  if (text.includes("차트") || text.includes("그려")) return CHART_ENTRY;
   if (text.includes("보존")) return APPROVAL_ENTRIES.retention;
   if (text.includes("알람") && /끄|꺼|멈|중지/.test(text))
     return APPROVAL_ENTRIES.alarm;
@@ -831,7 +951,7 @@ const route = (
         answer,
         elapsed_time: `${Math.round(run.total / 1000)}초`,
         inference: JSON.parse(
-          inferenceOf(tools, stepsAt(run, Infinity), pending),
+          inferenceOf(tools, stepsAt(run, Infinity), pending, run.entry.artifacts),
         ),
       },
     ];

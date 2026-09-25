@@ -577,6 +577,76 @@
   word-break: break-all;
 }
 
+/* 결과물 (ArtifactView): 브라우저에서 그린 차트 또는 서버가 그린 PNG */
+.artifact {
+  margin: 1rem 0;
+  padding: 12px 12px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: #fff;
+  max-width: 760px;
+}
+
+.artifact .markdown-image {
+  max-width: 100%;
+  box-shadow: none;
+  border: 0;
+}
+
+.artifact-chart-canvas {
+  width: 100%;
+  display: block;
+}
+
+.artifact-loading {
+  border-radius: 8px;
+  background: linear-gradient(90deg, #f3f6fa 0%, #e9eef5 50%, #f3f6fa 100%);
+  background-size: 200% 100%;
+  animation: artifact-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes artifact-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-loading { animation: none; }
+}
+
+.artifact-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-neutral);
+}
+
+.artifact-png {
+  color: var(--color-neutral);
+  white-space: nowrap;
+}
+
+.artifact-png:hover {
+  color: var(--color-primary);
+}
+
+.artifact-missing {
+  margin: 0.75rem 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--color-line);
+  border-radius: var(--radius-md);
+  color: var(--color-neutral);
+  font-size: 13px;
+}
+
+/* 모델이 쓴 바깥 주소의 이미지는 열지 않고 링크로만 (utils/markdown.ts) */
+.markdown-image-link {
+  color: var(--color-neutral);
+  font-size: 13px;
+}
+
 .markdown-image-container {
   display: flex;
   justify-content: center;
