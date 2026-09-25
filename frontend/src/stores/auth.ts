@@ -19,10 +19,18 @@ const AUTH_TOKENS_KEY = 'wga_auth_tokens';
 const COGNITO_REGION = import.meta.env.AWS_REGION || 'ap-northeast-2';
 const AUTH_USER_KEY = 'wga_auth_user';
 
+// mock 모드(npm run dev:mock): Cognito 없이 처음부터 로그인된 상태로 시작한다 (화면만 고칠 때)
+const MOCK = import.meta.env.MODE === 'mock';
+const MOCK_USER = {
+    email: 'demo@example.com',
+    'cognito:username': 'demo',
+    auth_time: Math.floor(Date.now() / 1000),
+};
+
 export const useAuthStore = defineStore('auth', {
     state: (): AuthState => ({
-        isAuthenticated: false,
-        user: null,
+        isAuthenticated: MOCK,
+        user: MOCK ? MOCK_USER : null,
         tokens: {
             idToken: null,
             accessToken: null,
@@ -41,6 +49,7 @@ export const useAuthStore = defineStore('auth', {
 
     actions: {
         async initializeAuth() {
+            if (MOCK) return;
             this.loading = true;
             try {
                 const savedTokens = localStorage.getItem(AUTH_TOKENS_KEY);
@@ -125,6 +134,12 @@ export const useAuthStore = defineStore('auth', {
         },
 
         initiateLogin() {
+            if (MOCK) {
+                this.isAuthenticated = true;
+                this.user = MOCK_USER;
+                window.location.href = '/start-chat';
+                return;
+            }
             this.loading = true;
             this.error = null;
 
@@ -237,6 +252,11 @@ export const useAuthStore = defineStore('auth', {
         },
 
         async logout() {
+            if (MOCK) {
+                this.clearAuth();
+                window.location.href = '/login'; // 새로 고쳐지므로 다시 로그인된 상태로 시작한다
+                return;
+            }
             try {
                 const clientId = import.meta.env.COGNITO_CLIENT_ID;
                 const redirectUri = import.meta.env.COGNITO_REDIRECT_URI;
