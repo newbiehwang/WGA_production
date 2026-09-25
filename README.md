@@ -193,6 +193,9 @@ cp .env.example .env
 # Slack 봇을 쓰는 경우 SSM 파라미터 설정
 aws ssm put-parameter --name "/wga/${Environment}/SlackbotToken" --value "your-slack-token" --type "SecureString"
 aws ssm put-parameter --name "/wga/${Environment}/SlackSigningSecret" --value "your-slack-signing-secret" --type "SecureString"
+
+# .env 없이 배포하는 경우(GitHub Actions만 쓰는 경우 등) Anthropic API 키를 SSM에 직접 등록
+aws ssm put-parameter --name "/wga/${Environment}/ANTHROPIC_API_KEY" --value "your-anthropic-key" --type "SecureString"
 ```
 
 루트 `.env`(예시는 `.env.example`)에는 두 종류의 값이 들어갑니다.
