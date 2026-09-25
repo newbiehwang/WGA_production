@@ -91,13 +91,13 @@ export function parseMarkdown(markdown: string): string {
     let html = markdown;
 
     const codeBlocks: string[] = [];
-    html = html.replace(/```([^`]+)```/g, (match, body: string) => {
+    html = html.replace(/```([^`]+)```/g, (_match, body: string) => {
         codeBlocks.push(codeBlock(body));
         return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
     });
 
     const inlineCodes: string[] = [];
-    html = html.replace(/`([^`]+)`/g, (match, code) => {
+    html = html.replace(/`([^`]+)`/g, (_match, code) => {
         inlineCodes.push(`<code>${code}</code>`);
         return `__INLINE_CODE_${inlineCodes.length - 1}__`;
     });

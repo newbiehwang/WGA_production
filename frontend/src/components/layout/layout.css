@@ -1,0 +1,657 @@
+/* AXPI(LG Entrue) components/layout/layout.css를 그대로 가져와 색만 바꿨다. 맨 아래 'WGA에서 더한 것'만 새로 썼다 */
+
+
+.login-shell {
+  height: 100vh;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  position: relative;
+  isolation: isolate;
+}
+
+.login-shell::before {
+  content: "";
+  position: absolute;
+  width: min(420px, 70vw);
+  aspect-ratio: 1;
+  left: max(-80px, -8vw);
+  top: max(-100px, -12vw);
+  background: radial-gradient(
+    circle,
+    rgba(0, 123, 255, 0.16) 0%,
+    rgba(0, 123, 255, 0) 70%
+  );
+  pointer-events: none;
+  z-index: -1;
+}
+
+.login-shell::after {
+  content: "";
+  position: absolute;
+  width: min(440px, 75vw);
+  aspect-ratio: 1;
+  right: max(-90px, -8vw);
+  bottom: max(-110px, -10vw);
+  background: radial-gradient(
+    circle,
+    rgba(35, 47, 62, 0.12) 0%,
+    rgba(35, 47, 62, 0) 72%
+  );
+  pointer-events: none;
+  z-index: -1;
+}
+
+.login-card {
+  width: min(420px, 100%);
+  border-radius: 16px;
+  border: 1px solid #dfe6ee;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 16px 40px rgba(35, 47, 62, 0.13);
+  padding: 24px;
+  animation: rise-in 320ms ease both;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.login-brand .logo-mark {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+
+.login-brand-text {
+  min-width: 0;
+}
+
+.login-title {
+  margin: 0;
+  font-family: var(--font-headline);
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #1f2933;
+}
+
+.login-description {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--color-neutral);
+}
+
+.login-form {
+  display: grid;
+  gap: 12px;
+}
+
+.login-field {
+  display: grid;
+  gap: 6px;
+}
+
+.login-field label {
+  font-family: var(--font-label);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #3c4650;
+}
+
+.login-input {
+  width: 100%;
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid #d9e0e8;
+  padding: 0 12px;
+  font-family: var(--font-body);
+  font-size: 0.94rem;
+  color: #1f2933;
+  background: #fff;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.login-input::placeholder {
+  color: #a0aab5;
+}
+
+.login-input:focus {
+  outline: none;
+  border-color: rgba(0, 123, 255, 0.56);
+  box-shadow: inset 0 0 0 1px rgba(0, 123, 255, 0.14);
+}
+
+.login-hint {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #8a94a0;
+}
+
+.login-error-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid #f3c2c7;
+  background: #fdf1f2;
+  border-radius: 10px;
+  padding: 10px 12px;
+  animation: menu-in 160ms ease both;
+}
+
+.login-error-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: #dc3545;
+  color: #fff;
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.login-error-content {
+  min-width: 0;
+}
+
+.login-error-title,
+.login-error-text {
+  margin: 0;
+}
+
+.login-error-title {
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #b02a37;
+}
+
+.login-error-text {
+  margin-top: 4px;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #8f3b44;
+}
+
+.login-submit {
+  margin-top: 2px;
+  height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--color-primary);
+  color: #fff;
+  font-family: var(--font-label);
+  font-size: 0.94rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: 0 8px 16px rgba(0, 123, 255, 0.2);
+  transition: transform 180ms ease, filter 180ms ease;
+}
+
+.login-submit:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+}
+
+.login-submit:disabled {
+  transform: none;
+  filter: none;
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.top-nav {
+  position: fixed;
+  inset: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  background: var(--color-surface);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--color-line);
+  z-index: 20;
+  animation: nav-enter 500ms ease both;
+}
+
+.nav-inner {
+  width: min(1280px, 100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  padding: 6px var(--space-lg);
+}
+
+.brand-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+  padding: 0;
+  text-decoration: none;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.logo-mark {
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  overflow: visible;
+  display: grid;
+  place-items: center;
+}
+
+.logo-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.top-nav .logo-image {
+  width: 156px;
+  height: auto;
+  max-width: none;
+}
+
+.center-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.nav-link {
+  position: relative;
+  border: 0;
+  background: transparent;
+  color: var(--color-neutral);
+  font-family: var(--font-label);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  padding-bottom: 4px;
+  cursor: pointer;
+  transition: color 180ms ease;
+}
+
+.nav-link:hover {
+  color: var(--color-secondary);
+}
+
+.nav-link.is-active {
+  color: var(--color-primary);
+}
+
+.nav-link:focus-visible {
+  outline: 2px solid rgba(0, 123, 255, 0.35);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.nav-link.is-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--color-primary);
+}
+
+.profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+}
+
+.profile-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  border: 1px solid #cfe0f5;
+  background: #eef5ff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(35, 47, 62, 0.12);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.profile-avatar.is-open {
+  border-color: rgba(0, 123, 255, 0.45);
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.12);
+}
+
+.profile-avatar span {
+  font-family: var(--font-label);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--color-secondary);
+}
+
+.profile-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 378px;
+  border-radius: 14px;
+  border: 1px solid #dfe6ee;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 14px 30px rgba(35, 47, 62, 0.16);
+  padding: 12px 0;
+  animation: menu-in 180ms ease both;
+}
+
+.profile-dropdown-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px 12px;
+}
+
+.summary-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-pill);
+  border: 1px solid #cfe0f5;
+  background: #eef5ff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 10px rgba(35, 47, 62, 0.12);
+}
+
+.summary-avatar span {
+  font-family: var(--font-label);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--color-secondary);
+}
+
+.summary-meta {
+  min-width: 0;
+}
+
+.summary-name,
+.summary-email {
+  margin: 0;
+}
+
+.summary-name {
+  font-family: var(--font-label);
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #1f2933;
+}
+
+.summary-email {
+  margin-top: 4px;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  line-height: 1.2;
+  color: #8a94a0;
+}
+
+.profile-dropdown-divider {
+  height: 1px;
+  margin: 6px 16px;
+  background: #e6ebf1;
+}
+
+.profile-dropdown-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #1f2933;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 22px;
+  cursor: pointer;
+  font-family: var(--font-label);
+  font-size: 1.02rem;
+  font-weight: 700;
+  text-align: left;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.profile-dropdown-item:hover {
+  background: #f1f6fd;
+}
+
+.profile-dropdown-item svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.profile-dropdown-item.is-danger {
+  color: #dc3545;
+}
+
+.profile-dropdown-item:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.main-content {
+  height: 100vh;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  padding: var(--main-content-top) clamp(14px, 2.2vw, var(--space-xl))
+    var(--main-content-bottom);
+  overflow: hidden;
+}
+
+.main-tab-stage {
+  width: min(var(--tab-panel-max-width), 100%);
+  display: grid;
+  justify-items: center;
+  view-transition-name: main-tab-stage;
+}
+
+.logout-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(1.5px);
+  display: grid;
+  place-items: center;
+  animation: menu-in 160ms ease both;
+}
+
+.logout-overlay-card {
+  width: min(320px, calc(100% - 32px));
+  border-radius: 14px;
+  border: 1px solid rgba(223, 230, 238, 0.92);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 20px 34px rgba(15, 23, 42, 0.24);
+  padding: 18px 16px;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+
+.logout-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 3px solid rgba(0, 123, 255, 0.22);
+  border-top-color: var(--color-primary);
+  animation: spin 0.85s linear infinite;
+}
+
+.logout-overlay-text {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #1f4f86;
+}
+
+
+/* ---------------------------------------------------------------- WGA에서 더한 것 */
+
+/* 로고: AXPI는 가로로 긴 회사 로고 이미지 하나였다. WGA는 정사각형 아이콘 + 서비스 이름 */
+.brand-link {
+  width: auto;
+}
+
+.logo-mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.top-nav .logo-image,
+.logo-image {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #eef4ff;
+}
+
+.logo-wordmark {
+  font-family: var(--font-headline);
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
+  white-space: nowrap;
+}
+
+.login-brand .logo-image {
+  width: 56px;
+  height: 56px;
+}
+
+.nav-link {
+  text-decoration: none;
+}
+
+/* 로그인 화면 아래 링크 (회원가입 · 비밀번호 찾기): Cognito Hosted UI가 하던 일 */
+.login-links {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.login-links button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-family: var(--font-label);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-neutral);
+  cursor: pointer;
+}
+
+.login-links button:hover {
+  color: var(--color-primary);
+}
+
+/* 알림(코드를 보냈습니다 등): 오류 알림과 같은 모양, 파란색 */
+.login-notice {
+  border: 1px solid #cfe0f5;
+  background: #f1f6fd;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #1f4f86;
+  animation: menu-in 160ms ease both;
+}
+
+.login-input[readonly] {
+  background: #f7f9fc;
+  color: var(--color-neutral);
+}
+
+/* 앱을 여는 중 (로그인 상태 확인) */
+.app-loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+/* 좁은 화면: AXPI styles.css의 반응형 규칙 중 내비게이션·본문 부분 */
+@media (max-width: 980px) {
+  .nav-inner {
+    padding: 6px var(--space-md);
+    gap: var(--space-md);
+  }
+
+  .center-toolbar {
+    gap: var(--space-md);
+  }
+}
+
+@media (max-width: 760px) {
+  :root {
+    --main-content-top: 116px;
+    --main-content-bottom: 16px;
+  }
+
+  .nav-inner {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    row-gap: 6px;
+  }
+
+  .center-toolbar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: center;
+    gap: var(--space-lg);
+  }
+
+  .profile-actions {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .profile-dropdown {
+    top: calc(100% + 8px);
+    right: -8px;
+    width: min(378px, 88vw);
+  }
+
+  .main-content {
+    padding: var(--main-content-top) 12px var(--main-content-bottom);
+  }
+
+  .plan-panel {
+    padding: 14px;
+  }
+
+  .plan-panel-header {
+    margin-bottom: 12px;
+  }
+}

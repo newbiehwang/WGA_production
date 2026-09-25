@@ -1,0 +1,723 @@
+/* 대화 화면: AXPI 패널 안에 목록(왼쪽)과 대화(오른쪽). 행·버튼·메뉴는 AXPI 것을 그대로 쓰고
+   메시지 본문(마크다운·도구 목록)은 예전 ChatMessage.vue의 모양을 옮겨 색만 맞췄다 */
+
+.chat-panel .plan-panel-header-stage {
+  align-items: center;
+}
+
+.chat-heading {
+  min-width: 0;
+}
+
+.chat-heading .plan-panel-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.chat-list-toggle {
+  display: none;
+}
+
+.chat-error {
+  margin-bottom: 12px;
+}
+
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 20px;
+  position: relative;
+}
+
+/* ---------------------------------------------------------------- 대화 목록 */
+
+.chat-sessions {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e8edf3;
+  padding-right: 16px;
+}
+
+.chat-sessions-header {
+  justify-content: space-between;
+  padding: 0 4px 10px;
+}
+
+.chat-sessions-count {
+  font-family: var(--font-label);
+  color: var(--color-primary) !important;
+}
+
+.chat-session-list {
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.chat-session-row {
+  padding: 10px 10px 10px 14px;
+}
+
+.chat-session-row.is-selected {
+  border-color: rgba(0, 123, 255, 0.45);
+  background: #f1f6fd;
+}
+
+.chat-session-meta {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.chat-session-meta .plan-row-name {
+  color: var(--color-ink);
+  letter-spacing: 0;
+  font-size: 0.9rem;
+}
+
+.chat-session-date {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: #8a94a0;
+}
+
+.chat-sessions-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  border: 1px dashed #dde4ec;
+  border-radius: 12px;
+  margin-top: 8px;
+}
+
+.chat-sessions-empty p {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: 0.86rem;
+  color: #6b7785;
+}
+
+.chat-delete-all {
+  margin-top: 10px;
+  border: 0;
+  background: transparent;
+  padding: 6px 4px;
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #b02a37;
+  text-align: left;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.chat-delete-all:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.chat-delete-all:disabled,
+.plan-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-sessions-backdrop {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- 대화 */
+
+.chat-conversation {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px 4px 0;
+}
+
+.chat-messages::-webkit-scrollbar,
+.chat-session-list::-webkit-scrollbar,
+.home-example-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.chat-messages::-webkit-scrollbar-thumb,
+.chat-session-list::-webkit-scrollbar-thumb,
+.home-example-list::-webkit-scrollbar-thumb {
+  background: rgba(140, 160, 185, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.88);
+  border-radius: 999px;
+}
+
+.chat-empty {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 24px 0;
+}
+
+.chat-empty-title {
+  margin: 0;
+  font-family: var(--font-headline);
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--color-ink);
+}
+
+.chat-empty-text {
+  margin: 0 0 8px;
+  font-size: 0.86rem;
+  color: #6b7785;
+}
+
+.chat-examples {
+  display: grid;
+  gap: 8px;
+  width: min(560px, 100%);
+}
+
+.chat-example {
+  border: 1px solid #e1e7ef;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px 14px;
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  color: var(--color-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.chat-example:hover:not(:disabled) {
+  border-color: rgba(0, 123, 255, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.08);
+}
+
+/* ---------------------------------------------------------------- 메시지 */
+
+.message {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  animation: rise-in 240ms ease both;
+}
+
+.user-message {
+  justify-content: flex-end;
+}
+
+/* 내 질문: 상자 없이 글씨만, 오른쪽. 긴 질문은 3/4까지만 쓰고 줄을 바꾼다 */
+.user-message .message-body {
+  max-width: 75%;
+}
+
+.user-message .message-content {
+  text-align: right;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.bot-message .message-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.message-avatar {
+  flex-shrink: 0;
+}
+
+.message-avatar img {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: #eef4ff;
+  display: block;
+}
+
+.message-content {
+  font-size: 15px;
+  line-height: 1.65;
+  color: #1f2933;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.bot-message .message-content {
+  padding-top: 4px;
+}
+
+/* 도구 호출 목록: 왼쪽 세로줄, 본문보다 작고 옅게 */
+.tool-trace {
+  list-style: none;
+  margin: 4px 0 12px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid #dfe6ee;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #6b7785;
+}
+
+.tool-step + .tool-step {
+  margin-top: 6px;
+}
+
+.tool-step-title {
+  display: block;
+  color: #3c4650;
+}
+
+/* 입력값만 고정폭 글꼴 (고정폭 글꼴에는 한글이 없어 이름까지 쓰면 글자 간격이 벌어진다) */
+.tool-step-detail {
+  display: block;
+  padding-left: 1.2em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #8a94a0;
+  overflow-wrap: anywhere;
+}
+
+.tool-step-error {
+  font-family: inherit;
+  font-size: 12.5px;
+}
+
+.tool-step.failed .tool-step-title {
+  font-weight: 700;
+}
+
+.typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+}
+
+.typing-indicator .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  opacity: 0.5;
+  animation: dot-pulse 1.4s infinite ease-in-out;
+}
+
+.typing-indicator .dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-indicator .dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes dot-pulse {
+  0%,
+  60%,
+  100% {
+    transform: scale(0.8);
+    opacity: 0.4;
+  }
+  30% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+/* 마크다운 (utils/markdown.ts) */
+.markdown-content h1 {
+  font-size: 1.4rem;
+  margin: 0.8rem 0;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid #e8edf3;
+}
+
+.markdown-content h2 {
+  font-size: 1.25rem;
+  margin: 0.7rem 0;
+}
+
+.markdown-content h3 {
+  font-size: 1.08rem;
+  margin: 0.6rem 0;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  font-family: var(--font-headline);
+  color: var(--color-ink);
+}
+
+.markdown-content p {
+  margin: 0.5rem 0;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+
+.markdown-content li {
+  margin: 0.3rem 0;
+}
+
+.markdown-content code {
+  background: #eef4ff;
+  padding: 0.1rem 0.35rem;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.markdown-content pre {
+  background: #f7f9fc;
+  border: 1px solid #e1e7ef;
+  padding: 0.8rem 1rem;
+  border-radius: 10px;
+  overflow-x: auto;
+  margin: 0.7rem 0;
+  white-space: pre-wrap;
+}
+
+.markdown-content pre code {
+  background: none;
+  padding: 0;
+  word-break: break-word;
+}
+
+/* 표: 폭이 좁으면 표만 가로로 스크롤한다 */
+.markdown-table-container {
+  overflow-x: auto;
+  margin: 8px 0 12px;
+  white-space: normal;
+}
+
+.markdown-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  border: 1px solid #e1e7ef;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.markdown-table th,
+.markdown-table td {
+  min-width: 5em; /* 좁은 화면에서 '9월 22일' 같은 짧은 값이 한 글자씩 쪼개지지 않게 (넘치면 표만 가로로 스크롤) */
+  word-break: keep-all;
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #e8edf3;
+}
+
+.markdown-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.markdown-table th + th,
+.markdown-table td + td {
+  border-left: 1px solid #e8edf3;
+}
+
+.markdown-table th {
+  background: #f7f9fc;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 700;
+  color: #6c757d;
+  white-space: nowrap;
+}
+
+.markdown-content a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.markdown-image-container {
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0;
+}
+
+.markdown-image-container a {
+  display: flex;
+  border: 0;
+}
+
+.markdown-image {
+  max-width: 60%;
+  height: auto;
+  border-radius: 12px;
+  border: 1px solid #e1e7ef;
+  box-shadow: 0 8px 16px rgba(35, 47, 62, 0.1);
+  cursor: pointer;
+  object-fit: contain;
+  display: block;
+}
+
+/* 실행 시간 · 자세히 보기 */
+.query-metadata {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-family: var(--font-label);
+  font-size: 12px;
+}
+
+.elapsed-time {
+  color: #8a94a0;
+}
+
+.details-toggle {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.query-details {
+  flex-basis: 100%;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #e8edf3;
+}
+
+.query-section h4 {
+  margin: 0 0 6px;
+  font-family: var(--font-label);
+  font-size: 12px;
+  color: #6c757d;
+}
+
+.query-section + .query-section {
+  margin-top: 12px;
+}
+
+.query-code {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  background: #f7f9fc;
+  border: 1px solid #e1e7ef;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #3c4650;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------------------------------------------------------------- 질문 입력칸 (홈과 함께 쓴다) */
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  border: 1px solid #d9e0e8;
+  border-radius: 14px;
+  background: #fff;
+  padding: 10px 10px 10px 14px;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.composer:focus-within {
+  border-color: rgba(0, 123, 255, 0.56);
+  box-shadow: inset 0 0 0 1px rgba(0, 123, 255, 0.14);
+}
+
+.composer--home {
+  margin-bottom: 18px;
+}
+
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  padding: 7px 0;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #1f2933;
+  max-height: 150px;
+}
+
+.composer-input::placeholder {
+  color: #a0aab5;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.composer-model {
+  height: 36px;
+  max-width: 180px;
+  border: 1px solid #e1e7ef;
+  border-radius: 10px;
+  background: #f7f9fc;
+  padding: 0 8px;
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #3c4650;
+  cursor: pointer;
+}
+
+.composer-send svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.composer-send.is-cancel {
+  background: #3c4650;
+  box-shadow: none;
+}
+
+.composer-spinner {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+  margin: 0;
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+
+/* ---------------------------------------------------------------- 좁은 화면 */
+
+@media (max-width: 980px) {
+  .chat-body {
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 14px;
+  }
+}
+
+@media (max-width: 760px) {
+  .chat-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chat-list-toggle {
+    display: inline-block;
+  }
+
+  /* 목록은 버튼을 누르면 패널 안에 겹쳐서 연다 */
+  .chat-sessions {
+    display: none;
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: min(300px, 86%);
+    z-index: 5;
+    background: #fff;
+    border: 1px solid #e1e7ef;
+    border-radius: 12px;
+    box-shadow: 0 14px 30px rgba(35, 47, 62, 0.16);
+    padding: 12px;
+    animation: menu-in 160ms ease both;
+  }
+
+  .chat-sessions.is-open {
+    display: flex;
+  }
+
+  .chat-sessions-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    background: rgba(255, 255, 255, 0.6);
+  }
+
+  /* 좁은 화면: 제목을 한 줄 다 쓰고, 버튼은 그 아래 오른쪽에 작게 */
+  .chat-panel .plan-panel-header-stage {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .chat-heading .plan-panel-title {
+    font-size: 1.15rem;
+  }
+
+  .chat-header-actions {
+    justify-content: flex-end;
+  }
+
+  .chat-header-actions button {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 0.8rem;
+  }
+
+  .message-avatar {
+    display: none;
+  }
+
+  .user-message .message-body {
+    max-width: 88%;
+  }
+
+  .composer {
+    flex-wrap: wrap;
+    padding: 8px 8px 8px 12px;
+  }
+
+  .composer-input {
+    flex-basis: 100%;
+  }
+
+  .composer-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .composer-model {
+    margin-right: auto;
+    max-width: 60%;
+  }
+
+  .markdown-image {
+    max-width: 90%;
+  }
+}

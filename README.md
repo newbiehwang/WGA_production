@@ -26,7 +26,7 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 ![WGA 시스템 아키텍처](./images/architecture.png)
 
 ### 기술 스택
-- **Frontend**: Vue 3, TypeScript, Pinia, Vue Router, Vite, Axios
+- **Frontend**: React 18, TypeScript, Zustand, React Router, Vite, Axios, Amplify Auth
 - **Backend**: AWS Lambda (Python 3.12, MCP 서버는 Lambda Container Image), API Gateway (REST)
 - **AI/ML**: Anthropic Claude (AWS Bedrock / Anthropic API), MCP (Model Context Protocol)
 - **Database**: DynamoDB, Athena
@@ -88,7 +88,7 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 - **다국어 지원**: 영문 문서를 한국어로 자동 번역하여 제공
 
 ### 5. 다중 인터페이스 지원
-- **웹 인터페이스**: Vue 3 기반 웹 앱
+- **웹 인터페이스**: React 기반 웹 앱
 - **Slack 봇**: 슬랙 채널에서 직접 질의 가능
 
 ### 6. 대화 기록 관리
@@ -277,11 +277,11 @@ GuardDuty에서 감지된 보안 이벤트가 있나요?
 
 ## 핵심 구현 로직
 
-### Vue 3 기반 채팅 인터페이스
-Vue 3(Composition API)와 TypeScript로 대화형 채팅 인터페이스를 구현했습니다. 메시지와 세션 상태는 Pinia store(`chatbot`, `chatHistoryStore`)로 관리하고, AI 응답은 글자 단위로 출력하는 타이핑 애니메이션으로 표시합니다. 대화 기록은 Chat History API(`/sessions/*`)를 통해 DynamoDB에 저장되어 이전 대화를 다시 불러올 수 있습니다. 커스텀 디렉티브(`v-markdown`)로 마크다운을 렌더링하여 코드 블록, 표, 링크를 표시하고, 서버에서 생성한 차트·다이어그램은 S3 이미지로 표시합니다.
+### React 기반 채팅 인터페이스
+React 18과 TypeScript로 채팅 화면을 만들었습니다. 화면 디자인은 이전에 만든 다른 프로젝트(AXPI)의 CSS를 가져와 색만 바꿔 썼습니다(위쪽 내비게이션, 패널, 목록 행, 확인창). 대화 목록과 메시지 상태는 Zustand store(`chatStore`)로 관리하고, AI 응답은 타이핑하듯 조금씩 보여 줍니다. 답변을 만들며 부른 MCP 도구는 답변 위에 목록으로 표시합니다. 대화 기록은 Chat History API(`/sessions/*`)를 통해 DynamoDB에 저장되어 이전 대화를 다시 불러올 수 있습니다. 마크다운은 직접 만든 파서(`utils/markdown.ts`)로 코드 블록, 표, 링크를 표시하고, 서버에서 생성한 차트·다이어그램은 S3 이미지로 표시합니다. 좁은 화면(760px 이하)에서는 대화 목록을 버튼으로 엽니다.
 
-### Cognito OAuth 2.0 인증
-AWS Cognito User Pool의 Hosted UI와 OAuth 2.0 Authorization Code Flow로 로그인을 처리합니다. 발급된 토큰과 사용자 정보는 Pinia `auth` store에서 관리하며, 만료 시 refresh token으로 갱신합니다. Vue Router의 `beforeEach` 가드에서 `meta.requiresAuth`가 설정된 라우트에 대해 인증 여부를 확인하고, 미인증 사용자는 로그인 페이지로 이동시킵니다.
+### Cognito 인증
+앱 안의 로그인 화면에서 Amplify Auth로 Cognito User Pool에 로그인합니다(SRP 방식이라 비밀번호가 서버로 그대로 가지 않습니다). 회원가입과 이메일 인증, 비밀번호 재설정, 관리자가 만든 계정의 첫 로그인(새 비밀번호 정하기)도 같은 화면에서 처리합니다. 토큰 저장과 갱신은 Amplify가 맡고, API 요청에는 ID 토큰을 붙여 API Gateway의 Cognito Authorizer가 확인합니다. API가 401을 돌려주면 로그인 화면으로 돌아갑니다.
 
 ### Lambda 기반 MCP 서버 및 클라이언트 구현
 기존 MCP 프로토콜의 HTTP+SSE(Server-Sent Events) 방식은 AWS Lambda의 제약사항과 호환되지 않아, Streamable HTTP 방식으로 재설계했습니다. Lambda의 서버리스 환경에서 지속적인 연결을 유지할 수 없는 특성을 고려하여, 요청-응답 기반의 HTTP 프로토콜로 MCP 스펙을 구현했습니다. 이를 위해 전용 MCP 서버와 클라이언트를 직접 설계하고 개발했으며, 기존에 존재하는 MCP 서버들을 우리의 Streamable HTTP 방식과 호환되도록 리팩토링했습니다. 추가로, analyze_log_groups_insights 등 필요한 MCP 도구를 직접 설계하고 구현하였고, 기존의 MCP 도구 중 fetch_cloudwatch_logs_for_service()의 치명적인 결함을 발견 후 수정하였으며, 원작자의 Github Repo에 해당 내용을 반영한 Pull Request를 생성했습니다.
@@ -335,7 +335,7 @@ PR과 `main` 푸시마다 세 작업이 병렬로 실행됩니다. AWS 자격 �
 |---|---|
 | Python | `ruff`(문법 오류·정의되지 않은 이름), `pytest` |
 | IaC | `cfn-lint`(오류 시 실패), `checkov` 보안 스캔, `deploy.sh` 문법 검사 |
-| 프론트엔드 | `vue-tsc` 타입 검사, `vite build` |
+| 프론트엔드 | `tsc` 타입 검사, `vite build` |
 
 `checkov`는 도입 시점의 기존 결과를 `cloudformation/.checkov.baseline`에 기준선으로 저장하고, **새로 생기는 보안 문제만** 실패로 처리합니다. 기준선의 항목은 하나씩 해결하면서 기준선을 다시 만듭니다.
 

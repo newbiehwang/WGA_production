@@ -120,7 +120,7 @@ def test_region_is_not_hardcoded():
     # 배포 리전을 바꿔도 동작하도록 코드와 템플릿에 특정 리전·전역 S3 엔드포인트를 고정하지 않는다.
     # (전역 엔드포인트 s3.amazonaws.com은 us-east-1 외 리전 버킷의 템플릿 URL에서 실패할 수 있다)
     targets = [ROOT / "deploy.sh", *(ROOT / "cloudformation").glob("*.yaml"),
-               *(ROOT / "frontend" / "src").rglob("*.ts"), *(ROOT / "frontend" / "src").rglob("*.vue"),
+               *(ROOT / "frontend" / "src").rglob("*.ts"), *(ROOT / "frontend" / "src").rglob("*.tsx"),
                *(ROOT / "layers").rglob("*.py"), *(ROOT / "services").rglob("*.py"), *(ROOT / "mcp").rglob("*.py")]
     offenders = []
     for path in targets:
