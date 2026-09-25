@@ -230,6 +230,47 @@ Resources:
       AlarmActions: [!Ref AlarmTopic]
       OKActions: [!Ref AlarmTopic]
 
+  # 거버넌스 알람 (services/llm/metrics.py가 EMF로 발행하는 WGA/Governance 지표)
+  # 이름은 wga-<env>-governance-*: AI가 요청하는 알람 알림 변경 도구(setAlarmActions)가 끌 수 없게
+  # 도구 코드(mcp/app.py)와 IAM(llm.yaml의 명시적 Deny) 두 곳에서 막는다
+  InjectionSuspectedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'wga-${Environment}-governance-injection-suspected'
+      AlarmDescription: 도구 결과에 지시문처럼 보이는 문구가 5분 동안 3건 이상 (프롬프트 인젝션 시도 의심, 감사 로그 확인)
+      Namespace: WGA/Governance
+      MetricName: InjectionSuspected
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Environment
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
+  ApprovalDeniedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'wga-${Environment}-governance-approval-denied'
+      AlarmDescription: 변경 작업 승인 요청이 15분 동안 3번 이상 거절됨 (AI가 원치 않는 변경을 반복 요청, 감사 로그 확인)
+      Namespace: WGA/Governance
+      MetricName: ApprovalDenied
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Environment
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+
   # 서비스 상태 대시보드 (챗봇의 get_dashboard_summary 도구로도 조회 가능)
   ServiceDashboard:
     Type: AWS::CloudWatch::Dashboard
@@ -288,7 +329,26 @@ Resources:
                "properties": {"title": "DynamoDB 소비 용량 (대화 기록)", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
                  "metrics": [
                    ["AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "wga-chat-history-${Environment}"],
-                   [".", "ConsumedWriteCapacityUnits", ".", "."]]}}
+                   [".", "ConsumedWriteCapacityUnits", ".", "."]]}},
+              {"type": "text", "x": 0, "y": 19, "width": 24, "height": 1,
+               "properties": {"markdown": "## AI 에이전트 거버넌스 (도구 호출 · 인젝션 의심 · 가리기 · 변경 작업 승인)"}},
+              {"type": "metric", "x": 0, "y": 20, "width": 8, "height": 6,
+               "properties": {"title": "도구 호출 / 실패", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
+                 "metrics": [
+                   ["WGA/Governance", "ToolCalls", "Environment", "${Environment}"],
+                   [".", "ToolErrors", ".", "."]]}},
+              {"type": "metric", "x": 8, "y": 20, "width": 8, "height": 6,
+               "properties": {"title": "인젝션 의심 / 가린 값", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
+                 "metrics": [
+                   ["WGA/Governance", "InjectionSuspected", "Environment", "${Environment}"],
+                   [".", "RedactedValues", ".", "."]]}},
+              {"type": "metric", "x": 16, "y": 20, "width": 8, "height": 6,
+               "properties": {"title": "변경 작업: 요청 / 승인 / 거절 / 실패", "region": "${AWS::Region}", "stat": "Sum", "period": 300, "view": "timeSeries",
+                 "metrics": [
+                   ["WGA/Governance", "ApprovalRequested", "Environment", "${Environment}"],
+                   [".", "ApprovalApproved", ".", "."],
+                   [".", "ApprovalDenied", ".", "."],
+                   [".", "ActionFailed", ".", "."]]}}
             ]
           }
         - Api: !Sub 'wga-api-${Environment}'

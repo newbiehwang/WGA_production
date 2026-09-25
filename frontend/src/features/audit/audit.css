@@ -193,6 +193,11 @@
   font-weight: 600;
 }
 
+.audit-flag.is-suspicious {
+  background: rgba(220, 53, 69, 0.12);
+  color: #b02a37;
+}
+
 .audit-flag.is-redacted {
   background: rgba(255, 153, 0, 0.14);
   color: #9a5b00;

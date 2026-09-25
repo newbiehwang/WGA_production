@@ -138,6 +138,7 @@ export type TraceStep =
           status: 'running' | 'ok' | 'error';
           error?: string;
           seconds?: string; // 걸린 시간 ("1.2초")
+          suspicious?: boolean; // 결과에 지시문처럼 보이는 문구가 있었다 (services/llm/injection.py)
       };
 
 interface RawProgressStep {
@@ -148,6 +149,7 @@ interface RawProgressStep {
     status?: string;
     error?: string;
     ms?: number;
+    suspicious?: string[];
 }
 
 const PREVIEW = 60; // 접힌 사고 요약에서 보여 줄 첫 줄 길이
@@ -171,6 +173,7 @@ export function fromProgressSteps(raw: unknown): TraceStep[] {
                 status: step.status === 'error' ? 'error' : step.status === 'running' ? 'running' : 'ok',
                 error: step.error ? clip(String(step.error), 160) : undefined,
                 seconds: secondsOf(step.ms),
+                suspicious: Array.isArray(step.suspicious) && step.suspicious.length > 0,
             });
         }
     }

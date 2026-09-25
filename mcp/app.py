@@ -178,6 +178,9 @@ def preview_log_retention(log_group_name: str, retention_days: int) -> Dict[str,
 def _check_alarm(alarm_name: str) -> None:
     if not alarm_name.startswith(f"wga-{environment}-"):
         raise ValueError(f"이 환경의 WGA 알람(wga-{environment}-*)만 바꿀 수 있습니다: {alarm_name}")
+    # 거버넌스 알람(인젝션 의심 등)은 끌 수 없다: 인젝션으로 속은 요청이 감시 장치부터 끄는 것을 막는다 (IAM도 Deny)
+    if alarm_name.startswith(f"wga-{environment}-governance-"):
+        raise ValueError(f"거버넌스 알람은 바꿀 수 없습니다: {alarm_name}")
 
 
 def _alarm_actions_enabled(alarm_name: str) -> bool:

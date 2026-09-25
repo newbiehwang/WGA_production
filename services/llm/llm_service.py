@@ -15,6 +15,8 @@ from audit import AuditLog, AuditQueryError, CloudWatchSink, groups_of, query_au
 from approvals import (APPROVED, DENIED, FINISHED, ApprovalError, ApprovalRequester, ApprovalStore, approval_mode,
                        can_view, check_decision, execute_approved, follow_up_prompt, public_view)
 from mcp_client import MCPClient
+import injection
+import metrics
 
 # Lambda 환경에서 효율적인 재사용을 위한 클라이언트 캐싱
 client = None
@@ -421,7 +423,7 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
         - If visualization is needed: First, generate all charts → then, provide the final analysis.
         - Time zone: UTC+9
         </Rules>
-        """
+        """ + injection.SYSTEM_RULES
 
         # 진행 상황: 화면이 보낸 requestId로 단계마다 기록한다 (웹 요청만. Slack 봇은 기록할 곳 없이 단계만 모은다)
         request_id = body.get('requestId')
@@ -574,6 +576,7 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
             "pendingActions": [public_view(item) for item in approvals.created] if approvals else [],
         })
         audit.request_finished(True)
+        emit_request_metrics(progress, redactor, approvals)
 
         # 응답 시간 기록 및 경과 시간 계산
         response_time = datetime.now(timezone.utc)
@@ -613,6 +616,8 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
             progress.finished(False)
         if 'audit' in locals():
             audit.request_finished(False, str(e))
+        if 'progress' in locals() and 'redactor' in locals():
+            emit_request_metrics(progress, redactor, locals().get('approvals'))
         return cors_response(500, {
             "error": "MCP 처리 중 오류 발생",
             # 오류 메시지에도 도구 결과 일부가 들어 있을 수 있다
@@ -639,6 +644,18 @@ def handle_audit(params, caller_id, claims, origin):
         return cors_response(200, query_audit(audit_table, caller_id, claims, params), origin)
     except AuditQueryError as error:
         return cors_response(error.status, {"error": str(error)}, origin)
+
+
+def emit_request_metrics(progress, redactor, approvals):
+    """질문 하나의 거버넌스 지표 (metrics.py). 진행 상황에 쌓인 도구 단계와 가리기·승인 요청 수로 센다."""
+    tools = [step for step in progress.steps if step.get("type") == "tool"]
+    metrics.emit({
+        "ToolCalls": len(tools),
+        "ToolErrors": sum(step.get("status") == "error" for step in tools),
+        "InjectionSuspected": sum(bool(step.get("suspicious")) for step in tools),
+        "RedactedValues": sum(redactor.counts.values()),
+        "ApprovalRequested": len(approvals.created) if approvals else 0,
+    })
 
 
 def _mcp_url():
@@ -683,10 +700,13 @@ def handle_action(action_id, operation, claims, origin):
             print(f"감사 로그 저장 실패로 결정을 멈춤: {error}")
             raise ApprovalError(503, "감사 로그를 남기지 못해 처리하지 않았습니다. 잠시 뒤 다시 시도해 주세요")
         approval_store.set_decision(action_id, APPROVED if approve else DENIED, caller_id)
+        metrics.emit({"ApprovalApproved" if approve else "ApprovalDenied": 1})
         if not approve:
             return cors_response(200, public_view(approval_store.get(action_id) or item), origin)
 
         latest = execute_approved(approval_store, item, call_mcp_tool)
+        if latest.get("status") != "executed":
+            metrics.emit({"ActionFailed": 1})
         try:
             auditor.action_event(latest.get("status", "failed"), latest, decided_by=caller_id,
                                  result=latest.get("result"))

@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional
 from mcp_client import MCPClient
 from redaction import Redactor
 from approvals import PREVIEW_META, risk_of
+import injection
 
 
 # 응답 한 번의 최대 출력 토큰. 사고 과정(thinking)도 이 안에서 쓰므로 사고를 켠 뒤 8192에서 늘렸다
@@ -860,7 +861,8 @@ class AnthropicMCPClient:
 
                         # MCP 도구 호출. 모델은 가명(********9012 등)만 알기 때문에 도구에는 원래 값으로 되돌려 넘긴다.
                         # AWS를 바꾸는 도구는 실행하지 않고 승인 요청을 만든다 (approvals.py)
-                        if self._tool_risk(tool_name) == "write":
+                        is_write = self._tool_risk(tool_name) == "write"
+                        if is_write:
                             result = self._request_approval(tool_name, tool_input)
                         else:
                             result = self.mcp_client.call_tool(
@@ -871,9 +873,12 @@ class AnthropicMCPClient:
                         print(f"도구 결과: {self.redactor.text(json.dumps(result, ensure_ascii=False))[:200]}...")
                         # MCP 도구는 실패를 예외 대신 결과의 isError로 알리기도 한다
                         failed = isinstance(result, dict) and result.get("isError") is True
+                        # 도구 결과(제3자가 쓴 글)에 지시문처럼 보이는 문구가 있는지 (injection.py).
+                        # 승인 요청 결과는 이 서비스가 만든 글이라 보지 않는다
+                        suspicious = [] if is_write else injection.scan(json.dumps(result, ensure_ascii=False))
                         self._report("tool_finished", tool_use_id, not failed,
                                      self._tool_error_text(result) if failed else None,
-                                     len(json.dumps(result, ensure_ascii=False, default=str)))
+                                     len(json.dumps(result, ensure_ascii=False, default=str)), suspicious)
 
                         # 디버그 로그에 도구 결과 기록
                         self.debug_log.append({
@@ -888,7 +893,8 @@ class AnthropicMCPClient:
                         tool_results.append({
                             "tool_id": tool_use_id,
                             "name": tool_name,
-                            "result": result
+                            "result": result,
+                            "suspicious": suspicious
                         })
                     except Exception as e:
                         # 오류 처리
@@ -927,8 +933,10 @@ class AnthropicMCPClient:
                     tool_results_list.append({
                         "type": "tool_result",
                         "tool_use_id": res["tool_id"],
-                        # 도구 결과가 계정 밖(Claude API)으로 나가는 곳이다. 여기서 반드시 가린다
-                        "content": self.redactor.text(content_value)
+                        # 도구 결과가 계정 밖(Claude API)으로 나가는 곳이다. 여기서 반드시 가리고,
+                        # 데이터 영역으로 감싸 지시로 읽히지 않게 한다 (의심 문구가 있으면 경고를 붙인다)
+                        "content": injection.wrap(res["name"], self.redactor.text(content_value),
+                                                  res.get("suspicious") or [])
                     })
                 # Save as a single user message with a list of tool_result objects
                 self.messages.append({

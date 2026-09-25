@@ -298,8 +298,11 @@ def test_model_calling_a_write_tool_creates_an_approval_request(env, monkeypatch
     # MCP에는 미리 보기만 요청했다
     assert [(name, meta) for name, _, meta in env["mcp"].calls if name == "setLogRetention"] == [
         ("setLogRetention", {"wga/preview": True})]
-    # 도구 결과는 MCP 결과(content 목록)를 JSON으로 바꿔 모델에 보낸다 (다른 도구와 같은 모양)
-    content = json.loads(json.loads(tool_result["content"])["content"][0]["text"])
+    # 도구 결과는 MCP 결과(content 목록)를 JSON으로 바꿔 데이터 영역(<tool_result_data>)에 넣어 보낸다
+    wrapped = tool_result["content"]
+    assert wrapped.startswith('<tool_result_data tool="setLogRetention">')
+    inner = wrapped.split(">\n", 1)[1].rsplit("\n</tool_result_data>", 1)[0]
+    content = json.loads(json.loads(inner)["content"][0]["text"])
     assert content["status"] == "approval_required"
     stored = env["pending"].get_item(Key={"actionId": content["actionId"]})["Item"]
     assert stored["status"] == "pending" and stored["requesterId"] == "alice"

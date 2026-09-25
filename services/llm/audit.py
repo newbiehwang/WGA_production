@@ -106,6 +106,7 @@ class AuditLog:
         self._started = _now()
         self._tools: Dict[str, Tuple[datetime, str, Any]] = {}  # 도구 호출 ID → (시작 시각, 이름, 입력)
         self.tool_count = 0
+        self.suspicious_count = 0  # 지시문처럼 보이는 문구가 든 도구 결과 수 (injection.py)
 
     # ---------------------------------------------------------------- 도구 반복에서 부르는 메서드
     def tool_started(self, tool_id: str, name: str, tool_input: Any) -> None:
@@ -114,7 +115,7 @@ class AuditLog:
         self._tools[tool_id] = (_now(), name, actual)
 
     def tool_finished(self, tool_id: str, ok: bool, error: Optional[str] = None,
-                      result_chars: Optional[int] = None) -> None:
+                      result_chars: Optional[int] = None, suspicious: Optional[List[str]] = None) -> None:
         started, name, tool_input = self._tools.pop(tool_id, (_now(), "unknown", {}))
         self.tool_count += 1
         record = {
@@ -129,6 +130,9 @@ class AuditLog:
             record["error"] = _clip(self._redactor.secrets_only(str(error)), ERROR_LIMIT)
         if result_chars is not None:
             record["resultChars"] = int(result_chars)
+        if suspicious:
+            record["injectionSuspected"] = list(suspicious)
+            self.suspicious_count += 1
         self._write(started, tool_id, record)
 
     # ---------------------------------------------------------------- 요청이 끝날 때 (llm_service)
@@ -139,6 +143,7 @@ class AuditLog:
             "model": self.model_id,
             "status": "ok" if ok else "error",
             "toolCount": self.tool_count,
+            "injectionSuspected": self.suspicious_count,
             # 이번 요청에서 Claude로 보내기 전에 가린 값의 수 (종류별)
             "redacted": dict(self._redactor.counts),
             "ms": int((_now() - self._started).total_seconds() * 1000),
