@@ -10,6 +10,7 @@ from common.config import get_config
 from common.utils import invoke_bedrock_nova, cors_headers, cors_response
 from slack_sdk import WebClient
 from llm_progress import REQUEST_ID, ProgressReporter, read_progress
+from redaction import Redactor
 
 # Lambda 환경에서 효율적인 재사용을 위한 클라이언트 캐싱
 client = None
@@ -36,6 +37,8 @@ except Exception as e:
 # 답변을 만드는 동안의 진행 상황 (llm_progress.py). 테이블이 없으면 진행 상황 없이 답변만 만든다
 LLM_PROGRESS_TABLE = os.environ.get("LLM_PROGRESS_TABLE")
 progress_table = boto3.resource("dynamodb").Table(LLM_PROGRESS_TABLE) if LLM_PROGRESS_TABLE else None
+# 이 Lambda가 속한 계정 ID (CloudFormation이 넣는다). 도구 결과 어디에 있든 가린다 (redaction.py)
+ACCOUNT_ID = os.environ.get("ACCOUNT_ID", "")
 
 
 # ---------------------------------------------------------------- 모델 선택
@@ -399,9 +402,13 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
         can_save = bool(progress_table is not None and caller_id and REQUEST_ID.match(request_id or ""))
         progress = ProgressReporter(progress_table if can_save else None, request_id, caller_id)
 
+        # 민감정보 가리기: 요청마다 새로 만든다 (계정 ID·이메일의 가명 표가 요청마다 따로여야 한다)
+        redactor = Redactor([ACCOUNT_ID])
+
         # MCP 클라이언트 가져오기
         client = get_client(model_id)
         client.progress = progress
+        client.redactor = redactor
 
         # 사용자 입력 처리 시작 시간 기록
         question_time = datetime.now(timezone.utc)
@@ -505,15 +512,22 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
             })
 
         progress.finished(True)
-        debug_info = {
+        # 답변과 추론 데이터는 화면에 보이고 대화 기록에 저장된다. 모델은 가린 값만 봤지만,
+        # 도구 오류 메시지처럼 모델을 거치지 않고 들어오는 값이 있어 한 번 더 가린다
+        response_text = redactor.text(response_text)
+        debug_info = redactor.redact({
             "tools_used": tools_used,
             # 사고 요약과 도구 호출을 일어난 순서대로 (화면이 Claude Code처럼 순서대로 보여 준다)
             "steps": progress.saved_steps(),
             "reasoning": reasoning_content,
+        })
+        debug_info.update({
             "session_cached": is_cached and session_id is not None and chat_table is not None,
             "session_id": session_id if is_cached else None,
-            "token_usage": token_usage
-        }
+            "token_usage": token_usage,
+            # 이번 요청에서 가린 값의 수 (종류별, 서로 다른 값 기준)
+            "redacted": dict(redactor.counts),
+        })
 
         # 응답 시간 기록 및 경과 시간 계산
         response_time = datetime.now(timezone.utc)
@@ -553,7 +567,8 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
             progress.finished(False)
         return cors_response(500, {
             "error": "MCP 처리 중 오류 발생",
-            "answer": str(e)
+            # 오류 메시지에도 도구 결과 일부가 들어 있을 수 있다
+            "answer": (redactor if 'redactor' in locals() else Redactor([ACCOUNT_ID])).text(str(e))
         }, origin)
 
 

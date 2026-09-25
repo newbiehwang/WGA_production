@@ -4,6 +4,7 @@ import re
 import requests
 from typing import Dict, Any, List, Optional
 from mcp_client import MCPClient
+from redaction import Redactor
 
 
 # 응답 한 번의 최대 출력 토큰. 사고 과정(thinking)도 이 안에서 쓰므로 사고를 켠 뒤 8192에서 늘렸다
@@ -54,11 +55,25 @@ class AnthropicMCPClient:
         # 요청마다 llm_service가 넣어 주는 진행 상황 기록 (llm_progress.ProgressReporter).
         # 클라이언트는 모델별로 캐시해 여러 요청이 함께 쓰므로 생성자가 아니라 요청마다 바꿔 끼운다
         self.progress = None
+        # 요청마다 llm_service가 새로 넣어 주는 민감정보 가리기 (redaction.Redactor). 가명 표가 요청마다 따로여야 한다
+        self.redactor = Redactor()
 
     def _report(self, event: str, *args) -> None:
-        """진행 상황에 한 단계를 알린다 (기록할 곳이 없으면 아무것도 하지 않는다)."""
+        """진행 상황에 한 단계를 알린다 (기록할 곳이 없으면 아무것도 하지 않는다).
+        진행 상황은 화면과 대화 기록에 남으므로 도구 오류 메시지 등을 가린 뒤에 넘긴다."""
         if self.progress is not None:
-            getattr(self.progress, event)(*args)
+            getattr(self.progress, event)(*self.redactor.redact(list(args)))
+
+    def _redact_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """이전 대화의 메시지 하나를 가린 사본. 사고 블록은 서명과 함께 받은 그대로 보내야 하므로 건드리지 않는다
+        (사고 블록은 이미 가린 입력으로 모델이 만든 것이다)."""
+        content = message.get("content")
+        if isinstance(content, list):
+            content = [block if isinstance(block, dict) and block.get("type") in ("thinking", "redacted_thinking")
+                       else self.redactor.redact(block) for block in content]
+        else:
+            content = self.redactor.redact(content)
+        return {**message, "content": content}
 
     @staticmethod
     def _text_of(content) -> str:
@@ -592,11 +607,13 @@ class AnthropicMCPClient:
         if system_prompt:
             self.system_prompt = system_prompt
 
-        # 메시지 배열 초기화 - 이전 대화 기록 포함
+        # 메시지 배열 초기화 - 이전 대화 기록 포함.
+        # 질문과 이전 대화도 Claude로 나가므로 가린다 (사용자가 키나 계정 ID를 붙여 넣었을 수 있다)
         if previous_messages:
-            self.messages = previous_messages.copy()
+            self.messages = [self._redact_message(message) for message in previous_messages]
         else:
             self.messages = []
+        prompt = self.redactor.text(prompt)
 
         # 디버그 로그 초기화
         self.debug_log = []
@@ -796,13 +813,13 @@ class AnthropicMCPClient:
                             "timestamp": time.time()
                         })
 
-                        # MCP 도구 호출
+                        # MCP 도구 호출. 모델은 가명(********9012 등)만 알기 때문에 도구에는 원래 값으로 되돌려 넘긴다
                         result = self.mcp_client.call_tool(
                             tool_name,
-                            tool_input
+                            self.redactor.restore(tool_input)
                         )
 
-                        print(f"도구 결과: {json.dumps(result, ensure_ascii=False)[:200]}...")
+                        print(f"도구 결과: {self.redactor.text(json.dumps(result, ensure_ascii=False))[:200]}...")
                         # MCP 도구는 실패를 예외 대신 결과의 isError로 알리기도 한다
                         failed = isinstance(result, dict) and result.get("isError") is True
                         self._report("tool_finished", tool_use_id, not failed,
@@ -860,7 +877,8 @@ class AnthropicMCPClient:
                     tool_results_list.append({
                         "type": "tool_result",
                         "tool_use_id": res["tool_id"],
-                        "content": content_value
+                        # 도구 결과가 계정 밖(Claude API)으로 나가는 곳이다. 여기서 반드시 가린다
+                        "content": self.redactor.text(content_value)
                     })
                 # Save as a single user message with a list of tool_result objects
                 self.messages.append({
