@@ -1,8 +1,9 @@
-// 로그인 화면 (AXPI LoginPage.tsx의 카드 모양). 로그인 버튼 하나만 있다.
-// 누르면 Cognito 로그인 페이지로 간다. 가입·이메일 인증·비밀번호 찾기도 그 페이지에서 한다 (auth/authClient.ts).
+// 로그인 화면 (AXPI LoginPage.tsx의 카드 모양). 'AWS에서 로그인' 버튼 하나만 있다.
+// 누르면 AWS(Cognito) 로그인 페이지로 간다. 가입·이메일 인증·비밀번호 찾기도 그 페이지에서 한다 (auth/authClient.ts).
 import { useState } from 'react';
 import { login } from '@/auth/authClient';
 import { getErrorText } from '@/utils/formatters';
+import { AwsLogo } from './AwsLogo';
 import { LogoMark } from './LogoMark';
 
 export function LoginPage({
@@ -36,7 +37,7 @@ export function LoginPage({
                     <LogoMark showName={false} />
                     <div className="login-brand-text">
                         <h1 className="login-title">로그인</h1>
-                        <p className="login-description">WGA 계정으로 로그인 해주세요.</p>
+                        <p className="login-description">AWS 인증이 필요합니다.</p>
                     </div>
                 </div>
 
@@ -54,11 +55,9 @@ export function LoginPage({
                     ) : null}
 
                     <button className="login-submit" type="button" disabled={isRedirecting} onClick={handleLogin}>
-                        {isRedirecting ? '로그인 페이지로 이동 중...' : '로그인'}
+                        <AwsLogo className="login-submit-logo" />
+                        <span>{isRedirecting ? '로그인 페이지로 이동 중...' : 'AWS에서 로그인'}</span>
                     </button>
-                    <p className="login-hint login-hint--center">
-                        AWS Cognito 로그인 페이지로 이동합니다. 회원가입과 비밀번호 찾기도 그 페이지에서 할 수 있습니다.
-                    </p>
                 </div>
             </section>
         </main>
