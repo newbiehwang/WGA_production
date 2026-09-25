@@ -886,7 +886,12 @@ class AnthropicMCPClient:
                         tool_input = tool_use.get("input", {})
 
                         print(f"도구 호출: {tool_name}, 입력: {json.dumps(tool_input, ensure_ascii=False)}")
-                        self._report("tool_started", tool_use_id, tool_name, tool_input)
+                        # 조회 도구에는 가명을 원래 값으로 되돌려 넘긴다 (ARN으로 다시 조회하는 흐름이 깨지지 않게).
+                        # 결과물 도구(차트·다이어그램)는 AWS를 부르지 않고 모델이 쓴 값을 그림에 옮길 뿐이라 가명 그대로
+                        # 넘긴다: 그림은 링크로 공유될 수 있고, 답변과 같이 가명만 보이는 것이 맞다 (docs/threat-model.md R1)
+                        risk = self._tool_risk(tool_name)
+                        restore = risk != "artifact"
+                        self._report("tool_started", tool_use_id, tool_name, tool_input, restore)
 
                         # 디버그 로그에 도구 사용 요청 기록
                         self.debug_log.append({
@@ -896,15 +901,14 @@ class AnthropicMCPClient:
                             "timestamp": time.time()
                         })
 
-                        # MCP 도구 호출. 모델은 가명(********9012 등)만 알기 때문에 도구에는 원래 값으로 되돌려 넘긴다.
-                        # AWS를 바꾸는 도구는 실행하지 않고 승인 요청을 만든다 (approvals.py)
-                        is_write = self._tool_risk(tool_name) == "write"
+                        # MCP 도구 호출. AWS를 바꾸는 도구는 실행하지 않고 승인 요청을 만든다 (approvals.py)
+                        is_write = risk == "write"
                         if is_write:
                             result = self._request_approval(tool_name, tool_input)
                         else:
                             result = self.mcp_client.call_tool(
                                 tool_name,
-                                self.redactor.restore(tool_input)
+                                self.redactor.restore(tool_input) if restore else tool_input
                             )
 
                         print(f"도구 결과: {self.redactor.text(json.dumps(result, ensure_ascii=False))[:200]}...")

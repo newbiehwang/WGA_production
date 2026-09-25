@@ -27,7 +27,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
                                                          ▼
                                                    MCP Lambda ──(MCP 역할)──▶ AWS API
                                                          │   └─ 공식 MCP 서버 7개가 같은 프로세스에서 돈다
-                                                         └──▶ 차트 렌더링 서버 (antv-studio.alipay.com)  [계정 밖]
+                                                         └──▶ 다이어그램 버킷 (차트·다이어그램을 Lambda 안에서 그려 올린다)
 
  제3자가 쓴 글: 로그 한 줄, 알람 설명, 태그, AWS 문서 ──▶ 도구 결과로 모델에 들어간다 (간접 프롬프트 인젝션의 통로)
 ```
@@ -43,7 +43,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | A3 로그·리소스에 글을 남길 수 있는 사람 | 애플리케이션 로그, 알람 설명, 태그에 모델을 노린 지시문 심기 (간접 인젝션) |
 | A4 모델 자체 | 지시를 잘못 이해하거나, 인젝션에 넘어가 엉뚱한 도구·값을 고름 |
 | A5 Slack 워크스페이스 구성원 | Slack 봇에 질문 |
-| A6 의존성 공급망 | 공식 MCP 서버 패키지, 차트 서버 |
+| A6 의존성 공급망 | 공식 MCP 서버 패키지 |
 
 ## 4. 위협 → 방어 → 테스트
 
@@ -95,13 +95,14 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | T27 | 공식 서버의 위험한 도구가 딸려 온다 (A6) | 필요한 도구만 붙인다: 파일을 읽는 Pricing 도구, 비용이 드는 CloudTrail Lake, IAM 변경 도구를 뺐고, 이름으로 불러도 없는 도구다. IAM 서버는 자체 읽기 전용 모드 | `tests/test_pricing.py::test_file_reading_tools_cannot_be_called`, `tests/test_cloudtrail.py::test_only_event_lookup_is_attached`, `tests/test_iam_server.py::test_write_tools_cannot_be_called_even_by_name`, `tests/test_iam_server.py::test_server_runs_in_its_own_read_only_mode`, `tests/test_network_server.py::test_profile_name_from_the_model_is_ignored` |
 | T28 | 조회 권한이 넓어 역할이 새면 피해가 크다 | 서버마다 쓰는 동작만 준다 | `tests/test_network_server.py::test_mcp_role_gets_only_ec2_describe`, `tests/test_cloudtrail.py::test_mcp_role_can_only_look_up_events`, `tests/test_pricing.py::test_mcp_role_gets_only_price_lookup_permissions` |
 | T29 | 저장소에 비밀 값이 올라간다 (공개 저장소) | 실제 발급 형식의 문자열이 없는지 검사한다 | `tests/test_secret_patterns.py::test_no_secret_shaped_strings_in_repository` |
+| T30 | 차트 데이터가 계정 밖의 차트 서버로 나간다 (예전에는 외부 차트 서버로 보냈다) | 차트 15종을 MCP Lambda 안에서 matplotlib으로 그려 다이어그램 버킷에 올린다. 결과물 도구(차트·다이어그램)에는 가명을 원래 값으로 되돌리지 않는다 (AWS를 부르지 않으므로 원래 값이 필요 없다) | `tests/test_charts.py::test_chart_code_has_no_way_out`, `tests/test_charts.py::test_chart_is_drawn_here_and_uploaded_to_our_bucket`, `tests/test_charts.py::test_chart_tools_get_pseudonyms_but_lookups_get_real_values` |
 
 ### 감사 기록
 
 | # | 위협 | 방어 | 테스트 |
 |:--|:--|:--|:--|
-| T30 | 감사 기록을 고치거나 지운다 | 쓰기는 `attribute_not_exists`로 덧붙이기만 하고, LLM 역할에는 PutItem·Query만 준다. CloudWatch Logs(365일)에도 같은 기록을 남긴다. 테이블은 PITR | `tests/test_audit.py::test_records_are_append_only`, `tests/test_audit.py::test_llm_role_can_only_append_and_read_audit_records`, `tests/test_audit.py::test_audit_records_are_also_written_to_cloudwatch_logs` |
-| T31 | 도구 호출이 기록되지 않는다 | 도구마다 실제로 받은 값(비밀 값만 가림)으로 기록한다 | `tests/test_audit.py::test_each_tool_call_is_recorded_with_the_value_the_tool_received`, `tests/test_audit.py::test_slack_requests_are_recorded_by_slack_user` |
+| T31 | 감사 기록을 고치거나 지운다 | 쓰기는 `attribute_not_exists`로 덧붙이기만 하고, LLM 역할에는 PutItem·Query만 준다. CloudWatch Logs(365일)에도 같은 기록을 남긴다. 테이블은 PITR | `tests/test_audit.py::test_records_are_append_only`, `tests/test_audit.py::test_llm_role_can_only_append_and_read_audit_records`, `tests/test_audit.py::test_audit_records_are_also_written_to_cloudwatch_logs` |
+| T32 | 도구 호출이 기록되지 않는다 | 도구마다 실제로 받은 값(비밀 값만 가림)으로 기록한다 | `tests/test_audit.py::test_each_tool_call_is_recorded_with_the_value_the_tool_received`, `tests/test_audit.py::test_slack_requests_are_recorded_by_slack_user` |
 
 ## 5. 남은 위험
 
@@ -109,11 +110,11 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 
 | # | 위험 | 심각도 | 지금 상태 | 다음에 할 수 있는 것 |
 |:--|:--|:--|:--|:--|
-| R1 | **차트 데이터가 계정 밖의 제3자 서버로 나간다** | 높음 | 차트 도구 15개가 데이터를 `antv-studio.alipay.com`으로 보내 이미지를 만든다. 차트는 조회 도구(아티팩트)라 승인 없이 불리고, 가명은 도구를 부르기 직전에 원래 값으로 되돌려지므로 계정 ID·이메일이 원래 값으로 나갈 수 있다. 인젝션에 넘어간 모델이 조회한 데이터를 차트 입력으로 넣으면 데이터 반출 통로가 된다 | 아티팩트 도구에는 가명을 되돌리지 않기, 차트를 Lambda 안에서 그리기(`VIS_REQUEST_SERVER`를 자체 서버로), 또는 차트 도구를 승인 대상으로 올리기 |
+| R1 | ~~차트 데이터가 계정 밖의 제3자 서버로 나간다~~ | **해결** | 차트 도구 15개가 데이터를 외부 차트 서버(`antv-studio.alipay.com`)로 보내 이미지를 만들었다. 가명도 원래 값으로 되돌려 보냈다. 이제 Lambda 안에서 그리고, 결과물 도구에는 가명 그대로 넘긴다 (T30) | - |
 | R2 | **누구나 가입할 수 있고, dev에서는 본인이 승인한다** | 높음 (dev 공개 시) | Cognito 자체 가입이 켜져 있다(`AllowAdminCreateUserOnly: false`). 가입한 사람은 IAM 정책·버킷 목록·비용을 읽을 수 있고, dev·test에서는 자기 변경 요청을 스스로 승인할 수 있다 (EC2 중지 포함). prod는 `approvers` 그룹만 승인한다 | 자체 가입 끄기 또는 이메일 도메인 제한(가입 전 트리거), 모든 환경에서 `approvers` 그룹만 승인 |
 | R3 | EC2 중지·시작은 IAM이 대상을 좁히지 않는다 | 중간 | PR #58에서 태그 조건(ABAC)을 없앴다. 이 리전의 모든 인스턴스가 대상이고, 사람의 승인과 MCP 재확인만으로 통제한다 | 필요해지면 태그 조건 또는 인스턴스 ID 허용 목록을 IAM에 다시 두기 |
 | R4 | 공식 MCP 서버가 MCP 역할의 권한으로 같은 프로세스에서 돈다 | 중간 | 승인 재확인은 우리 코드에 있다. 패키지가 오염되면 우리 코드를 거치지 않고 MCP 역할로 AWS를 부를 수 있다. 버전은 고정했지만 해시 고정은 아니다 | 해시 고정(`--require-hashes`), 변경 권한을 가진 도구만 다른 Lambda·역할로 분리 |
-| R5 | 인젝션 탐지는 패턴이다 | 중간 | 다른 말로 바꾸면 빠져나간다. 변경은 승인으로 막지만, 답변을 왜곡해 사용자를 속이는 것(무결성)과 R1 같은 반출은 막지 못한다 | 탐지에 기대지 않는 구조적 방어(R1 해소), 답변에 근거 도구 결과 표시 |
+| R5 | 인젝션 탐지는 패턴이다 | 중간 | 다른 말로 바꾸면 빠져나간다. 변경은 승인으로 막고 계정 밖으로 나가는 통로는 Claude API뿐이지만, 답변을 왜곡해 사용자를 속이는 것(무결성)은 막지 못한다 | 답변에 근거 도구 결과 표시 |
 | R6 | 가리기는 패턴이다 | 중간 | 모르는 형식의 비밀 값, 리소스 이름·IP·버킷 이름 같은 값은 Claude API로 나간다 | 로그 조회 결과의 필드 허용 목록, 데이터 분류에 따른 도구별 가리기 |
 | R7 | 요청 수·비용 한도가 없다 | 중간 | API Gateway 사용량 계획·사용자별 할당이 없다. 한 사용자가 Anthropic 토큰, Logs Insights 스캔, 흐름 로그 조회, Cost Explorer API 비용을 키울 수 있다 | 사용량 계획과 사용자별 일일 한도, 요청당 반복 수·스캔 범위 제한 |
 | R8 | 조회 권한이 사용자별로 나뉘지 않는다 | 낮음 | 모든 사용자가 같은 MCP 역할로 조회한다. 감사 기록 조회만 `admins` 그룹으로 나뉜다 | Cognito 그룹별로 쓸 수 있는 도구 제한 |
@@ -125,7 +126,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 - **위험도는 우리가 정한다.** MCP 표준 `annotations`(readOnlyHint 등)는 공식 서버들이 비워 두어 믿을 수 없다. 목록(`mcp/lambda_mcp/risk.py`)에 없으면 변경 도구로 본다. 공식 서버를 올리다 새 도구가 생겨도 승인 없이는 돌지 않는다.
 - **승인은 채팅 글이 아니라 인증된 버튼으로.** "응, 승인해"는 인젝션으로도 만들 수 있다. 승인은 `/actions/{id}/approve` 호출이고, 카드 내용은 서버가 만든다.
 - **승인 절차는 감사 로그보다 약하지 않다.** 결정을 기록하지 못하면 실행하지 않는다. 반대로 조회 요청은 감사 로그가 실패해도 답한다 (가용성 우선).
-- **가명은 지우지 않고 바꾼다.** 계정 ID를 지우면 ARN으로 다시 조회하는 흐름이 깨진다. 요청마다 가명 표를 따로 두고, 도구를 부르기 직전에만 되돌린다 (R1은 이 선택의 대가다).
+- **가명은 지우지 않고 바꾼다.** 계정 ID를 지우면 ARN으로 다시 조회하는 흐름이 깨진다. 요청마다 가명 표를 따로 두고, AWS를 조회하는 도구를 부르기 직전에만 되돌린다. 차트·다이어그램처럼 모델이 쓴 값을 그림에 옮길 뿐인 도구에는 되돌리지 않는다 (예전에 차트로 원래 값이 계정 밖에 나간 것이 R1이었다).
 - **탐지는 보조, 구조가 주된 방어.** 인젝션 탐지는 사람에게 알리려는 것이고, 막는 것은 승인이다. 그래서 탐지 패턴은 오탐을 줄이는 쪽으로 좁혔다.
 - **도구 검색은 위험을 바꾸지 않는다.** 모델에게 정의를 보여 주는 시점만 바뀐다. 위험도와 승인은 도구를 부를 때 판단한다.
 - **EC2는 IAM 대상 제한을 두지 않았다 (PR #58).** 운영자가 원하는 인스턴스를 모두 다룰 수 있게 하고, 통제는 사람의 승인에 맡겼다. 대신 R3이 남는다.
