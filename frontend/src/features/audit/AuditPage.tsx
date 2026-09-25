@@ -29,7 +29,17 @@ const KINDS: { value: '' | AuditKind; label: string }[] = [
     { value: '', label: '전체' },
     { value: 'tool', label: '도구 호출' },
     { value: 'request', label: '질문' },
+    { value: 'action', label: '변경 작업' },
 ];
+
+// 변경 작업의 사건 → 결과 열에 보일 이름과 모양
+const ACTION_EVENTS: Record<string, { label: string; className: string }> = {
+    requested: { label: '승인 요청', className: 'audit-event-requested' },
+    approved: { label: '승인', className: 'plan-status-active' },
+    denied: { label: '거절', className: 'plan-status-pending' },
+    executed: { label: '실행', className: 'plan-status-complete' },
+    failed: { label: '실패', className: 'audit-status-error' },
+};
 
 // 가린 값의 종류 → 화면에 보일 이름 (services/llm/redaction.py)
 const REDACTED_LABELS: Record<string, string> = {
@@ -76,6 +86,7 @@ const requesterOf = (record: AuditRecord) => {
 
 const summaryOf = (record: AuditRecord) => {
     if (record.kind === 'request') return record.question ?? '';
+    if (record.kind === 'action') return record.summary ?? '';
     if (typeof record.input === 'string') return record.input;
     return summarize(record.input);
 };
@@ -132,6 +143,19 @@ function Details({ record }: { record: AuditRecord }) {
             </pre>,
         ]);
         if (record.resultChars !== undefined) rows.push(['결과 크기', `${record.resultChars.toLocaleString()}자`]);
+    } else if (record.kind === 'action') {
+        rows.push(['사건', ACTION_EVENTS[record.event ?? '']?.label ?? record.event ?? '']);
+        rows.push(['변경 내용', record.summary ?? '']);
+        rows.push(['도구 이름', <code key="tool">{record.tool}</code>]);
+        rows.push([
+            '실행될 값',
+            <pre key="input" className="audit-code">
+                {typeof record.input === 'string' ? record.input : JSON.stringify(record.input ?? {}, null, 2)}
+            </pre>,
+        ]);
+        if (record.decidedBy) rows.push(['결정한 사람', <code key="by">{record.decidedBy}</code>]);
+        if (record.result) rows.push(['실행 결과', record.result]);
+        if (record.actionId) rows.push(['작업 ID', <code key="action">{record.actionId}</code>]);
     } else {
         rows.push(['질문', record.question ?? '']);
         if (record.model) rows.push(['모델', <code key="model">{record.model}</code>]);
@@ -163,8 +187,19 @@ function Details({ record }: { record: AuditRecord }) {
     );
 }
 
-function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boolean; onToggle: () => void }) {
+// 결과 열: 변경 작업은 사건(승인 요청·승인·거절·실행·실패), 나머지는 성공·실패
+function ResultBadge({ record }: { record: AuditRecord }) {
+    const event = record.kind === 'action' ? ACTION_EVENTS[record.event ?? ''] : undefined;
+    if (event) return <span className={`plan-status-badge ${event.className}`}>{event.label}</span>;
     const failed = record.status === 'error';
+    return (
+        <span className={`plan-status-badge ${failed ? 'audit-status-error' : 'plan-status-complete'}`}>
+            {failed ? '실패' : '성공'}
+        </span>
+    );
+}
+
+function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boolean; onToggle: () => void }) {
     const redacted = redactedTotal(record);
     const summary = summaryOf(record);
     const detailsId = `audit-details-${keyOf(record).replace(/[^a-zA-Z0-9_-]/g, '')}`;
@@ -184,6 +219,8 @@ function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boole
                 <span className="audit-col-tool" title={record.tool}>
                     {record.kind === 'request' ? (
                         <span className="audit-kind-request">질문</span>
+                    ) : record.kind === 'action' ? (
+                        <span className="audit-kind-action">{labelOf(record.tool ?? '').replace(/ 요청$/, '')}</span>
                     ) : (
                         labelOf(record.tool ?? '')
                     )}
@@ -192,9 +229,7 @@ function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boole
                     {summary || <span className="audit-muted">-</span>}
                 </span>
                 <span className="audit-col-status">
-                    <span className={`plan-status-badge ${failed ? 'audit-status-error' : 'plan-status-complete'}`}>
-                        {failed ? '실패' : '성공'}
-                    </span>
+                    <ResultBadge record={record} />
                     <span className="audit-ms">{secondsOf(record.ms)}</span>
                 </span>
                 <span className="audit-col-flags">
