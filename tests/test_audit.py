@@ -1,0 +1,423 @@
+"""감사 로그 (audit.py, mcp_anthropic_client.py, llm_service.py, lambda_function.py, llm.yaml)
+
+- 도구 호출 한 번, 질문 하나마다 누가·무엇을·어떤 입력으로 했는지 남긴다
+- 감사 로그에는 도구가 실제로 받은 값(계정 ID 원래 값)을 남기고, 비밀 값은 남기지 않는다
+- 추가만 한다 (덮어쓰지 않는다). 기록에 실패해도 답변은 만든다
+- 조회: 일반 사용자는 자기 기록만, admins 그룹은 모든 사람의 기록
+
+키 모양 값은 저장소 비밀 값 검사(test_secret_patterns.py)에 걸리지 않도록 실행할 때 조각을 이어 붙여 만든다.
+"""
+import copy
+import json
+from datetime import datetime, timedelta, timezone
+
+import boto3
+import pytest
+import yaml
+
+from conftest import ROOT, load_service_module
+
+AUDIT_TABLE = "wga-audit-test"
+AUDIT_LOG_GROUP = "/wga/test/audit"
+ACCOUNT = "111122223333"
+ACCESS_KEY = "AK" + "IA" + "Z7QW4ERTY6UIOP2A"
+ORIGIN = "https://test.abc.amplifyapp.com"
+REQUEST_ID = "0f8fad5b-d9cb-469f-a165-70867728950e"
+
+
+def create_audit_table():
+    boto3.client("dynamodb").create_table(
+        TableName=AUDIT_TABLE,
+        AttributeDefinitions=[{"AttributeName": name, "AttributeType": "S"} for name in ("userId", "at", "day")],
+        KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}, {"AttributeName": "at", "KeyType": "RANGE"}],
+        GlobalSecondaryIndexes=[{
+            "IndexName": "by-day",
+            "KeySchema": [{"AttributeName": "day", "KeyType": "HASH"}, {"AttributeName": "at", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    return boto3.resource("dynamodb").Table(AUDIT_TABLE)
+
+
+@pytest.fixture
+def audit_env(aws, monkeypatch):
+    monkeypatch.setenv("AUDIT_TABLE", AUDIT_TABLE)
+    monkeypatch.setenv("AUDIT_LOG_GROUP", AUDIT_LOG_GROUP)
+    table = create_audit_table()
+    boto3.client("logs").create_log_group(logGroupName=AUDIT_LOG_GROUP)
+    return table
+
+
+def log_records():
+    logs = boto3.client("logs")
+    records = []
+    for stream in logs.describe_log_streams(logGroupName=AUDIT_LOG_GROUP)["logStreams"]:
+        events = logs.get_log_events(logGroupName=AUDIT_LOG_GROUP, logStreamName=stream["logStreamName"])["events"]
+        records += [json.loads(event["message"]) for event in events]
+    return records
+
+
+# ---------------------------------------------------------------- 도구 반복에서 기록
+
+class FakeResponse:
+    def __init__(self, payload):
+        self.status_code = 200
+        self._payload = payload
+        self.text = json.dumps(payload, ensure_ascii=False)
+
+    def json(self):
+        return self._payload
+
+
+ALIAS_ARN = "arn:aws:logs:us-east-1:********3333:log-group:/aws/lambda/wga-llm-dev"
+REAL_ARN = f"arn:aws:logs:us-east-1:{ACCOUNT}:log-group:/aws/lambda/wga-llm-dev"
+
+
+@pytest.fixture
+def client_run(audit_env, monkeypatch):
+    load_service_module("services/llm", "llm_service")
+    import mcp_anthropic_client
+    from audit import AuditLog, CloudWatchSink
+    from llm_progress import ProgressReporter
+    from redaction import Redactor
+
+    replies = [
+        {"content": [{"type": "tool_use", "id": "toolu_1", "name": "describe_log_groups",
+                      "input": {"log_group_name_prefix": "/aws/lambda"}}], "usage": {}},
+        {"content": [{"type": "tool_use", "id": "toolu_2", "name": "analyze_log_group",
+                      "input": {"log_group_arn": ALIAS_ARN, "note": f"key {ACCESS_KEY}"}}], "usage": {}},
+        {"content": [{"type": "text", "text": "오류가 없습니다."}], "usage": {}},
+    ]
+    sent = []
+
+    def fake_post(url, headers=None, json=None):
+        sent.append(copy.deepcopy(json))
+        return FakeResponse(replies[len(sent) - 1])
+
+    def fake_call_tool(name, args):
+        if name == "describe_log_groups":
+            return {"content": [{"type": "text", "text": REAL_ARN}]}
+        return {"isError": True, "content": [{"type": "text", "text": f"AccessDenied for {ACCESS_KEY}"}]}
+
+    monkeypatch.setattr(mcp_anthropic_client.requests, "post", fake_post)
+    client = mcp_anthropic_client.AnthropicMCPClient(
+        mcp_url="https://example.invalid", api_key="k", model_id="claude-sonnet-5")
+    client.tools = [{"name": "describe_log_groups", "description": "", "inputSchema": {}},
+                    {"name": "analyze_log_group", "description": "", "inputSchema": {}}]
+    monkeypatch.setattr(client.mcp_client, "call_tool", fake_call_tool)
+    client.progress = ProgressReporter()
+    client.redactor = Redactor([ACCOUNT])
+    client.audit = AuditLog(audit_env, CloudWatchSink(AUDIT_LOG_GROUP), client.redactor, user_id="alice",
+                            email="alice@example.com", source="web", request_id=REQUEST_ID, session_id="s1",
+                            model_id="claude-sonnet-5", question="로그 봐줘")
+    client.process_user_input("로그 봐줘", "system")
+    return audit_env, client
+
+
+def test_each_tool_call_is_recorded_with_the_value_the_tool_received(client_run):
+    table, _ = client_run
+    items = sorted(table.query(KeyConditionExpression="userId = :u",
+                               ExpressionAttributeValues={":u": "alice"})["Items"], key=lambda i: i["at"])
+    assert [i["tool"] for i in items] == ["describe_log_groups", "analyze_log_group"]
+    first, second = items
+    assert first["status"] == "ok" and first["resultChars"] > 0 and first["ms"] >= 0
+    assert first["requestId"] == REQUEST_ID and first["sessionId"] == "s1" and first["email"] == "alice@example.com"
+    assert first["at"].endswith("#toolu_1") and first["day"] == first["at"][:10]
+    # 모델은 가명(********3333)을 줬지만, 감사 로그에는 도구가 실제로 받은 ARN을 남긴다. 비밀 값은 남기지 않는다
+    assert json.loads(second["input"]) == {"log_group_arn": REAL_ARN, "note": "key [REDACTED:aws_access_key]"}
+    assert second["status"] == "error" and second["error"] == "AccessDenied for [REDACTED:aws_access_key]"
+
+
+def test_audit_records_are_also_written_to_cloudwatch_logs(client_run):
+    records = log_records()
+    assert [r["tool"] for r in records] == ["describe_log_groups", "analyze_log_group"]
+    assert all(r["wga_audit"] is True and r["userId"] == "alice" for r in records)
+    assert all("expiresAt" not in r for r in records)
+    assert ACCESS_KEY not in json.dumps(records)
+    # 실행 환경마다 로그 스트림 하나
+    assert len(boto3.client("logs").describe_log_streams(logGroupName=AUDIT_LOG_GROUP)["logStreams"]) == 1
+
+
+def test_progress_still_gets_redacted_values(client_run):
+    # 진행 상황(화면)은 가명, 감사 로그는 원래 값: 같은 지점에서 받지만 가리는 정도가 다르다
+    _, client = client_run
+    assert ACCOUNT not in json.dumps(client.progress.steps)
+
+
+# ---------------------------------------------------------------- 질문 단위 기록 (/llm1)
+
+class FakeClient:
+    progress = None
+    redactor = None
+    audit = None
+    model_id = "claude-sonnet-5"
+
+    def process_user_input(self, text, system_prompt):
+        self.progress.tool_started("toolu_1", "get_active_alarms", {})
+        self.progress.tool_finished("toolu_1", True)
+        self.audit.tool_started("toolu_1", "get_active_alarms", {})
+        self.audit.tool_finished("toolu_1", True, None, 10)
+        self.redactor.text(ACCESS_KEY)  # Claude로 보내기 전에 가린 값 하나
+        return "답변"
+
+    def process_user_input_with_history(self, text, system_prompt, previous_messages):
+        return self.process_user_input(text, system_prompt)
+
+    def get_debug_log(self):
+        return []
+
+
+def items_of(table, user_id):
+    return table.query(KeyConditionExpression="userId = :u", ExpressionAttributeValues={":u": user_id})["Items"]
+
+
+def test_llm1_records_the_request(audit_env, monkeypatch):
+    llm = load_service_module("services/llm", "llm_service")
+    monkeypatch.setattr(llm, "get_client", lambda model_id: FakeClient())
+
+    body = {"text": f"계정 {ACCOUNT}의 키 {ACCESS_KEY} 확인", "requestId": REQUEST_ID, "sessionId": "s1"}
+    llm.handle_llm1_with_mcp(body, ORIGIN, caller_id="alice", caller_email="alice@example.com")
+
+    request = next(i for i in items_of(audit_env, "alice") if i["kind"] == "request")
+    assert request["at"].endswith(f"#request#{REQUEST_ID}")
+    assert request["status"] == "ok" and request["toolCount"] == 1 and request["source"] == "web"
+    assert request["model"] == "claude-sonnet-5" and request["email"] == "alice@example.com"
+    # 질문: 계정 ID는 남기고 비밀 값은 가린다
+    assert request["question"] == f"계정 {ACCOUNT}의 키 [REDACTED:aws_access_key] 확인"
+    assert request["redacted"] == {"aws_access_key": 1}
+
+
+def test_slack_requests_are_recorded_by_slack_user(audit_env, monkeypatch):
+    llm = load_service_module("services/llm", "llm_service")
+    monkeypatch.setattr(llm, "get_client", lambda model_id: FakeClient())
+    monkeypatch.setattr(llm, "send_slack_dm", lambda user, text: None)
+
+    body = {"text": "알람", "user_id": "U123", "previous_questions": [{"role": "user", "content": "x"}]}
+    llm.handle_llm1_with_mcp(body, ORIGIN)  # Slack 봇은 API Gateway를 거치지 않아 caller_id가 없다
+    request = next(i for i in items_of(audit_env, "slack:U123") if i["kind"] == "request")
+    assert request["source"] == "slack" and "email" not in request
+
+
+def test_failed_request_is_recorded(audit_env, monkeypatch):
+    llm = load_service_module("services/llm", "llm_service")
+
+    class Broken(FakeClient):
+        def process_user_input(self, text, system_prompt):
+            raise RuntimeError(f"Anthropic 오류 {ACCESS_KEY}")
+
+    monkeypatch.setattr(llm, "get_client", lambda model_id: Broken())
+    response = llm.handle_llm1_with_mcp({"text": "알람"}, ORIGIN, caller_id="alice")
+    assert response["statusCode"] == 500
+    request = items_of(audit_env, "alice")[0]
+    assert request["status"] == "error" and request["error"] == "Anthropic 오류 [REDACTED:aws_access_key]"
+
+
+def test_audit_failure_does_not_stop_the_answer(aws, monkeypatch):
+    # 테이블·로그 그룹이 없어 기록에 실패해도 답변은 만든다 (지금 도구는 모두 조회용)
+    monkeypatch.setenv("AUDIT_TABLE", "missing-table")
+    monkeypatch.setenv("AUDIT_LOG_GROUP", "/missing/group")
+    llm = load_service_module("services/llm", "llm_service")
+    monkeypatch.setattr(llm, "get_client", lambda model_id: FakeClient())
+    response = llm.handle_llm1_with_mcp({"text": "알람"}, ORIGIN, caller_id="alice")
+    assert response["statusCode"] == 200 and json.loads(response["body"])["answer"] == "답변"
+
+
+def test_records_are_append_only(audit_env):
+    load_service_module("services/llm", "llm_service")
+    from audit import AuditLog
+    from redaction import Redactor
+
+    audit = AuditLog(audit_env, None, Redactor(), user_id="alice", email=None, source="web",
+                     request_id=REQUEST_ID, session_id=None, model_id="m", question="q")
+    audit.request_finished(True)
+    item = items_of(audit_env, "alice")[0]
+    # 같은 키로 다시 쓰면 조건부 쓰기가 막는다 (기존 기록이 바뀌지 않는다)
+    with pytest.raises(Exception, match="ConditionalCheckFailed"):
+        audit_env.put_item(Item={**item, "status": "changed"}, ConditionExpression="attribute_not_exists(userId)")
+    assert items_of(audit_env, "alice")[0]["status"] == "ok"
+
+
+# ---------------------------------------------------------------- 조회: GET /audit
+
+def put(table, user, at, tool="get_active_alarms", status="ok", kind="tool"):
+    table.put_item(Item={"userId": user, "at": at, "day": at[:10], "kind": kind, "tool": tool, "status": status,
+                         "input": json.dumps({"n": 1}), "expiresAt": 1})
+
+
+@pytest.fixture
+def seeded(audit_env):
+    load_service_module("services/llm", "llm_service")
+    today = datetime.now(timezone.utc).date()
+    days = [(today - timedelta(days=offset)).isoformat() for offset in range(3)]
+    for index, day in enumerate(days):
+        put(audit_env, "alice", f"{day}T10:00:00.000Z#toolu_a{index}")
+        put(audit_env, "alice", f"{day}T11:00:00.000Z#toolu_b{index}", tool="describe_log_groups", status="error")
+        put(audit_env, "bob", f"{day}T12:00:00.000Z#toolu_c{index}")
+    return audit_env, days
+
+
+def run_query(table, caller="alice", groups=None, **params):
+    from audit import query_audit
+    claims = {"sub": caller}
+    if groups is not None:
+        claims["cognito:groups"] = groups
+    return query_audit(table, caller, claims, {k: str(v) for k, v in params.items()})
+
+
+def test_users_see_only_their_own_records(seeded):
+    table, days = seeded
+    result = run_query(table, **{"from": days[-1]})
+    assert {i["userId"] for i in result["items"]} == {"alice"} and len(result["items"]) == 6
+    assert result["scope"] == "mine" and result["isAdmin"] is False
+    # 최신 기록부터, 입력은 객체로, TTL 값은 빼고
+    assert [i["at"] for i in result["items"]] == sorted((i["at"] for i in result["items"]), reverse=True)
+    assert result["items"][0]["input"] == {"n": 1} and "expiresAt" not in result["items"][0]
+
+
+@pytest.mark.parametrize("params", [{"scope": "all"}, {"user": "bob"}])
+def test_users_cannot_read_other_peoples_records(seeded, params):
+    from audit import AuditQueryError
+    with pytest.raises(AuditQueryError) as error:
+        run_query(seeded[0], **params)
+    assert error.value.status == 403
+
+
+def test_admins_see_everyone_across_days_with_paging(seeded):
+    table, days = seeded
+    seen, cursor = [], None
+    for _ in range(10):
+        params = {"scope": "all", "from": days[-1], "limit": 4}
+        if cursor:
+            params["cursor"] = cursor
+        page = run_query(table, groups="admins", **params)
+        assert len(page["items"]) <= 4
+        seen += page["items"]
+        cursor = page["cursor"]
+        if not cursor:
+            break
+    assert len(seen) == 9 and {i["userId"] for i in seen} == {"alice", "bob"}
+    assert len({i["at"] for i in seen}) == 9  # 겹치거나 빠진 기록이 없다
+    assert [i["day"] for i in seen] == sorted((i["day"] for i in seen), reverse=True)
+
+
+def test_admins_can_read_one_user_and_filter(seeded):
+    table, days = seeded
+    result = run_query(table, caller="carol", groups="[approvers admins]", user="alice", tool="describe_log_groups",
+                       status="error", **{"from": days[-1]})
+    assert result["scope"] == "user" and len(result["items"]) == 3
+    assert {i["tool"] for i in result["items"]} == {"describe_log_groups"}
+
+
+def test_filtered_paging_does_not_skip_records(seeded):
+    # 거르기 때문에 페이지가 비어도 cursor로 이어 읽으면 빠짐없이 나온다
+    table, days = seeded
+    seen, cursor = [], None
+    for _ in range(20):
+        params = {"status": "error", "from": days[-1], "limit": 1}
+        if cursor:
+            params["cursor"] = cursor
+        page = run_query(table, **params)
+        seen += page["items"]
+        cursor = page["cursor"]
+        if not cursor:
+            break
+    assert len(seen) == 3
+
+
+@pytest.mark.parametrize("params, status", [
+    ({"from": "2026-13-01"}, 400),
+    ({"from": "2026-09-10", "to": "2026-09-01"}, 400),
+    ({"from": "2026-01-01", "to": "2026-03-01"}, 400),  # 31일 넘는 기간
+    ({"scope": "everyone"}, 400),
+    ({"limit": "many"}, 400),
+    ({"cursor": "not-base64!"}, 400),
+])
+def test_bad_queries_are_rejected(seeded, params, status):
+    from audit import AuditQueryError
+    with pytest.raises(AuditQueryError) as error:
+        run_query(seeded[0], **params)
+    assert error.value.status == status
+
+
+def test_cursor_for_another_user_is_rejected(seeded):
+    from audit import AuditQueryError, _encode_cursor
+    cursor = _encode_cursor({"key": {"userId": "bob", "at": "2026-09-25T00:00:00.000Z#x"}})
+    with pytest.raises(AuditQueryError) as error:
+        run_query(seeded[0], cursor=cursor)
+    assert error.value.status == 400
+
+
+@pytest.mark.parametrize("raw, groups", [
+    ("admins", ["admins"]),
+    ("[admins approvers]", ["admins", "approvers"]),
+    ("admins,approvers", ["admins", "approvers"]),
+    (["admins"], ["admins"]),
+    (None, []),
+])
+def test_cognito_groups_claim_formats(aws, raw, groups):
+    load_service_module("services/llm", "llm_service")
+    from audit import groups_of
+    assert groups_of({"cognito:groups": raw}) == groups
+
+
+def test_audit_route(seeded):
+    lambda_function = load_service_module("services/llm", "lambda_function")
+    event = {"path": "/audit", "httpMethod": "GET", "headers": {"origin": ORIGIN},
+             "queryStringParameters": {"scope": "all"},
+             "requestContext": {"authorizer": {"claims": {"sub": "alice"}}}}
+    assert lambda_function.lambda_handler(event, None)["statusCode"] == 403
+
+    event["requestContext"]["authorizer"]["claims"]["cognito:groups"] = "admins"
+    response = lambda_function.lambda_handler(event, None)
+    assert response["statusCode"] == 200 and len(json.loads(response["body"])["items"]) == 9  # 기본 기간(최근 7일)
+
+    event["queryStringParameters"] = None
+    event["requestContext"] = {}
+    assert lambda_function.lambda_handler(event, None)["statusCode"] == 401
+
+
+def test_llm1_route_passes_the_email_claim(audit_env, monkeypatch):
+    lambda_function = load_service_module("services/llm", "lambda_function")
+    captured = {}
+    monkeypatch.setattr(lambda_function, "handle_llm1_with_mcp",
+                        lambda body, origin, caller_id, email: captured.update(sub=caller_id, email=email) or {})
+    lambda_function.lambda_handler({"path": "/llm1", "httpMethod": "POST", "headers": {}, "body": "{}",
+                                    "requestContext": {"authorizer": {"claims": {
+                                        "sub": "alice", "email": "alice@example.com"}}}}, None)
+    assert captured == {"sub": "alice", "email": "alice@example.com"}
+
+
+# ---------------------------------------------------------------- CloudFormation
+
+class CfnLoader(yaml.SafeLoader):
+    pass
+
+
+CfnLoader.add_multi_constructor("!", lambda loader, suffix, node: None)
+
+
+def template(name):
+    return yaml.load((ROOT / "cloudformation" / name).read_text(encoding="utf-8"), Loader=CfnLoader)
+
+
+def test_audit_resources_in_template():
+    resources = template("llm.yaml")["Resources"]
+    table = resources["AuditTable"]["Properties"]
+    assert table["TimeToLiveSpecification"] == {"AttributeName": "expiresAt", "Enabled": True}
+    assert table["PointInTimeRecoverySpecification"]["PointInTimeRecoveryEnabled"] is True
+    assert table["GlobalSecondaryIndexes"][0]["IndexName"] == "by-day"
+    assert resources["AuditLogGroup"]["Properties"]["RetentionInDays"] == 365
+    assert resources["AuditMethod"]["Properties"]["AuthorizationType"] == "COGNITO_USER_POOLS"
+
+
+def test_llm_role_can_only_append_and_read_audit_records():
+    statements = template("llm.yaml")["Resources"]["LlmLambdaExecutionRole"]["Properties"]["Policies"][0][
+        "PolicyDocument"]["Statement"]
+    actions = {action for statement in statements for action in statement["Action"] if action.startswith("dynamodb:")}
+    assert "dynamodb:UpdateItem" not in actions and "dynamodb:DeleteItem" not in actions
+    assert {"dynamodb:PutItem", "dynamodb:Query"} <= actions
+
+
+def test_admins_group_exists():
+    group = template("base.yaml")["Resources"]["AdminsGroup"]
+    assert group["Type"] == "AWS::Cognito::UserPoolGroup" and group["Properties"]["GroupName"] == "admins"

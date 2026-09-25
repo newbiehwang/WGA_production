@@ -106,6 +106,20 @@ class Redactor:
             return {key: self.redact(item) for key, item in value.items()}
         return value
 
+    def secrets_only(self, value: Any) -> Any:
+        """비밀 값만 가린 사본 (계정 ID·이메일은 그대로). 계정 안에 남는 감사 로그용 (audit.py).
+        누가 어느 계정의 무엇을 조회했는지 추적하려면 식별자는 남아 있어야 하고, 비밀 값은 감사 로그에도 남기지 않는다.
+        밖으로 나간 값이 아니므로 counts에는 세지 않는다."""
+        if isinstance(value, str):
+            for kind, pattern, group in SECRET_PATTERNS:
+                value = pattern.sub(lambda match, k=kind, g=group: self._secret(match, k, g, count=False), value)
+            return value
+        if isinstance(value, list):
+            return [self.secrets_only(item) for item in value]
+        if isinstance(value, dict):
+            return {key: self.secrets_only(item) for key, item in value.items()}
+        return value
+
     # ---------------------------------------------------------------- 되돌리기 (도구 호출 직전에만)
     def restore(self, value: Any) -> Any:
         """모델이 도구 입력에 넣은 가명을 원래 값으로 되돌린 사본. 비밀 값([REDACTED:…])은 되돌리지 않는다."""
@@ -128,8 +142,9 @@ class Redactor:
             self._seen.add(key)
             self.counts[kind] += 1
 
-    def _secret(self, match: re.Match, kind: str, group: int) -> str:
-        self._count(kind, match.group(group))
+    def _secret(self, match: re.Match, kind: str, group: int, count: bool = True) -> str:
+        if count:
+            self._count(kind, match.group(group))
         mark = f"[REDACTED:{kind}]"
         if group == 0:
             return mark

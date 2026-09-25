@@ -11,6 +11,7 @@ from common.utils import invoke_bedrock_nova, cors_headers, cors_response
 from slack_sdk import WebClient
 from llm_progress import REQUEST_ID, ProgressReporter, read_progress
 from redaction import Redactor
+from audit import AuditLog, AuditQueryError, CloudWatchSink, query_audit
 
 # Lambda 환경에서 효율적인 재사용을 위한 클라이언트 캐싱
 client = None
@@ -39,6 +40,10 @@ LLM_PROGRESS_TABLE = os.environ.get("LLM_PROGRESS_TABLE")
 progress_table = boto3.resource("dynamodb").Table(LLM_PROGRESS_TABLE) if LLM_PROGRESS_TABLE else None
 # 이 Lambda가 속한 계정 ID (CloudFormation이 넣는다). 도구 결과 어디에 있든 가린다 (redaction.py)
 ACCOUNT_ID = os.environ.get("ACCOUNT_ID", "")
+# 감사 로그 (audit.py). 테이블·로그 그룹이 없으면(로컬 등) 그쪽에는 기록하지 않는다
+AUDIT_TABLE = os.environ.get("AUDIT_TABLE")
+audit_table = boto3.resource("dynamodb").Table(AUDIT_TABLE) if AUDIT_TABLE else None
+audit_sink = CloudWatchSink(os.environ.get("AUDIT_LOG_GROUP"))
 
 
 # ---------------------------------------------------------------- 모델 선택
@@ -322,7 +327,7 @@ def get_client(model_id: str = None):
     return client_cache[model_id]
 
 
-def handle_llm1_with_mcp(body, origin, caller_id=None):
+def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
     """
     MCP 클라이언트를 사용하여 llm1 요청을 처리하고 도구 사용 과정 및 결과 포함
     세션 기반 메시지 캐싱 지원 (개선된 messages 배열 방식)
@@ -331,6 +336,7 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
         body: 요청 본문
         origin: CORS origin
         caller_id: Cognito Authorizer가 검증한 요청자 sub (웹 요청), Slack 봇 직접 호출은 None
+        caller_email: 요청자 이메일 (ID 토큰의 email, 감사 로그에 남긴다)
 
     Returns:
         응답 객체 (도구 사용 과정 및 결과 포함)
@@ -405,10 +411,22 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
         # 민감정보 가리기: 요청마다 새로 만든다 (계정 ID·이메일의 가명 표가 요청마다 따로여야 한다)
         redactor = Redactor([ACCOUNT_ID])
 
+        # 감사 로그: 웹은 Cognito sub, Slack은 Slack 사용자 ID로 요청자를 남긴다
+        if caller_id:
+            requester, source = caller_id, "web"
+        elif slack_user_id:
+            requester, source = f"slack:{slack_user_id}", "slack"
+        else:
+            requester, source = "unknown", "direct"
+        audit = AuditLog(audit_table, audit_sink, redactor, user_id=requester, email=caller_email, source=source,
+                         request_id=request_id, session_id=session_id, model_id=model_id, question=user_input)
+
         # MCP 클라이언트 가져오기
         client = get_client(model_id)
         client.progress = progress
         client.redactor = redactor
+        client.audit = audit
+        audit.model_id = getattr(client, "model_id", None) or model_id  # 요청한 모델이 없으면 기본 모델로 바뀐다
 
         # 사용자 입력 처리 시작 시간 기록
         question_time = datetime.now(timezone.utc)
@@ -528,6 +546,7 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
             # 이번 요청에서 가린 값의 수 (종류별, 서로 다른 값 기준)
             "redacted": dict(redactor.counts),
         })
+        audit.request_finished(True)
 
         # 응답 시간 기록 및 경과 시간 계산
         response_time = datetime.now(timezone.utc)
@@ -565,6 +584,8 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
         print(f"MCP 처리 중 오류: {str(e)}")
         if 'progress' in locals():
             progress.finished(False)
+        if 'audit' in locals():
+            audit.request_finished(False, str(e))
         return cors_response(500, {
             "error": "MCP 처리 중 오류 발생",
             # 오류 메시지에도 도구 결과 일부가 들어 있을 수 있다
@@ -583,6 +604,14 @@ def handle_progress(request_id, caller_id, origin):
         # 아직 시작 전이거나(첫 기록 전) 남의 것이다. 화면은 404면 조금 뒤 다시 묻는다
         return cors_response(404, {"error": "진행 상황이 없습니다."}, origin)
     return cors_response(200, progress, origin)
+
+
+def handle_audit(params, caller_id, claims, origin):
+    """GET /audit: 감사 로그. 일반 사용자는 자기 기록만, admins 그룹은 모든 사람의 기록 (audit.query_audit)."""
+    try:
+        return cors_response(200, query_audit(audit_table, caller_id, claims, params), origin)
+    except AuditQueryError as error:
+        return cors_response(error.status, {"error": str(error)}, origin)
 
 
 def get_table_registry():

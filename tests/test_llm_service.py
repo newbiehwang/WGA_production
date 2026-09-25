@@ -12,7 +12,8 @@ def llm_lambda(monkeypatch):
     module = load_service_module("services/llm", "lambda_function")
     calls = []
     monkeypatch.setattr(module, "handle_llm1_with_mcp",
-                        lambda body, origin, caller_id=None: calls.append((body, caller_id)) or {"statusCode": 200})
+                        lambda body, origin, caller_id=None, caller_email=None:
+                        calls.append((body, caller_id)) or {"statusCode": 200})
     module.calls = calls
     return module
 

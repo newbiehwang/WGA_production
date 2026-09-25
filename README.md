@@ -44,7 +44,7 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 | frontend (`frontend.yaml`) | `wga-frontend-{env}` | Amplify App/Branch, 프론트엔드 버킷 정책 |
 | mcp (`mcp.yaml`) | `wga-mcp-{env}` | MCP 이미지용 ECR 리포지토리, CodeBuild 프로젝트 |
 | main (`main.yaml`) | `wga-{env}` | 아래 5개 Nested Stack과 API Gateway 최종 Deployment |
-| └ llm (`llm.yaml`) | Nested | LLM Lambda, MCP Lambda(Container Image, Function URL), `/llm1`, `/llm1/progress/{requestId}`, `/llm2` 등, 답변 진행 상황 테이블 |
+| └ llm (`llm.yaml`) | Nested | LLM Lambda, MCP Lambda(Container Image, Function URL), `/llm1`, `/llm1/progress/{requestId}`, `/llm2`, `/audit` 등, 답변 진행 상황 테이블, 감사 로그 테이블·로그 그룹 |
 | └ logs (`logs.yaml`) | Nested | Athena 유틸리티 Lambda, `/execute-query`, `/create-table` |
 | └ slackbot (`slackbot.yaml`) | Nested | Slack 봇 Lambda, `/login`, `/callback`, `/models`, `/req` 등 |
 | └ chat-history (`chat-history.yaml`) | Nested | 대화 기록 Lambda, `/sessions/*` |
@@ -105,7 +105,20 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 - **적용 위치**: 질문과 이전 대화, 도구 결과(Claude로 보내기 전), 진행 상황, 최종 답변과 추론 데이터. 가린 값의 수는 추론 데이터의 `redacted`에 남습니다.
 - **오탐 줄이기**: 이 계정의 ID는 어디서든 가리지만, 다른 계정 ID는 ARN·ECR 주소·`AccountId` 같은 이름 뒤에 있을 때만 가립니다. 12자리 숫자라는 것만으로는 가리지 않습니다(요청 ID·바이트 수와 구분하기 위해서).
 
-### 8. 간편한 배포
+### 8. 감사 로그
+누가 언제 어떤 질문으로 어떤 도구를 어떤 입력으로 불렀고 결과가 어땠는지 남깁니다 (`services/llm/audit.py`).
+- **기록 단위**: 도구 호출 한 번과 질문 하나마다 한 건. 요청자(웹은 Cognito sub·이메일, Slack은 Slack 사용자 ID), 질문 ID, 대화 ID, 모델, 도구 입력, 성공·실패, 걸린 시간, 결과 크기, 가린 값의 수를 남깁니다.
+- **저장**: DynamoDB `wga-audit-<env>`(화면에서 조회, 90일 뒤 TTL, 시점 복구)와 CloudWatch Logs `/wga/<env>/audit`(1년 보관, Logs Insights로 분석).
+- **가리기**: 비밀 값은 감사 로그에도 남기지 않습니다. 계정 ID·이메일은 도구가 실제로 받은 원래 값으로 남깁니다 (Claude에는 가명만 보냅니다).
+- **추가만**: 같은 키를 덮어쓰지 않고(조건부 쓰기), LLM Lambda에는 수정·삭제 권한을 주지 않습니다.
+- **조회** (`GET /audit`): 일반 사용자는 자기 기록만 봅니다. Cognito `admins` 그룹이면 모든 사람의 기록(`scope=all`)이나 특정 사람의 기록(`user=<sub>`)을 봅니다. 기간(`from`·`to`, 최대 31일), 도구(`tool`), 결과(`status`), 종류(`kind`)로 거를 수 있고 `cursor`로 이어 읽습니다.
+- **관리자 지정**: 가입만으로는 관리자가 될 수 없고, 운영자가 그룹에 넣습니다.
+
+```bash
+aws cognito-idp admin-add-user-to-group --user-pool-id <UserPoolId> --username <이메일> --group-name admins
+```
+
+### 9. 간편한 배포
 - **단일 스크립트 배포**: `deploy.sh` 하나로 전체 인프라와 프론트엔드 배포
 - **CloudFormation 기반**: AWS 네이티브 IaC로 인프라 관리
 - **이미지 빌드 자동화**: CodeBuild로 MCP 서버 Docker 이미지 빌드 후 ECR 푸시
