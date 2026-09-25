@@ -420,8 +420,8 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
              instances, unassociated Elastic IPs).
         6. Visualization: Generate charts/AWS diagrams (only if the user explicitly requests visualization)
         7. Changes (only when the user asks to change something): setLogRetention (WGA Lambda log group retention),
-           setAlarmActions (turn WGA alarm notifications on/off), setEc2InstanceState (stop/start an EC2 instance
-           tagged wga-managed=true only), enableS3PublicAccessBlock (turn on Block Public Access for a bucket; there
+           setAlarmActions (turn WGA alarm notifications on/off), setEc2InstanceState (stop/start an EC2 instance),
+           enableS3PublicAccessBlock (turn on Block Public Access for a bucket; there
            is no way to turn it off). Calling them does NOT change anything yet: it creates
            an approval request, and the change runs only after the user approves it on the screen.
            Tell the user what will change and that approval is needed. Never claim the change is done.
