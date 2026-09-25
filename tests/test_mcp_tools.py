@@ -185,8 +185,8 @@ from moto import mock_aws
 with mock_aws():
     from lambda_mcp.official import OfficialTools
     tools = OfficialTools.default()
+    names = [schema["name"] for schema in tools.schemas()]  # 여기서 공식 서버를 불러온다
     import awslabs.billing_cost_management_mcp_server as billing
-    names = [schema["name"] for schema in tools.schemas()]
     content, is_error = tools.call("cost-explorer", {
         "operation": "getCostAndUsage", "start_date": "2026-09-01", "end_date": "2026-09-20",
         "granularity": "DAILY", "metrics": '["UnblendedCost"]'})
@@ -230,3 +230,34 @@ def test_official_servers_start_when_package_dir_is_read_only(tmp_path):
     assert result["billing_file"].startswith(str(read_only))  # 정말 읽기 전용 폴더에서 불러왔는지
     assert "cost-explorer" in result["names"] and "describe_log_groups" in result["names"]
     assert result["is_error"] is False
+
+
+LAZY_CHECK = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1])  # mcp 폴더
+from moto import mock_aws
+
+loaded = lambda: sorted(name for name in sys.modules if name.startswith("awslabs."))
+with mock_aws():
+    from lambda_mcp.official import OfficialTools
+    tools = OfficialTools.default()
+    before = loaded()
+    tools.schemas()
+    print(json.dumps({"before": before, "after": loaded()}))
+"""
+
+
+def test_official_servers_load_on_first_tools_list():
+    # Lambda 초기화 단계(10초 제한)에서 무거운 공식 서버를 불러오지 않는다: 도구 목록이 처음 필요할 때 불러온다.
+    # 이 프로세스는 이미 공식 서버를 불러왔으므로 새 프로세스에서 확인한다
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    mcp_dir = Path(__file__).resolve().parent.parent / "mcp"
+    done = subprocess.run([sys.executable, "-c", LAZY_CHECK, str(mcp_dir)],
+                          capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr[-3000:]
+    result = json.loads(done.stdout.strip().splitlines()[-1])
+    assert result["before"] == []
+    assert "awslabs.cloudwatch_mcp_server.server" in result["after"]
