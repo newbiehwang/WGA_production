@@ -15,12 +15,19 @@ in-memory 클라이언트로 부르는 이유
 
 Lambda 핸들러는 동기 함수이고 공식 도구는 async다. 컨테이너마다 이벤트 루프 하나를 만들어 계속 쓴다
 (요청마다 새 루프를 만들면 루프에 묶인 자원이 다음 요청에서 깨질 수 있다).
+
+공식 서버는 도구 목록이 처음 필요할 때 불러온다 (Lambda 초기화 단계에서 불러오지 않는다)
+- 공식 서버는 무겁다. CloudWatch 서버는 메트릭 분석 때문에 pandas·scipy·statsmodels까지 불러온다.
+  Lambda는 컨테이너 이미지의 파일을 처음 읽을 때 받아 오므로, 콜드 스타트에서는 이 import가 10초를 넘는다.
+- Lambda 초기화 단계는 10초로 제한되어 있고 늘릴 수 없다. 넘으면 그때까지 한 일을 버리고 첫 요청에서
+  초기화를 처음부터 다시 한다. 초기화 단계에서 불러오면 10초를 버리고 같은 import를 한 번 더 하게 된다.
+- 첫 요청에서 불러오면 한 번만 한다. 그 뒤로는 컨테이너가 살아 있는 동안 불러온 서버를 그대로 쓴다.
 """
 import asyncio
 import copy
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +73,30 @@ def _inline_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
     return resolve(copy.deepcopy(schema))
 
 
+def load_default_servers() -> List[Any]:
+    """이 서비스가 쓰는 공식 서버: CloudWatch, AWS 문서, Cost Explorer. 부를 때 import한다 (무겁다)."""
+    # 공식 서버는 import할 때 loguru로 로그를 남긴다. Lambda 로그가 넘치지 않게 경고 이상만 남긴다
+    os.environ.setdefault("FASTMCP_LOG_LEVEL", "ERROR")
+    # Lambda에서는 /tmp만 쓸 수 있고 패키지가 설치된 곳(site-packages)은 읽기 전용이다.
+    # billing-cost-management 서버는 import하는 순간 로그 파일을 자기 설치 폴더(awslabs/logs)에 만들려고 해서,
+    # 그대로 두면 "Read-only file system"으로 MCP Lambda가 시작하지 못한다. 로그 파일 위치를 /tmp로 옮긴다
+    os.environ.setdefault("FASTMCP_LOG_FILE", "/tmp/billing-cost-management-mcp-server.log")
+    # 같은 서버는 응답이 크면(기본 25KB) 설치 폴더에 SQLite 파일을 만들어 옮겨 두고, 그 표를 SQL 도구로
+    # 다시 읽게 한다. 이 서비스는 SQL 도구를 붙이지 않았으므로 옮기지 말고 응답을 그대로 받는다
+    # (Lambda 응답 한도 6MB보다 작게)
+    os.environ.setdefault("MCP_SQL_THRESHOLD", str(5 * 1024 * 1024))
+    from awslabs.aws_documentation_mcp_server.server_aws import mcp as documentation
+    from awslabs.billing_cost_management_mcp_server.tools.cost_explorer_tools import cost_explorer_server
+    from awslabs.cloudwatch_mcp_server.server import mcp as cloudwatch
+
+    return [cloudwatch, documentation, cost_explorer_server]
+
+
 class OfficialTools:
     """공식 서버 여러 개의 도구를 하나로 모아 목록을 주고, 이름으로 해당 서버에 호출을 넘긴다."""
 
-    def __init__(self, servers: List[Any], excluded: Optional[Dict[str, str]] = None):
-        self._servers = servers
+    def __init__(self, load_servers: Callable[[], List[Any]], excluded: Optional[Dict[str, str]] = None):
+        self._load_servers = load_servers  # 서버 목록을 돌려주는 함수. 도구 목록이 처음 필요할 때 부른다
         self._excluded = excluded or {}
         self._loop = asyncio.new_event_loop()
         self._schemas: Optional[Dict[str, Dict[str, Any]]] = None  # 도구 이름 → MCP 도구 정의
@@ -78,22 +104,8 @@ class OfficialTools:
 
     @classmethod
     def default(cls) -> "OfficialTools":
-        """이 서비스가 쓰는 공식 서버: CloudWatch, AWS 문서, Cost Explorer."""
-        # 공식 서버는 import할 때 loguru로 로그를 남긴다. Lambda 로그가 넘치지 않게 경고 이상만 남긴다
-        os.environ.setdefault("FASTMCP_LOG_LEVEL", "ERROR")
-        # Lambda에서는 /tmp만 쓸 수 있고 패키지가 설치된 곳(site-packages)은 읽기 전용이다.
-        # billing-cost-management 서버는 import하는 순간 로그 파일을 자기 설치 폴더(awslabs/logs)에 만들려고 해서,
-        # 그대로 두면 "Read-only file system"으로 MCP Lambda가 시작하지 못한다. 로그 파일 위치를 /tmp로 옮긴다
-        os.environ.setdefault("FASTMCP_LOG_FILE", "/tmp/billing-cost-management-mcp-server.log")
-        # 같은 서버는 응답이 크면(기본 25KB) 설치 폴더에 SQLite 파일을 만들어 옮겨 두고, 그 표를 SQL 도구로
-        # 다시 읽게 한다. 이 서비스는 SQL 도구를 붙이지 않았으므로 옮기지 말고 응답을 그대로 받는다
-        # (Lambda 응답 한도 6MB보다 작게)
-        os.environ.setdefault("MCP_SQL_THRESHOLD", str(5 * 1024 * 1024))
-        from awslabs.aws_documentation_mcp_server.server_aws import mcp as documentation
-        from awslabs.billing_cost_management_mcp_server.tools.cost_explorer_tools import cost_explorer_server
-        from awslabs.cloudwatch_mcp_server.server import mcp as cloudwatch
-
-        return cls([cloudwatch, documentation, cost_explorer_server], EXCLUDED_TOOLS)
+        """이 서비스가 쓰는 공식 서버를 붙인다. 여기서는 불러오지 않는다 (위 모듈 설명)."""
+        return cls(load_default_servers, EXCLUDED_TOOLS)
 
     def _run(self, coro):
         return self._loop.run_until_complete(coro)
@@ -102,7 +114,7 @@ class OfficialTools:
         from fastmcp import Client
 
         schemas: Dict[str, Dict[str, Any]] = {}
-        for server in self._servers:
+        for server in self._load_servers():
             async with Client(server) as client:
                 for tool in await client.list_tools():
                     if tool.name in self._excluded:
@@ -119,7 +131,7 @@ class OfficialTools:
         self._schemas = schemas
 
     def schemas(self) -> List[Dict[str, Any]]:
-        """tools/list에 넣을 도구 정의. 처음 부를 때 한 번만 모은다 (컨테이너가 살아 있는 동안 그대로)."""
+        """tools/list에 넣을 도구 정의. 처음 부를 때 공식 서버를 불러와 한 번만 모은다 (컨테이너가 살아 있는 동안 그대로)."""
         if self._schemas is None:
             self._run(self._collect())
         return list(self._schemas.values())

@@ -33,6 +33,7 @@ cloudwatch_client = boto3.client('cloudwatch', region_name=aws_region)
 
 # Initialize the MCP server
 mcp_server = LambdaMCPServer(name="cloudguard", version="1.0.0", session_table=session_table)
+# 공식 서버는 여기서 불러오지 않고 도구 목록이 처음 필요할 때 불러온다 (콜드 스타트, lambda_mcp/official.py)
 mcp_server.attach(OfficialTools.default())
 
 
