@@ -280,7 +280,6 @@
     import AppLayout from '@/layouts/AppLayout.vue';
     import { useChatHistoryStore } from '@/stores/chatHistoryStore';
     import { useModelsStore } from '@/stores/models.ts';
-    import { useSettingsStore } from '@/stores/settings.ts';
 
     export default defineComponent({
         name: 'StartChatPage',
@@ -291,7 +290,6 @@
         setup() {
             const router = useRouter();
             const chatHistoryStore = useChatHistoryStore();
-            const settingsStore = useSettingsStore();
 
             const messageText = ref('');
             const isNavOpen = ref(false);
@@ -300,7 +298,6 @@
             const showDeleteAllConfirm = ref(false);
 
             onMounted(async () => {
-                settingsStore.loadFromStorage();
                 if (chatHistoryStore.sessions.length === 0) {
                     try {
                         await chatHistoryStore.fetchSessions();
@@ -453,7 +450,6 @@
                 confirmDeleteAllSessions,
                 cancelDeleteAll,
                 confirmDeleteAll,
-                settingsStore,
                 handleLogout,
             };
         },

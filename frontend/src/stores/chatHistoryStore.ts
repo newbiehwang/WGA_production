@@ -4,7 +4,6 @@ import { defineStore } from 'pinia';
 import type { CancelTokenSource } from 'axios';
 import axios from 'axios';
 import type { BotResponse, ChatHistoryState, ChatMessageType, ChatSession } from '@/types/chat';
-import { useSettingsStore } from '@/stores/settings.ts';
 
 const generateId = () => {
     return Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -155,15 +154,12 @@ export const useChatHistoryStore = defineStore('chatHistory', {
             }
         },
 
-        async sendMessage(text: string, isCached: boolean = true) {
+        async sendMessage(text: string) {
             if (!text.trim()) return;
 
             if (!this.currentSession) {
                 await this.createNewSession();
             }
-
-            const settingsStore = useSettingsStore();
-            const cachedValue = isCached !== undefined ? isCached : settingsStore.isCached;
 
             this.waitingForResponse = true;
             let userMessageResponse = null;
@@ -215,7 +211,7 @@ export const useChatHistoryStore = defineStore('chatHistory', {
                 this.apiCancelToken = axios.CancelToken.source();
                 console.log('API 취소 토큰 생성 완료:', !!this.apiCancelToken);
 
-                const botResponseData = await this.generateBotResponse(text, cachedValue);
+                const botResponseData = await this.generateBotResponse(text);
 
                 if (this.currentSession && Array.isArray(this.currentSession.messages)) {
                     this.currentSession.messages = this.currentSession.messages.filter(
@@ -394,16 +390,11 @@ export const useChatHistoryStore = defineStore('chatHistory', {
             }
         },
 
-        async generateBotResponse(
-            userMessage: string,
-            isCached: boolean = true,
-        ): Promise<BotResponse> {
+        async generateBotResponse(userMessage: string): Promise<BotResponse> {
             try {
                 console.log('generateBotResponse 호출, 취소 토큰 존재:', !!this.apiCancelToken);
 
                 const apiUrl = import.meta.env.VITE_API_DEST || 'http://localhost:8000';
-                const settingsStore = useSettingsStore();
-                const cachedValue = isCached !== undefined ? isCached : settingsStore.isCached;
 
                 const { useModelsStore } = await import('@/stores/models');
                 const modelsStore = useModelsStore();
@@ -418,7 +409,10 @@ export const useChatHistoryStore = defineStore('chatHistory', {
                         text: userMessage,
                         sessionId: this.currentSession?.sessionId,
                         modelId: modelsStore.selectedModel.id,
-                        isCached: cachedValue,
+                        // 대화 컨텍스트는 항상 기억한다: 백엔드가 이 세션의 이전 대화를 함께 모델에 보낸다.
+                        // 예전에는 화면의 토글로 끌 수 있었지만 끄면 앞 대화를 모르는 답이 나와 없앴다.
+                        // 백엔드는 값이 없으면 false로 보므로 반드시 true를 보낸다
+                        isCached: true,
                     },
                     {
                         headers,
