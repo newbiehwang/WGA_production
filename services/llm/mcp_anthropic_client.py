@@ -69,6 +69,8 @@ class AnthropicMCPClient:
         self.audit = None
         # 요청마다 llm_service가 넣어 주는 승인 요청 (approvals.ApprovalRequester). 없으면(Slack 등) 변경 도구를 쓸 수 없다
         self.approvals = None
+        # 요청마다 llm_service가 넣어 주는 결과물 목록 (artifacts.Artifacts). 없으면 예전처럼 주소를 모델에 넘긴다
+        self.artifacts = None
 
     def _report(self, event: str, *args) -> None:
         """한 단계를 진행 상황과 감사 로그에 알린다 (기록할 곳이 없으면 아무것도 하지 않는다).
@@ -910,6 +912,9 @@ class AnthropicMCPClient:
                                 tool_name,
                                 self.redactor.restore(tool_input) if restore else tool_input
                             )
+                            # 결과물은 주소·그릴 내용을 떼어 두고 모델에는 참조(artifact://…)만 준다
+                            if risk == "artifact" and self.artifacts is not None:
+                                result = self.artifacts.take(tool_name, result)
 
                         print(f"도구 결과: {self.redactor.text(json.dumps(result, ensure_ascii=False))[:200]}...")
                         # MCP 도구는 실패를 예외 대신 결과의 isError로 알리기도 한다

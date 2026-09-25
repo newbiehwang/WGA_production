@@ -2,7 +2,9 @@
 
     차트 도구(app.py generate_*_chart 등 15개) ──▶ generate_chart_url(종류, 옵션)
         ├─ render_chart: matplotlib으로 PNG를 그린다 (한글 글꼴: Noto Sans CJK, Dockerfile)
-        └─ 다이어그램 버킷(charts/날짜/…)에 올리고 24시간짜리 presigned URL을 돌려준다 (아키텍처 다이어그램과 같다)
+        ├─ 다이어그램 버킷(charts/날짜/…)에 올리고 24시간짜리 presigned URL을 돌려준다 (아키텍처 다이어그램과 같다)
+        └─ 그릴 내용(spec)도 돌려준다: 웹 화면은 PNG 대신 ECharts로 다시 그린다 (선명하고 값을 짚어 볼 수 있다).
+           PNG는 Slack, 오래된 대화, spec이 너무 큰 경우에 쓴다
 
 예전에는 차트 데이터를 외부 차트 서버(AntV GPT-Vis, antv-studio.alipay.com)에 보내 이미지를 받았다.
 차트에는 조회한 AWS 데이터가 들어가므로 계정 밖 제3자에게 데이터가 나갔다 (docs/threat-model.md R1).
@@ -12,6 +14,7 @@
 입력은 모델이 만든 값이라 크기를 제한한다 (그림 크기, 항목 수, 글자 길이).
 """
 import io
+import json
 import math
 import os
 import uuid
@@ -37,6 +40,9 @@ MIN_SIDE, MAX_SIDE = 300, 2000  # 그림 한 변 (픽셀, DPI 100 기준)
 MAX_ITEMS = 1000  # 데이터 항목 수
 MAX_NODES = 150  # 트리·그래프의 노드 수
 MAX_LABEL = 60  # 글자 하나의 길이
+# 브라우저가 다시 그릴 수 있게 그릴 내용(spec)도 돌려준다 (frontend EChart). 대화 기록(DynamoDB 항목 400KB)에
+# 함께 저장되므로 크기를 제한하고, 넘으면 PNG만 쓴다
+SPEC_LIMIT = 16000
 
 KOREAN_FONTS = ["Noto Sans CJK KR", "Noto Sans CJK JP", "NanumGothic", "Malgun Gothic", "AppleGothic",
                 "Apple SD Gothic Neo"]
@@ -600,8 +606,13 @@ def generate_chart_url(chart_type: str, options: Dict[str, Any]) -> Dict[str, An
                                                ExpiresIn=PRESIGNED_SECONDS)
     except Exception as error:
         return {"status": "error", "chart_type": chart_type, "message": f"Error uploading chart: {error}"}
-    return {"status": "success", "url": url, "chart_type": chart_type,
-            "message": f"Chart generated successfully: {chart_type}"}
+    result = {"status": "success", "url": url, "s3_key": key, "chart_type": chart_type,
+              "message": f"Chart generated successfully: {chart_type}"}
+    # 그릴 내용: PNG를 그리며 검사를 마친 값이다. 모델에는 가지 않는다 (LLM Lambda artifacts.py가 떼어 화면에 준다)
+    spec = {"type": chart_type, "options": options}
+    if len(json.dumps(spec, ensure_ascii=False, default=str)) <= SPEC_LIMIT:
+        result["spec"] = spec
+    return result
 
 
 def validate_chart_data(data: List[Dict], required_fields: List[str]) -> bool:
