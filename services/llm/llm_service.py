@@ -319,13 +319,15 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
         The current time is UTC {now.strftime('%Y-%m-%d %H:%M:%S')}.
         Korean time is UTC+9.
         <Tools>
-        1. Log Analysis (2 steps required):
-            Step1: fetch_cloudwatch_logs_for_service("cloudtrail"|"guardduty"|"etc") 
-            Step2: analyze_log_groups_insights(actual_log_group_name)
-        2. Monitoring: list_cloudwatch_dashboards → get_dashboard_summary
-        3. Documentation Search: search_documentation → recommend_documentation → read_documentation
-        4. Cost Analysis: get_detailed_breakdown_by_day
-        5. Visualization: Generate charts/AWS diagrams (only if the user explicitly requests visualization)
+        1. Log Analysis (AWS official CloudWatch MCP tools):
+            Step1: describe_log_groups (find the actual log group name, e.g. prefix "/aws/lambda")
+            Step2: execute_log_insights_query (Logs Insights query on that log group; poll get_logs_insight_query_results if it is still running)
+            Optional: analyze_log_group (anomalies and common patterns of one log group)
+        2. Metrics & Alarms: get_metric_metadata → get_metric_data / analyze_metric, get_active_alarms, get_alarm_history
+        3. Dashboards: listCloudwatchDashboards → getDashboardSummary
+        4. Documentation Search (AWS official documentation MCP tools): search_documentation → read_documentation (recommend for related pages)
+        5. Cost Analysis (AWS official Cost Explorer MCP tool): cost-explorer (operation "getCostAndUsage" etc.)
+        6. Visualization: Generate charts/AWS diagrams (only if the user explicitly requests visualization)
         </Tools>
 
         <Critical Rules - Response Generation Order>
@@ -343,7 +345,7 @@ def handle_llm1_with_mcp(body, origin, caller_id=None):
         - The final response must include both the analysis results and the image ![Title](URL).
 
         <Response Rules>
-        - For log analysis questions, first use the 'fetch' tool to confirm the actual log group name.
+        - For log analysis questions, first use describe_log_groups to confirm the actual log group name.
         - Do not guess log group names like "/aws/cloudtrail"; use the actual log group name.
         - If visualization is needed: First, generate all charts → then, provide the final analysis.
         - Time zone: UTC+9

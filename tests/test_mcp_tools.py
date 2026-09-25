@@ -1,6 +1,5 @@
-"""MCP 서버 도구와 세션 저장소 (moto CloudWatch Logs, CloudWatch, DynamoDB)"""
+"""MCP 서버: 직접 둔 도구, AWS 공식 MCP 서버 도구(CloudWatch·문서·Cost Explorer), 세션 저장소 (moto)"""
 import json
-import time
 
 import boto3
 import pytest
@@ -22,56 +21,6 @@ def app(aws, monkeypatch):
     return load_service_module("mcp", "app")
 
 
-def put_logs(group, stream, messages):
-    logs = boto3.client("logs")
-    logs.create_log_group(logGroupName=group)
-    logs.create_log_stream(logGroupName=group, logStreamName=stream)
-    now = int(time.time() * 1000)
-    logs.put_log_events(logGroupName=group, logStreamName=stream,
-                        logEvents=[{"timestamp": now + i, "message": m} for i, m in enumerate(messages)])
-
-
-@pytest.fixture
-def kst(monkeypatch):
-    """로컬 시간대를 KST로 바꿔 시간대 의존 결함을 재현한다 (Lambda는 UTC라 드러나지 않음)"""
-    monkeypatch.setenv("TZ", "Asia/Seoul")
-    time.tzset()
-    yield
-    monkeypatch.delenv("TZ")
-    time.tzset()
-
-
-def test_fetch_logs_for_service_only_reads_matching_groups(app):
-    put_logs("/aws/lambda/wga-llm-test", "2026/09/21/[$LATEST]a", ["START", "ERROR boom", "END"])
-    put_logs("/aws/rds/instance/db-1/error", "s", ["rds log"])
-
-    result = app.fetch_cloudwatch_logs_for_service("lambda", days=1)
-
-    assert result["log_groups_count"] == 1
-    group = result["log_groups"]["/aws/lambda/wga-llm-test"]
-    assert group["status"] == "success" and group["events_count"] == 3
-    # 최신 이벤트가 먼저 온다
-    assert group["events"][0]["message"] == "END"
-
-
-def test_fetch_logs_with_filter_pattern(app):
-    put_logs("/aws/lambda/wga-llm-test", "s", ["INFO ok", "ERROR boom"])
-    result = app.fetch_cloudwatch_logs_for_service("lambda", days=1, filter_pattern="ERROR")
-    events = result["log_groups"]["/aws/lambda/wga-llm-test"]["events"]
-    assert [e["message"] for e in events] == ["ERROR boom"]
-
-
-def test_fetch_logs_time_range_does_not_depend_on_local_timezone(app, kst):
-    # naive datetime.utcnow().timestamp()는 로컬 시간으로 해석되어 KST에서 조회 범위가 9시간 어긋났다
-    put_logs("/aws/lambda/wga-llm-test", "s", ["recent event"])
-    result = app.fetch_cloudwatch_logs_for_service("lambda", days=1)
-    assert result["log_groups"]["/aws/lambda/wga-llm-test"]["events_count"] == 1
-
-
-def test_fetch_logs_unknown_service_without_groups_warns(app):
-    assert app.fetch_cloudwatch_logs_for_service("eks")["status"] == "warning"
-
-
 def test_dashboards_list_and_summary(app):
     body = {"widgets": [{"type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
                          "properties": {"title": "Lambda Errors", "region": "us-east-1",
@@ -88,11 +37,13 @@ def test_dashboards_list_and_summary(app):
 
 
 def test_tools_are_registered_with_schemas(app):
-    # 도구 이름은 함수 이름을 camelCase로 바꿔 등록된다 (lambda_mcp.LambdaMCPServer.tool)
+    # 직접 둔 도구의 이름은 함수 이름을 camelCase로 바꿔 등록된다 (lambda_mcp.LambdaMCPServer.tool)
     tools = app.mcp_server.tools
-    for name in ["fetchCloudwatchLogsForService", "listCloudwatchDashboards", "getDashboardSummary"]:
+    for name in ["listCloudwatchDashboards", "getDashboardSummary", "generateArchitectureDiagram"]:
         assert name in tools
     assert tools["getDashboardSummary"]["inputSchema"]["required"] == ["dashboard_name"]
+    # 공식 도구로 바뀐 옛 도구는 없다
+    assert "fetchCloudwatchLogsForService" not in tools and "getDetailedBreakdownByDay" not in tools
 
 
 def test_session_lifecycle(app):
@@ -105,3 +56,117 @@ def test_session_lifecycle(app):
     assert sessions.get_session(sid)["client"] == "slack"
     assert sessions.delete_session(sid)
     assert sessions.get_session(sid) is None
+
+
+# ---------------------------------------------------------------- AWS 공식 MCP 서버 도구 (lambda_mcp/official.py)
+# LLM Lambda가 부르는 것과 같은 길(Function URL로 오는 JSON-RPC 요청 → lambda_handler)로 확인한다.
+
+def rpc(app, method, params=None, session_id=None):
+    headers = {"content-type": "application/json"}
+    if session_id:
+        headers["mcp-session-id"] = session_id
+    event = {"httpMethod": "POST", "headers": headers,
+             "body": json.dumps({"jsonrpc": "2.0", "id": "1", "method": method, "params": params or {}})}
+    response = app.lambda_handler(event, None)
+    return response, json.loads(response.get("body") or "{}")
+
+
+@pytest.fixture
+def session(app):
+    response, _ = rpc(app, "initialize")
+    return response["headers"]["MCP-Session-Id"]
+
+
+def call(app, session, name, arguments):
+    response, body = rpc(app, "tools/call", {"name": name, "arguments": arguments}, session)
+    assert response["statusCode"] == 200, body
+    return body["result"]
+
+
+def test_tools_list_merges_official_and_own_tools(app, session):
+    _, body = rpc(app, "tools/list", session_id=session)
+    tools = {tool["name"]: tool for tool in body["result"]["tools"]}
+
+    # 공식 CloudWatch · 문서 · Cost Explorer 도구와 직접 둔 도구가 한 목록에 있다
+    for name in ["describe_log_groups", "execute_log_insights_query", "get_metric_data", "get_active_alarms",
+                 "search_documentation", "read_documentation", "cost-explorer",
+                 "listCloudwatchDashboards", "generateLineChart"]:
+        assert name in tools, name
+    # 뺀 도구 (PromQL, 로그 인덱스 추천, 일괄 Insights)
+    for name in app.mcp_server.external._excluded:
+        assert name not in tools
+    # LLM Lambda는 properties만 옮겨 가므로 $ref가 남아 있으면 안 된다
+    assert "$ref" not in json.dumps(body) and "$defs" not in json.dumps(body)
+    # 참조를 풀어 넣은 스키마: get_metric_data의 dimensions 항목은 name·value를 가진 객체다
+    dimensions = tools["get_metric_data"]["inputSchema"]["properties"]["dimensions"]
+    assert "name" in json.dumps(dimensions) and "value" in json.dumps(dimensions)
+
+
+def test_official_cloudwatch_tool_reads_alarms(app, session):
+    cw = boto3.client("cloudwatch")
+    cw.put_metric_alarm(AlarmName="wga-llm-errors", MetricName="Errors", Namespace="AWS/Lambda", Statistic="Sum",
+                        Period=60, EvaluationPeriods=1, Threshold=1, ComparisonOperator="GreaterThanThreshold")
+    cw.set_alarm_state(AlarmName="wga-llm-errors", StateValue="ALARM", StateReason="test")
+
+    result = call(app, session, "get_active_alarms", {})
+
+    assert result["isError"] is False
+    assert result["content"][0]["type"] == "text"
+    assert "wga-llm-errors" in result["content"][0]["text"]
+
+
+def test_official_tool_error_is_a_result_not_an_rpc_error(app, session):
+    # 필수 인자(alarm_name)가 없다. MCP 규약대로 isError 결과로 돌려줘야 모델이 읽고 다시 부를 수 있다
+    result = call(app, session, "get_alarm_history", {})
+    assert result["isError"] is True
+    assert "alarm_name" in result["content"][0]["text"]
+
+
+def test_official_cost_explorer_tool(app, session):
+    # Cost Explorer 서버(fastmcp)는 MCP 세션이 있어야 도구가 돈다: in-memory 클라이언트로 부르는지 확인
+    result = call(app, session, "cost-explorer", {
+        "operation": "getCostAndUsage", "start_date": "2026-09-01", "end_date": "2026-09-20",
+        "granularity": "DAILY", "metrics": '["UnblendedCost"]'})
+    assert result["isError"] is False
+    assert json.loads(result["content"][0]["text"])["status"] == "success"
+
+
+def test_official_documentation_search(app, session, monkeypatch):
+    import httpx
+
+    # 문서 검색 API를 가짜 응답으로 바꾼다 (테스트에서 인터넷에 나가지 않게)
+    def handler(request):
+        assert "search" in str(request.url)
+        return httpx.Response(200, json={"queryId": "q1", "suggestions": [{"textExcerptSuggestion": {
+            "title": "Lambda 함수 로그 보기", "link": "https://docs.aws.amazon.com/lambda/latest/dg/monitoring-logs.html",
+            "summary": "CloudWatch Logs로 Lambda 로그를 봅니다."}}]})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient",
+                        lambda *args, **kwargs: real_client(*args, transport=httpx.MockTransport(handler), **kwargs))
+
+    result = call(app, session, "search_documentation", {"search_phrase": "lambda logs"})
+    assert result["isError"] is False
+    assert "monitoring-logs.html" in result["content"][0]["text"]
+
+
+def test_unknown_tool_is_not_found(app, session):
+    response, body = rpc(app, "tools/call", {"name": "fetch_cloudwatch_logs_for_service", "arguments": {}}, session)
+    assert response["statusCode"] == 404 and "not found" in body["error"]["message"]
+
+
+def test_inline_refs_resolves_nested_definitions():
+    from conftest import load_service_module
+    official = load_service_module("mcp", "lambda_mcp.official")
+    schema = {
+        "type": "object",
+        "properties": {"items": {"type": "array", "items": {"$ref": "#/$defs/Dimension"}},
+                       "loop": {"$ref": "#/$defs/Node"}},
+        "$defs": {"Dimension": {"type": "object", "properties": {"name": {"type": "string"}}},
+                  "Node": {"type": "object", "properties": {"child": {"$ref": "#/$defs/Node"}}}},
+    }
+    resolved = official._inline_refs(schema)
+    assert resolved["properties"]["items"]["items"]["properties"]["name"] == {"type": "string"}
+    assert "$defs" not in json.dumps(resolved) and "$ref" not in json.dumps(resolved)
+    # 자기 자신을 가리키는 참조는 한 번만 풀고 멈춘다
+    assert resolved["properties"]["loop"]["properties"]["child"] == {"type": "object"}

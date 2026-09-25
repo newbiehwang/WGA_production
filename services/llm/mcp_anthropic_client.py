@@ -65,23 +65,24 @@ class AnthropicMCPClient:
         """
         anthropic_tools = []
         for tool in self.tools:
-            # MCP 입력 스키마를 Anthropic 입력 스키마로 변환
-            properties = {}
-            for prop_name, prop_schema in tool['inputSchema'].get('properties', {}).items():
-                properties[prop_name] = {
-                    "type": prop_schema.get("type", "string"),
-                    "description": prop_schema.get("description", f"{prop_name} 파라미터")
-                }
+            # MCP 입력 스키마(JSON Schema)를 그대로 넘긴다. 예전에는 속성마다 type·description만 남겼는데,
+            # AWS 공식 MCP 도구는 배열 안의 객체(items), 선택 인자(anyOf), 선택지(enum)를 쓰므로 그 정보를 지우면
+            # 모델이 인자를 엉뚱한 모양으로 보낸다. ($ref는 MCP 서버가 미리 풀어서 보낸다: mcp/lambda_mcp/official.py)
+            schema = dict(tool.get('inputSchema') or {})
+            schema.setdefault("type", "object")
+            schema.setdefault("properties", {})
 
             anthropic_tools.append({
                 "name": tool["name"],
-                "description": tool["description"],
-                "input_schema": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": tool['inputSchema'].get('required', [])
-                }
+                "description": tool.get("description", ""),
+                "input_schema": schema,
             })
+
+        # 도구 목록을 프롬프트 캐시에 올린다. 마지막 도구에 표시하면 그 앞까지(도구 전체)가 캐시된다.
+        # AWS 공식 MCP 도구는 설명이 길어 도구 목록만 수만 자이고, 질문 하나에서도 도구를 부를 때마다 다시 보낸다.
+        # 5분 안에 같은 목록을 보내면 캐시에서 읽어 입력 비용이 크게 줄어든다
+        if anthropic_tools:
+            anthropic_tools[-1]["cache_control"] = {"type": "ephemeral"}
 
         return anthropic_tools
 

@@ -48,10 +48,19 @@ class LambdaMCPServer:
         self.version = version
         self.tools: Dict[str, Dict] = {}
         self.tool_implementations: Dict[str, Callable] = {}
+        # 다른 곳에서 가져온 도구 (AWS 공식 MCP 서버, official.OfficialTools). 없으면 직접 만든 도구만 쓴다
+        self.external = None
         self.session_manager = SessionManager(table_name=session_table)
         # Ensure session table exists
         self.session_manager.create_table(table_name=session_table)
     
+    def attach(self, external) -> None:
+        """다른 곳에서 가져온 도구 묶음을 붙인다. schemas() · has(name) · call(name, args)를 갖춰야 한다.
+
+        tools/list에는 직접 만든 도구와 함께 보이고, tools/call은 이름으로 해당 묶음에 넘긴다.
+        """
+        self.external = external
+
     def get_session(self) -> Optional[SessionData]:
         """Get the current session data wrapper.
         
@@ -304,13 +313,26 @@ class LambdaMCPServer:
             # Handle tools/list request
             if request.method == "tools/list":
                 logger.info("Handling tools/list request")
-                return self._create_success_response({"tools": list(self.tools.values())}, request.id, session_id)
+                tools = list(self.tools.values())
+                if self.external:
+                    tools += self.external.schemas()
+                return self._create_success_response({"tools": tools}, request.id, session_id)
             
             # Handle tool calls
             if request.method == "tools/call":
                 tool_name = request.params.get("name")
                 tool_args = request.params.get("arguments", {})
                 
+                # 공식 MCP 서버 도구: 결과(content)와 오류 여부(isError)를 MCP 형식 그대로 돌려준다.
+                # 도구 안의 오류(권한 없음 등)는 JSON-RPC 오류가 아니라 isError 결과다 (MCP 규약). 모델이 읽고 다음 수를 정한다
+                if tool_name not in self.tools and self.external and self.external.has(tool_name):
+                    try:
+                        content, is_error = self.external.call(tool_name, tool_args)
+                        return self._create_success_response({"content": content, "isError": is_error}, request.id, session_id)
+                    except Exception as e:
+                        logger.error(f"Error executing official tool {tool_name}: {e}")
+                        error_content = [ErrorContent(text=str(e)).model_dump()]
+                        return self._create_error_response(-32603, f"Error executing tool: {str(e)}", request.id, error_content, session_id)
                 if tool_name not in self.tools:
                     return self._create_error_response(-32601, f"Tool '{tool_name}' not found", request.id, session_id=session_id)
                 

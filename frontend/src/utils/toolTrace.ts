@@ -10,20 +10,33 @@ export interface ToolStep {
     error?: string;
 }
 
-// mcp/app.py의 @mcp_server.tool() 목록
+// MCP 도구 이름 → 화면에 보일 이름.
+// AWS 공식 MCP 서버 도구(snake_case, cost-explorer)와 직접 둔 도구(mcp/app.py)를 함께 적는다.
+// 직접 둔 도구는 서버가 이름을 camelCase로 바꿔 내보내므로(listCloudwatchDashboards), 찾을 때 snake_case로 바꿔 찾는다
 const LABELS: Record<string, string> = {
-    fetch_cloudwatch_logs_for_service: '로그 그룹 조회',
-    list_log_groups: '로그 그룹 목록',
+    // AWS 공식 CloudWatch MCP 서버
+    describe_log_groups: '로그 그룹 조회',
     analyze_log_group: '로그 분석',
-    analyze_log_groups_insights: '로그 분석 (Insights)',
-    get_insights_query_templates: 'Insights 쿼리 예시',
+    execute_log_insights_query: '로그 분석 (Insights)',
+    get_logs_insight_query_results: '로그 분석 결과',
+    cancel_logs_insight_query: '로그 분석 취소',
+    get_metric_data: '메트릭 조회',
+    get_metric_metadata: '메트릭 정보',
+    analyze_metric: '메트릭 분석',
+    get_recommended_metric_alarms: '알람 추천',
+    get_active_alarms: '알람 조회',
+    get_alarm_history: '알람 기록',
+    // AWS 공식 문서 MCP 서버
+    search_documentation: '문서 검색',
+    read_documentation: '문서 읽기',
+    read_sections: '문서 읽기 (부분)',
+    search_table: '문서 표 검색',
+    recommend: '관련 문서 추천',
+    // AWS 공식 Billing and Cost Management MCP 서버 (Cost Explorer)
+    'cost-explorer': '비용 조회',
+    // 직접 둔 도구
     list_cloudwatch_dashboards: '대시보드 목록',
     get_dashboard_summary: '대시보드 요약',
-    get_cloudwatch_alarms_for_service: '알람 조회',
-    get_detailed_breakdown_by_day: '일별 비용 조회',
-    search_documentation: '문서 검색',
-    recommend_documentation: '관련 문서 추천',
-    read_documentation: '문서 읽기',
     generate_architecture_diagram: '아키텍처 다이어그램 생성',
     get_diagram_code_examples: '다이어그램 예시',
     list_available_diagram_icons: '다이어그램 아이콘 목록',
@@ -43,6 +56,10 @@ const LABELS: Record<string, string> = {
     generate_flow_diagram: '흐름도 생성',
     generate_fishbone_diagram: '피시본 다이어그램 생성',
 };
+
+// listCloudwatchDashboards → list_cloudwatch_dashboards
+const toSnake = (name: string) => name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+const labelOf = (name: string) => LABELS[name] ?? LABELS[toSnake(name)] ?? name;
 
 const MAX_VALUE = 40; // 값 하나의 최대 길이
 const MAX_DETAIL = 100; // 한 줄 전체의 최대 길이
@@ -93,7 +110,7 @@ export function toolSteps(inference: unknown): ToolStep[] {
         .map((step) => {
             const name = String(step.tool_name);
             return {
-                label: LABELS[name] ?? name,
+                label: labelOf(name),
                 name,
                 detail: summarize(step.input),
                 failed: step.status === 'error',
