@@ -5,7 +5,7 @@
 
     LLM Lambda ──HTTP(JSON-RPC)──▶ LambdaMCPServer (lambda_mcp.py, 세션·전송은 그대로)
                                       ├─ 직접 만든 도구 (app.py의 @mcp_server.tool)
-                                      └─ OfficialTools ──in-memory──▶ 공식 서버 객체 (CloudWatch, 문서, Cost Explorer, CloudTrail, Pricing, IAM)
+                                      └─ OfficialTools ──in-memory──▶ 공식 서버 객체 (CloudWatch, 문서, Cost Explorer, CloudTrail, Pricing, IAM, 네트워크)
 
 in-memory 클라이언트로 부르는 이유
 - Cost Explorer 서버(fastmcp)는 MCP 세션이 있어야 도구가 돈다 (ctx.info가 세션을 쓴다). 서버 객체의
@@ -82,11 +82,37 @@ EXCLUDED_TOOLS = {
     "put_role_policy": "IAM 변경",
     "put_user_policy": "IAM 변경",
     "remove_user_from_group": "IAM 변경",
+    # 네트워크: EC2가 놓인 네트워크(VPC·서브넷·보안 그룹·NACL·라우팅·ENI·VPC 흐름 로그)와 경로 추적만 쓴다.
+    # Cloud WAN·Transit Gateway·Network Firewall·VPN 도구는 이 계정에 없는 서비스라 도구 설명과 권한만 늘린다 (필요하면 추가)
+    "detect_cwan_inspection": "이 계정에 없는 네트워크 서비스",
+    "get_all_cwan_routes": "이 계정에 없는 네트워크 서비스",
+    "get_cwan_routes": "이 계정에 없는 네트워크 서비스",
+    "get_cwan_attachment": "이 계정에 없는 네트워크 서비스",
+    "get_cwan": "이 계정에 없는 네트워크 서비스",
+    "get_cwan_logs": "이 계정에 없는 네트워크 서비스",
+    "get_cwan_peering": "이 계정에 없는 네트워크 서비스",
+    "list_cwan_peerings": "이 계정에 없는 네트워크 서비스",
+    "list_core_networks": "이 계정에 없는 네트워크 서비스",
+    "simulate_cwan_route_change": "이 계정에 없는 네트워크 서비스",
+    "get_firewall_rules": "이 계정에 없는 네트워크 서비스",
+    "get_firewall_flow_logs": "이 계정에 없는 네트워크 서비스",
+    "list_firewalls": "이 계정에 없는 네트워크 서비스",
+    "detect_tgw_inspection": "이 계정에 없는 네트워크 서비스",
+    "get_all_tgw_routes": "이 계정에 없는 네트워크 서비스",
+    "get_tgw": "이 계정에 없는 네트워크 서비스",
+    "get_tgw_routes": "이 계정에 없는 네트워크 서비스",
+    "get_tgw_flow_logs": "이 계정에 없는 네트워크 서비스",
+    "list_tgw_peerings": "이 계정에 없는 네트워크 서비스",
+    "list_transit_gateways": "이 계정에 없는 네트워크 서비스",
+    "list_vpn_connections": "이 계정에 없는 네트워크 서비스",
 }
 
-# region 인자의 기본값이 버지니아 북부 리전으로 박혀 있는 도구. 모델이 region을 생략하면 이 Lambda의 리전을 쓰게 한다.
-# (CloudWatch 도구들은 이미 AWS_REGION을 기본으로 쓴다. CloudTrail 조회는 리전별이라 다른 리전을 보면 '기록 없음'이 된다)
-REGION_FROM_ENV_TOOLS = {"lookup_events"}
+# region 인자를 이 Lambda의 리전으로 채우는 도구. 모델이 region을 생략하면 이 Lambda의 리전을 쓰게 한다.
+# (CloudWatch 도구들은 이미 AWS_REGION을 기본으로 쓴다)
+# - CloudTrail lookup_events: 기본값이 버지니아 북부 리전으로 박혀 있다. 조회는 리전별이라 다른 리전을 보면 '기록 없음'이 된다
+# - 네트워크 도구: list_vpcs 등은 region이 기본값 없는 필수 인자라, 모델이 빠뜨리면 검증 오류가 난다
+REGION_FROM_ENV_TOOLS = {"lookup_events", "find_ip_address", "get_eni_details", "list_vpcs", "get_vpc_network",
+                         "get_vpc_flow_logs"}
 
 # 공식 서버의 결함 보정: 도구 스키마에서 빼고, 부를 때 대신 채워 넣는 인자.
 # IAM 1.1.1의 list_users·get_user는 ctx의 타입을 MCP 문맥(Context)이 아니라 CallToolResult로 잘못 적어 두어,
@@ -99,6 +125,11 @@ HIDDEN_ARGUMENTS: Dict[str, Dict[str, Any]] = {
     "list_users": {"ctx": {"content": []}},
     "get_user": {"ctx": {"content": []}},
 }
+
+# 네트워크 서버의 profile_name(다른 계정의 AWS 프로필 이름)은 Lambda에 프로필 설정 파일이 없어 쓸 수 없다.
+# 모델이 헛되이 채우지 않게 스키마에서 숨기고 비워 둔다 (이 Lambda의 역할로 조회한다)
+HIDDEN_ARGUMENTS.update({name: {"profile_name": None} for name in (
+    "find_ip_address", "get_eni_details", "list_vpcs", "get_vpc_network", "get_vpc_flow_logs")})
 
 
 def _inline_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -126,8 +157,33 @@ def _inline_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
     return resolve(copy.deepcopy(schema))
 
 
+def _keeping_root_logger(importer: Callable[[], Any]) -> Any:
+    """importer를 부르는 동안 바뀐 기본(root) 로거 설정을 되돌린다.
+
+    공식 서버를 불러오면 기본 로거가 바뀐다.
+    - MCP SDK의 MCPServer는 만들어질 때 logging.basicConfig(level=INFO)로 핸들러를 붙인다 (대부분의 공식 서버)
+    - 네트워크 서버는 import할 때 logging.basicConfig(level=DEBUG)를 부른다. boto3·botocore의 디버그 로그
+      (요청·응답 내용)까지 쏟아진다
+    Lambda는 런타임이 기본 로거에 이미 핸들러를 붙여 두어 basicConfig가 아무 일도 하지 않지만, 핸들러가 없는
+    곳(로컬 실행·테스트·컨테이너)에서는 그대로 바뀐다. 어디서 돌든 같게 되돌린다."""
+    root = logging.getLogger()
+    level, handlers = root.level, list(root.handlers)
+    try:
+        return importer()
+    finally:
+        root.setLevel(level)
+        for handler in list(root.handlers):
+            if handler not in handlers:
+                root.removeHandler(handler)
+
+
 def load_default_servers() -> List[Any]:
-    """이 서비스가 쓰는 공식 서버: CloudWatch, AWS 문서, Cost Explorer, CloudTrail, Pricing, IAM. 부를 때 import한다 (무겁다)."""
+    """이 서비스가 쓰는 공식 서버: CloudWatch, AWS 문서, Cost Explorer, CloudTrail, Pricing, IAM, 네트워크.
+    부를 때 import한다 (무겁다). 불러오면서 바뀐 기본 로거 설정은 되돌린다."""
+    return _keeping_root_logger(_import_default_servers)
+
+
+def _import_default_servers() -> List[Any]:
     # 공식 서버는 import할 때 loguru로 로그를 남긴다. Lambda 로그가 넘치지 않게 경고 이상만 남긴다
     os.environ.setdefault("FASTMCP_LOG_LEVEL", "ERROR")
     # Lambda에서는 /tmp만 쓸 수 있고 패키지가 설치된 곳(site-packages)은 읽기 전용이다.
@@ -139,6 +195,7 @@ def load_default_servers() -> List[Any]:
     # (Lambda 응답 한도 6MB보다 작게)
     os.environ.setdefault("MCP_SQL_THRESHOLD", str(5 * 1024 * 1024))
     from awslabs.aws_documentation_mcp_server.server_aws import mcp as documentation
+    from awslabs.aws_network_mcp_server.server import mcp as network
     from awslabs.aws_pricing_mcp_server.server import mcp as pricing
     from awslabs.billing_cost_management_mcp_server.tools.cost_explorer_tools import cost_explorer_server
     from awslabs.cloudtrail_mcp_server.server import mcp as cloudtrail
@@ -152,7 +209,7 @@ def load_default_servers() -> List[Any]:
     if not IamContext.is_readonly():
         raise RuntimeError("IAM MCP 서버의 읽기 전용 모드를 켜지 못했습니다")
 
-    return [cloudwatch, documentation, cost_explorer_server, cloudtrail, pricing, iam]
+    return [cloudwatch, documentation, cost_explorer_server, cloudtrail, pricing, iam, network]
 
 
 class OfficialTools:
@@ -200,6 +257,9 @@ class OfficialTools:
         schema = copy.deepcopy(schema)
         schema["properties"]["region"].update(
             default=region, description=f"AWS region to query. Defaults to {region} (this deployment's region).")
+        # 생략해도 부를 때 채워 넣으므로 필수에서 뺀다
+        if "required" in schema:
+            schema["required"] = [arg for arg in schema["required"] if arg != "region"]
         return schema
 
     def _run(self, coro):
