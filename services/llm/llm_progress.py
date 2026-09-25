@@ -9,6 +9,8 @@
 단계(steps)는 일어난 순서대로 쌓는다.
 - {"type": "thinking", "text": 모델의 사고 요약}
 - {"type": "tool", "id", "name", "input": 짧은 값만, "status": "running" | "ok" | "error", "error"?, "ms"?: 걸린 시간}
+- {"type": "search", "query": 검색 패턴, "found": [찾은 도구 이름], "error"?}: 도구 검색 (tool_search.py). 모델 응답 안에서
+  Anthropic 서버가 이미 마친 검색이라 '실행 중'이 없다
 지금 하는 일(phase)은 "thinking"(모델 응답을 기다리는 중) · "tool"(도구 실행 중) · "done" · "error"다.
 
 같은 단계 목록을 답변의 inference.steps에도 넣어, 다시 불러온 대화에서도 사고 과정과 도구를 순서대로 볼 수 있다.
@@ -30,6 +32,7 @@ SAVED_TEXT_LIMIT = 1500  # 대화 기록(inference.steps): 사고 요약 한 덩
 SAVED_STEP_LIMIT = 40  # 대화 기록: 단계 수
 INPUT_VALUE_LIMIT = 200  # 도구 입력값 하나
 ERROR_LIMIT = 300  # 도구 오류 메시지
+SEARCH_FOUND_LIMIT = 20  # 도구 검색 한 번에 찾은 도구 이름 (기본 5개, 모델이 limit로 늘릴 수 있다)
 
 
 def _clip(text: str, limit: int) -> str:
@@ -101,6 +104,15 @@ class ProgressReporter:
                 if suspicious:
                     step["suspicious"] = list(suspicious)
                 break
+        self._save()
+
+    def tool_search(self, query: str, found: List[str], error: Optional[str] = None) -> None:
+        """모델이 도구를 찾아 불러왔다 (도구 검색). 무엇을 찾았는지 화면에 보인다."""
+        step = {"type": "search", "query": _clip(str(query or ""), INPUT_VALUE_LIMIT),
+                "found": [str(name) for name in (found or [])][:SEARCH_FOUND_LIMIT]}
+        if error:
+            step["error"] = _clip(str(error), ERROR_LIMIT)
+        self.steps.append(step)
         self._save()
 
     def finished(self, ok: bool = True) -> None:

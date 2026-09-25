@@ -369,7 +369,34 @@ MCP의 HTTP+SSE(Server-Sent Events) 방식은 연결을 오래 유지해야 해�
 | 아키텍처 다이어그램 | 직접 둠 (공식 diagram 서버는 PyPI에서 폐기됨. 폐기 전 공식 서버를 옮겨 온 코드) |
 | 차트 15종 | 직접 둠 (AntV 차트 서비스) |
 
-공식 도구 중 PromQL, 로그 인덱스 추천, 일괄 Insights 쿼리는 뺐습니다(권한이 문서에 없거나 쓰임이 겹침). CloudTrail Lake 도구 4개(`lake_query` 등)도 뺐습니다(쿼리한 데이터만큼 비용이 들고 유료 이벤트 데이터 저장소가 필요). CloudTrail 조회 도구는 region 기본값이 버지니아 북부 리전으로 박혀 있어, 생략하면 이 배포의 리전을 쓰도록 바꿔 붙입니다. Pricing 서버에서는 로컬 파일 경로를 받아 여는 CDK·Terraform 분석 도구를 뺐습니다(Lambda 안에서는 자격 증명이 든 파일까지 읽을 수 있어서). 파일을 쓰는 보고서 도구, 가격 파일 주소 도구, Bedrock 설계 예시 도구도 뺐습니다. IAM 서버는 조회만 씁니다: 변경 도구 17개(사용자·역할 생성, 정책 붙이기, 액세스 키 발급 등)를 빼고, 서버 자체의 읽기 전용 모드를 켜고, 위험도 목록에 없는 도구는 MCP가 거절하고, IAM 쓰기 권한을 주지 않는 네 겹으로 막습니다. IAM 1.1.1의 `list_users`·`get_user`는 `ctx` 인자의 타입이 잘못 적혀 필수 입력값으로 드러나는 결함이 있어, 스키마에서 빼고 부를 때 채워 넣습니다(`HIDDEN_ARGUMENTS`, 제보: [awslabs/mcp#4675](https://github.com/awslabs/mcp/issues/4675)). 네트워크 서버는 VPC·ENI·경로 추적 도구 6개만 붙이고, 이 계정에 없는 Cloud WAN·Transit Gateway·Network Firewall·VPN 도구 21개는 뺐습니다. 다른 계정 프로필(`profile_name`)은 Lambda에서 쓸 수 없어 숨기고, 필수인 `region`은 생략하면 이 배포의 리전을 채웁니다. 공식 서버를 불러오면 기본 로거 설정이 바뀌어(MCP SDK는 INFO, 네트워크 서버는 DEBUG) 불러온 뒤 되돌립니다. 공식 도구는 설명과 스키마가 길어서 도구 목록이 커지므로, Anthropic 요청에서는 도구 목록을 프롬프트 캐시에 올립니다. 이전 버전에서는 공개 MCP 서버의 로그 조회 도구를 옮겨 와 쓰면서 결함을 고쳐 원작자 저장소에 Pull Request를 보냈고, 이후 AWS 공식 서버로 바꿨습니다.
+공식 도구 중 PromQL, 로그 인덱스 추천, 일괄 Insights 쿼리는 뺐습니다(권한이 문서에 없거나 쓰임이 겹침). CloudTrail Lake 도구 4개(`lake_query` 등)도 뺐습니다(쿼리한 데이터만큼 비용이 들고 유료 이벤트 데이터 저장소가 필요). CloudTrail 조회 도구는 region 기본값이 버지니아 북부 리전으로 박혀 있어, 생략하면 이 배포의 리전을 쓰도록 바꿔 붙입니다. Pricing 서버에서는 로컬 파일 경로를 받아 여는 CDK·Terraform 분석 도구를 뺐습니다(Lambda 안에서는 자격 증명이 든 파일까지 읽을 수 있어서). 파일을 쓰는 보고서 도구, 가격 파일 주소 도구, Bedrock 설계 예시 도구도 뺐습니다. IAM 서버는 조회만 씁니다: 변경 도구 17개(사용자·역할 생성, 정책 붙이기, 액세스 키 발급 등)를 빼고, 서버 자체의 읽기 전용 모드를 켜고, 위험도 목록에 없는 도구는 MCP가 거절하고, IAM 쓰기 권한을 주지 않는 네 겹으로 막습니다. IAM 1.1.1의 `list_users`·`get_user`는 `ctx` 인자의 타입이 잘못 적혀 필수 입력값으로 드러나는 결함이 있어, 스키마에서 빼고 부를 때 채워 넣습니다(`HIDDEN_ARGUMENTS`, 제보: [awslabs/mcp#4675](https://github.com/awslabs/mcp/issues/4675)). 네트워크 서버는 VPC·ENI·경로 추적 도구 6개만 붙이고, 이 계정에 없는 Cloud WAN·Transit Gateway·Network Firewall·VPN 도구 21개는 뺐습니다. 다른 계정 프로필(`profile_name`)은 Lambda에서 쓸 수 없어 숨기고, 필수인 `region`은 생략하면 이 배포의 리전을 채웁니다. 공식 서버를 불러오면 기본 로거 설정이 바뀌어(MCP SDK는 INFO, 네트워크 서버는 DEBUG) 불러온 뒤 되돌립니다. 공식 도구는 설명과 스키마가 길어서 도구 목록이 커지므로, Anthropic 요청에서는 자주 쓰는 도구만 처음부터 싣고(아래 도구 검색) 도구 목록을 프롬프트 캐시에 올립니다. 이전 버전에서는 공개 MCP 서버의 로그 조회 도구를 옮겨 와 쓰면서 결함을 고쳐 원작자 저장소에 Pull Request를 보냈고, 이후 AWS 공식 서버로 바꿨습니다.
+
+### 도구 검색 (필요한 도구만 싣기)
+도구가 72개로 늘면서 정의만 약 13만 6천 자가 되었습니다. 질문 하나에 쓰는 도구는 몇 개뿐인데, 도구를 부를 때마다 요청이 한 번 더 가고 그때마다 전체 목록이 입력으로 들어갑니다. 비슷한 도구가 많으면 모델이 고르기도 어려워집니다. 그래서 Anthropic의 도구 검색(tool search tool, `defer_loading`)을 씁니다 (`services/llm/tool_search.py`).
+
+- **처음부터 싣는 도구**: 정규식 검색 도구와 로그 조회·알람 도구 4개(`describe_log_groups`, `execute_log_insights_query`, `get_logs_insight_query_results`, `get_active_alarms`). 나머지 68개는 모두 보내되 `defer_loading`으로 표시해, 모델이 이름으로 찾으면(예: `lookup_events`, `listEc2Instances|getEc2CpuRanking`) Anthropic API가 그 정의만 펼쳐 보여 줍니다. `get_metric_data`는 자주 쓰지만 정의가 약 1만 5천 자로 혼자서 나머지를 합친 것보다 커서 검색으로 싣습니다.
+- **캐시**: 지연한 도구에는 캐시 표시를 붙일 수 없어, 처음부터 싣는 마지막 도구와 대화의 마지막 사용자 메시지에 붙입니다. 검색으로 찾은 도구 정의는 대화 안에 펼쳐지므로, 같은 질문의 다음 반복에서 캐시로 읽습니다.
+- **대화 이어 가기**: 검색은 Anthropic 서버에서 끝나(`server_tool_use` → `tool_search_tool_result`) 실행할 것이 없고, 받은 블록을 고치지 않고 다음 요청에 그대로 보냅니다. 서버 도구가 길어져 응답이 멈추면(`pause_turn`) 그대로 다시 보내 이어 갑니다. 화면의 진행 과정에는 '도구 찾기'와 찾은 도구가 보입니다.
+- **거버넌스는 그대로**: 검색은 정의를 보여 줄 뿐입니다. 변경 도구를 찾아 불러도 승인 요청만 만들어집니다.
+- **끄기와 되돌리기**: LLM Lambda 환경 변수 `TOOL_SEARCH=off`면 예전처럼 모든 도구를 싣습니다. 모델이 도구 검색을 받지 않아 400이 오면, 그 요청을 모든 도구로 다시 보내고 그 모델에서는 계속 끕니다. Bedrock 경로(Converse API)는 도구 검색이 없어 그대로입니다.
+
+측정 (`scripts/measure_tool_search.py`):
+
+| | 처음부터 싣는 도구 | 정의 크기 |
+|:--|--:|--:|
+| 도구 검색 끔 | 72개 | 136,238자 |
+| 도구 검색 켬 | 5개 (검색 도구 포함) | 11,579자 (91.5% 감소) |
+
+위 표는 AWS와 Anthropic에 요청하지 않고 로컬에서 잰 글자 수입니다. 정확한 토큰 수와 도구 선택 정확도는 Anthropic API로 잽니다. 질문 21개 중 17개는 처음부터 싣지 않는 도구를 찾아야 답할 수 있습니다.
+
+```bash
+# 도구 정의 크기 (무료, 요청 없음)
+uv run --no-project --python 3.12 --with-requirements requirements-dev.txt python scripts/measure_tool_search.py size
+# 입력 토큰 (토큰 계산 API, ANTHROPIC_API_KEY 필요)
+uv run --no-project --python 3.12 --with-requirements requirements-dev.txt python scripts/measure_tool_search.py count
+# 첫 도구 선택 정확도와 입력 토큰 (모델 요청 약 42번, 비용 발생. 도구는 실행하지 않음)
+uv run --no-project --python 3.12 --with-requirements requirements-dev.txt python scripts/measure_tool_search.py eval --yes
+```
 
 ### 답변 진행 상황과 사고 과정
 답변을 만드는 동안 지금 무엇을 하는지(생각 중, 어떤 도구를 실행 중인지)와 모델의 사고 요약을 화면에 보여 줍니다. `/llm1`은 API Gateway REST의 동기 요청이라 답이 다 만들어진 뒤에 한 번만 응답하므로, 진행 상황은 따로 기록하고 화면이 따로 읽어 갑니다.

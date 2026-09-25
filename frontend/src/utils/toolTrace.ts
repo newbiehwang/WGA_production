@@ -176,6 +176,7 @@ export type TraceStep =
           error?: string;
           seconds?: string; // 걸린 시간 ("1.2초")
           suspicious?: boolean; // 결과에 지시문처럼 보이는 문구가 있었다 (services/llm/injection.py)
+          result?: string; // 끝난 뒤 보일 한 줄 (도구 검색: 찾은 도구). 없으면 걸린 시간
       };
 
 interface RawProgressStep {
@@ -187,6 +188,8 @@ interface RawProgressStep {
     error?: string;
     ms?: number;
     suspicious?: string[];
+    query?: string; // 도구 검색: 검색 패턴
+    found?: string[]; // 도구 검색: 찾은 도구 이름
 }
 
 const PREVIEW = 60; // 접힌 사고 요약에서 보여 줄 첫 줄 길이
@@ -211,6 +214,20 @@ export function fromProgressSteps(raw: unknown): TraceStep[] {
                 error: step.error ? clip(String(step.error), 160) : undefined,
                 seconds: secondsOf(step.ms),
                 suspicious: Array.isArray(step.suspicious) && step.suspicious.length > 0,
+            });
+        } else if (step?.type === 'search') {
+            // 도구 검색 (services/llm/tool_search.py): 모델이 필요한 도구를 찾아 불러왔다. 실행된 것은 없다
+            const found = Array.isArray(step.found)
+                ? step.found.map((name) => labelOf(String(name)).replace(/ 요청$/, ''))
+                : [];
+            steps.push({
+                kind: 'tool',
+                label: '도구 찾기',
+                name: 'tool_search',
+                detail: clip(String(step.query ?? ''), MAX_DETAIL),
+                status: step.error ? 'error' : 'ok',
+                error: step.error ? clip(String(step.error), 160) : undefined,
+                result: found.length ? clip(found.join(', '), 160) : '맞는 도구 없음',
             });
         }
     }
