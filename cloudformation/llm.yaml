@@ -277,6 +277,8 @@ Resources:
           ENV: !Ref Environment
           ATHENA_TABLE_REGISTRY_TABLE: !Sub 'AthenaTableRegistry-${Environment}'
           LLM_PROGRESS_TABLE: !Ref LlmProgressTable
+          # 민감정보 가리기: 이 계정의 ID는 도구 결과 어디에 있든 Claude로 보내기 전에 가린다 (redaction.py)
+          ACCOUNT_ID: !Ref AWS::AccountId
       Layers:
         - !Ref LlmLambdaLayer
       Tags:
