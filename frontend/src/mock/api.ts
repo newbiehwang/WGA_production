@@ -553,6 +553,11 @@ const actionAuditRecord = (
     status: "ok",
     ...(event !== "requested" && { decidedBy: MOCK_USER_ID }),
     ...(event === "executed" && action.result && { result: action.result }),
+    ...(event === "executed" &&
+      action.cloudtrail && {
+        awsRequestId: action.cloudtrail.request_id,
+        cloudTrailEvent: `${action.cloudtrail.event_source}:${action.cloudtrail.event_name}`,
+      }),
   };
 };
 
@@ -748,12 +753,25 @@ const route = (
         if (action.tool === "setLogRetention") mockResources.retention = 14;
         else mockResources.alarmActions = false;
         action.status = "executed";
+        const cloudtrail = {
+          event_source:
+            action.tool === "setLogRetention"
+              ? "logs.amazonaws.com"
+              : "monitoring.amazonaws.com",
+          event_name:
+            action.tool === "setLogRetention"
+              ? "PutRetentionPolicy"
+              : "DisableAlarmActions",
+          request_id: newId(),
+        };
         action.result = JSON.stringify({
           status: "success",
           target: action.args.log_group_name ?? action.args.alarm_name,
           before: action.before,
           after: action.after,
+          cloudtrail,
         });
+        action.cloudtrail = cloudtrail;
         events.push("approved", "executed");
       }
       auditRecords = [

@@ -49,6 +49,15 @@ MAX_PAGES = 10  # 거르기(도구·결과) 때문에 빈 페이지가 이어져
 DAY_INDEX = "by-day"
 
 
+def _trail_of(result: Optional[str]) -> Optional[Dict[str, Any]]:
+    """변경 도구 결과의 CloudTrail 단서 (mcp/app.py의 _trail). 없으면 None."""
+    try:
+        trail = json.loads(result or "").get("cloudtrail")
+    except (ValueError, AttributeError):
+        return None
+    return trail if isinstance(trail, dict) and trail.get("request_id") else None
+
+
 def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
@@ -168,6 +177,11 @@ class AuditLog:
         }
         if result:
             record["result"] = _clip(self._redactor.secrets_only(result), ERROR_LIMIT)
+        # 실행했으면 CloudTrail 이벤트를 찾을 단서 (요청 ID가 CloudTrail 이벤트의 requestID와 같다)
+        trail = _trail_of(result)
+        if trail:
+            record["awsRequestId"] = trail.get("request_id")
+            record["cloudTrailEvent"] = f"{trail.get('event_source')}:{trail.get('event_name')}"
         self._write(_now(), f"action#{action.get('actionId')}#{event}", record, strict=True)
 
     # ---------------------------------------------------------------- 저장

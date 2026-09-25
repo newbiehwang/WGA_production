@@ -38,6 +38,8 @@ const LABELS: Record<string, string> = {
     recommend: '관련 문서 추천',
     // AWS 공식 Billing and Cost Management MCP 서버 (Cost Explorer)
     'cost-explorer': '비용 조회',
+    // AWS 공식 CloudTrail MCP 서버
+    lookup_events: 'CloudTrail 이벤트 조회',
     // 직접 둔 도구
     list_cloudwatch_dashboards: '대시보드 목록',
     get_dashboard_summary: '대시보드 요약',

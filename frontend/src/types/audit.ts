@@ -34,6 +34,8 @@ export interface AuditRecord {
     summary?: string; // 예: "보존 기간 30일 → 14일"
     decidedBy?: string; // 승인·거절한 사람 (Cognito sub)
     result?: string; // 실행 결과
+    awsRequestId?: string; // 실행한 AWS API의 요청 ID = CloudTrail 이벤트의 requestID
+    cloudTrailEvent?: string; // 예: "logs.amazonaws.com:PutRetentionPolicy"
 }
 
 export interface AuditPage {

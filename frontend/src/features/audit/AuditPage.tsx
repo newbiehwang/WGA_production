@@ -159,6 +159,14 @@ function Details({ record }: { record: AuditRecord }) {
         ]);
         if (record.decidedBy) rows.push(['결정한 사람', <code key="by">{record.decidedBy}</code>]);
         if (record.result) rows.push(['실행 결과', record.result]);
+        if (record.awsRequestId)
+            rows.push([
+                'CloudTrail',
+                <span key="trail">
+                    {record.cloudTrailEvent} · 요청 ID <code>{record.awsRequestId}</code>
+                    <span className="audit-muted"> (CloudTrail 이벤트의 requestID와 같습니다)</span>
+                </span>,
+            ]);
         if (record.actionId) rows.push(['작업 ID', <code key="action">{record.actionId}</code>]);
     } else {
         rows.push(['질문', record.question ?? '']);
