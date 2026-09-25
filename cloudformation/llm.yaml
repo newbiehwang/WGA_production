@@ -213,6 +213,28 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:UpdateItem
                 Resource: !GetAtt PendingActionsTable.Arn
+              # S3 조회 도구 (app.py): 버킷 목록·설정·객체 이름만. HeadBucket(버킷 리전 확인)과 객체 목록은 s3:ListBucket
+              - Effect: Allow
+                Action:
+                  - s3:ListAllMyBuckets
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:GetBucketPolicyStatus
+                  - s3:GetEncryptionConfiguration
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketOwnershipControls
+                  - s3:GetLifecycleConfiguration
+                Resource: 'arn:aws:s3:::*'
+              # 객체 내용은 읽지 않는다: 다이어그램 버킷(이 서비스가 만든 그림) 말고는 s3:GetObject를 명시적으로 거부한다.
+              # 누가 나중에 넓은 Allow를 더해도 Deny가 우선한다 (데이터가 계정 밖 Claude로 나가지 않게)
+              - Effect: Deny
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                NotResource: !Sub 'arn:aws:s3:::wga-diagrambucket-${AWS::AccountId}-${Environment}/*'
               # 다이어그램 이미지 업로드 및 presigned URL 발급 (lambda_mcp/diagram_utils.py)
               - Effect: Allow
                 Action:

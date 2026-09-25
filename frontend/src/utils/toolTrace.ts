@@ -68,6 +68,10 @@ const LABELS: Record<string, string> = {
     // 직접 둔 도구
     list_cloudwatch_dashboards: '대시보드 목록',
     get_dashboard_summary: '대시보드 요약',
+    list_s3_buckets: 'S3 버킷 목록',
+    check_s3_bucket_security: 'S3 버킷 보안 점검',
+    get_s3_bucket_size: 'S3 버킷 크기',
+    list_s3_objects: 'S3 객체 목록',
     generate_architecture_diagram: '아키텍처 다이어그램 생성',
     get_diagram_code_examples: '다이어그램 예시',
     list_available_diagram_icons: '다이어그램 아이콘 목록',
