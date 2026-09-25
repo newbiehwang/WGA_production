@@ -34,6 +34,7 @@ export default defineConfig(({ mode }) => {
             'import.meta.env.AWS_REGION': JSON.stringify(env.AWS_REGION),
             'import.meta.env.USER_POOL_ID': JSON.stringify(env.USER_POOL_ID),
             'import.meta.env.COGNITO_CLIENT_ID': JSON.stringify(env.COGNITO_CLIENT_ID),
+            'import.meta.env.COGNITO_DOMAIN': JSON.stringify(env.COGNITO_DOMAIN),
         },
     };
 });

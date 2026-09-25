@@ -14,7 +14,7 @@ npm run build      # tsc 타입 검사 + vite 빌드 → dist/ (deploy.sh가 Amp
 | 경로 | 내용 |
 |---|---|
 | `src/App.tsx` | 로그인 여부에 따라 로그인 화면 / 위쪽 내비게이션 + 화면(홈 `/`, 대화 `/chat`) |
-| `src/auth/` | Cognito 로그인(Amplify Auth)과 로그인 상태 |
+| `src/auth/` | Cognito 로그인(로그인 버튼 → Cognito 로그인 페이지 → `/redirect`로 돌아옴, Amplify Auth)과 로그인 상태 |
 | `src/api/http.ts` | axios 공통 설정: API 주소, ID 토큰 붙이기, 401이면 로그인 화면으로 |
 | `src/stores/` | 대화 목록·메시지(`chatStore`), 모델 목록(`modelsStore`) — Zustand |
 | `src/components/layout/` | 위쪽 내비게이션, 프로필 메뉴, 로그인 화면 (AXPI) |
@@ -32,3 +32,6 @@ npm run build      # tsc 타입 검사 + vite 빌드 → dist/ (deploy.sh가 Amp
 | `VITE_API_DEST` | API Gateway 주소 |
 | `AWS_REGION` | Cognito 리전 |
 | `USER_POOL_ID`, `COGNITO_CLIENT_ID` | Cognito 로그인 |
+| `COGNITO_DOMAIN` | Cognito 로그인 페이지 주소의 앞부분 (`<값>.auth.<리전>.amazoncognito.com`) |
+
+로그인 뒤 돌아올 주소는 지금 열린 앱 주소 + `/redirect`로 정한다. Cognito에는 배포 주소와 `http://localhost:5173/redirect`가 등록되어 있어, 로컬에서는 포트 5173으로 띄워야 한다 (`.env.local`의 `COGNITO_REDIRECT_URI`는 쓰지 않는다).
