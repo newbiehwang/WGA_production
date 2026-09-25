@@ -10,9 +10,15 @@
 - 값은 터미널에서 보이지 않게 입력받거나(기본), JSON 모드에서는 stdin으로 받는다.
 - 명령 인자로 넘기지 않고, 권한 0600 임시 파일에 담아 `--cli-input-json file://...`로 넘긴 뒤 바로 지운다.
 - 이미 있는 값은 읽지 않는다 (이름·형식만 확인). 덮어쓸지는 사용자가 고르고, 기본은 "유지"다.
+
+저장소 루트 .env에 값이 있으면 (ANTHROPIC_API_KEY, dotenv.py)
+- 값을 묻지 않고 .env의 값을 쓴다. SSM에 없으면 그 값으로 등록한다 (등록 전 승인은 그대로 받는다).
+- SSM에 이미 있으면 덮어쓸지 묻지 않고 그대로 둔다. 배포할 때 deploy.sh가 SSM 값과 .env 값을 비교해
+  다르면 .env 값으로 맞추므로(sync_anthropic_key), setup이 기존 값을 읽을 필요가 없다.
 """
 import json
 
+from .. import dotenv
 from ..aws import (QUOTA_PENDING_STATUSES, QUOTA_REJECTED_STATUSES, QUOTA_SERVICE, REQUIRED_TIMEOUT_MS,
                    SECRET_PARAMS, SecretParam, error_text, existing_parameters, find_timeout_quota,
                    quota_requests)
@@ -122,6 +128,19 @@ def _store_parameters(ctx: Context, runner: Runner, emitter: Emitter) -> str:
     stored, kept, declined, failed, planned = [], [], [], [], []
     for param, name in zip(SECRET_PARAMS, names, strict=True):
         param_type = existing.get(name)
+        from_env = dotenv.read_value(ctx.repo_root, param.key)
+        if from_env:
+            # 저장소 루트 .env에 적어 둔 값: 묻지 않고 쓴다 (모듈 설명 참고)
+            runner.emitter.redactor.add(from_env)
+            if param_type is not None:
+                emitter.log(f"{name}: 저장소 루트 .env에 {param.key}가 있어 그대로 둡니다. "
+                            "배포할 때 deploy.sh가 .env 값과 다르면 SSM을 .env 값으로 맞춥니다", stream="info")
+                kept.append(name)
+                continue
+            emitter.log(f"저장소 루트 .env의 {param.key}를 씁니다: {mask_secret(from_env)}", stream="info")
+            outcome = _put_parameter(ctx, runner, emitter, param, name, overwrite=False, value=from_env)
+            {"stored": stored, "failed": failed, "planned": planned, "declined": declined}[outcome].append(name)
+            continue
         if param_type is not None:
             if param_type != "SecureString":
                 emitter.log(f"{name}이(가) {param_type} 형식으로 저장되어 있습니다. 평문으로 보관되므로 "
@@ -160,8 +179,9 @@ def mask_secret(value: str) -> str:
 
 
 def _put_parameter(ctx: Context, runner: Runner, emitter: Emitter, param: SecretParam, name: str,
-                   *, overwrite: bool) -> str:
-    """파라미터 하나를 저장한다. 결과: stored | failed | planned(dry-run) | declined."""
+                   *, overwrite: bool, value: str | None = None) -> str:
+    """파라미터 하나를 저장한다. 결과: stored | failed | planned(dry-run) | declined.
+    value: 이미 정해진 값(저장소 루트 .env). 없으면 사용자에게 묻는다."""
     step = "ssm_parameters"
     reason = f"{name}에 SecureString으로 저장합니다" + (" (덮어쓰기)" if overwrite else "")
 
@@ -171,11 +191,13 @@ def _put_parameter(ctx: Context, runner: Runner, emitter: Emitter, param: Secret
                       id_=f"put_{param.key}", reason=reason)
         return "planned"
 
-    value = runner.interaction.secret(f"secret_{param.key}", param.title, echo=param.echo)
+    from_env = value is not None
+    if not from_env:
+        value = runner.interaction.secret(f"secret_{param.key}", param.title, echo=param.echo)
     # 복사해 붙여 넣을 때 딸려 온 공백·줄바꿈을 지운다 (그대로 저장하면 API 호출이 인증 오류로 실패한다)
     value = (value or "").strip()
     runner.emitter.redactor.add(value)
-    if value and not param.echo:
+    if value and not param.echo and not from_env:
         # 보이지 않게 입력한 값은 들어갔는지 알 수 없으므로 길이 등으로 확인해 준다 (보이게 입력한 값은 필요 없다)
         emitter.log(f"입력됨: {mask_secret(value)}", stream="info")
     if not value:

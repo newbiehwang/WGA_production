@@ -271,3 +271,23 @@ def test_cancel_stops_deploy_and_its_children(fake, repo, sig):
     assert not any("여기까지 오면 안 됨" in e.get("line", "") for e in evts)
     error = next(e for e in evts if e["type"] == "error")
     assert error["message"] == "배포를 취소했습니다" and "IN_PROGRESS" in error["hint"]
+
+
+def test_key_in_dotenv_lets_deploy_start_without_ssm_parameter(fake, repo):
+    # SSM에 키가 없어도 저장소 루트 .env에 있으면 멈추지 않는다 (deploy.sh가 배포 전에 SSM으로 올린다)
+    write_deploy(repo, SUCCESS_SCRIPT)
+    ready_account(fake, anthropic=False)
+    (repo / ".env").write_text("ANTHROPIC_API_KEY=sk-ant-api03-FROM-DOTENV\n")
+    result = deploy_cli(fake, repo, input=approve_deploy())
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (repo / "ran.txt").exists()
+    assert any("저장소 루트 .env" in e.get("line", "") for e in events(result.stdout))
+    assert "sk-ant-api03-FROM-DOTENV" not in result.stdout
+
+
+def test_empty_key_in_dotenv_still_stops_deploy(fake, repo):
+    write_deploy(repo, SUCCESS_SCRIPT)
+    ready_account(fake, anthropic=False)
+    (repo / ".env").write_text("ANTHROPIC_API_KEY=\n")
+    result = deploy_cli(fake, repo, input=approve_deploy())
+    assert result.returncode == 1 and not (repo / "ran.txt").exists()

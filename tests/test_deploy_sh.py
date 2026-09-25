@@ -333,3 +333,19 @@ def test_frontend_bundle_takes_only_chosen_env_values():
     assert "env.ANTHROPIC" not in config  # 비밀 값을 읽어 쓰지 않는다
     assert set(re.findall(r"'import\.meta\.env\.(\w+)'", config)) == {
         "AWS_REGION", "USER_POOL_ID", "COGNITO_CLIENT_ID", "COGNITO_DOMAIN"}
+
+
+@pytest.mark.parametrize("text", [
+    'ANTHROPIC_API_KEY="sk-ant-q"\n', "  ANTHROPIC_API_KEY = sk-ant-s  \n", "ANTHROPIC_API_KEY=a\nANTHROPIC_API_KEY=b\n",
+    "# ANTHROPIC_API_KEY=commented\n", "ANTHROPIC_API_KEY=\n",
+])
+def test_installer_reads_dotenv_like_deploy_sh(tmp_path, text):
+    # 설치 마법사(wga_installer/dotenv.py)가 "키가 있다"고 보면 deploy.sh도 같은 값을 SSM에 올려야 한다.
+    # 두 쪽이 다르게 읽으면 설치 마법사는 배포를 진행시켰는데 deploy.sh는 키를 건너뛰는 일이 생긴다
+    from wga_installer import dotenv
+
+    (tmp_path / "repo").mkdir()
+    (tmp_path / "repo" / ".env").write_text(text)
+    expected = dotenv.read_value(tmp_path / "repo", "ANTHROPIC_API_KEY")
+    _, _, put = run_sync(tmp_path, text)
+    assert (put["Value"] if put else None) == expected
