@@ -61,6 +61,13 @@ TOOL_RISK: Dict[str, str] = {
     "get_role_policy": READ,
     "list_user_policies": READ,
     "list_role_policies": READ,
+    # AWS 공식 네트워크 MCP 서버 (모든 도구가 조회. VPC·ENI·경로 추적만 붙였다)
+    "get_path_trace_methodology": READ,
+    "find_ip_address": READ,
+    "get_eni_details": READ,
+    "list_vpcs": READ,
+    "get_vpc_network": READ,
+    "get_vpc_flow_logs": READ,  # Logs Insights 쿼리로 흐름 로그를 읽는다 (조회. 스캔한 양만큼 과금)
     # 직접 둔 도구 (app.py, 이름은 camelCase로 등록된다)
     "listCloudwatchDashboards": READ,
     "getDashboardSummary": READ,

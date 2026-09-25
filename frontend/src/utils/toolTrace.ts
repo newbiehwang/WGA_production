@@ -58,6 +58,13 @@ const LABELS: Record<string, string> = {
     get_role_policy: '역할 인라인 정책',
     list_user_policies: '사용자 인라인 정책 목록',
     list_role_policies: '역할 인라인 정책 목록',
+    // AWS 공식 네트워크 MCP 서버 (조회만)
+    get_path_trace_methodology: '경로 추적 방법',
+    find_ip_address: 'IP 주소로 리소스 찾기',
+    get_eni_details: 'ENI 상세 (보안 그룹·NACL·라우팅)',
+    list_vpcs: 'VPC 목록',
+    get_vpc_network: 'VPC 네트워크 구성',
+    get_vpc_flow_logs: 'VPC 흐름 로그',
     // 직접 둔 도구
     list_cloudwatch_dashboards: '대시보드 목록',
     get_dashboard_summary: '대시보드 요약',

@@ -5,6 +5,7 @@ awslabs.billing-cost-management-mcp-server==0.0.38
 awslabs.cloudtrail-mcp-server==0.1.1
 awslabs.aws-pricing-mcp-server==1.1.1
 awslabs.iam-mcp-server==1.1.1
+awslabs.aws-network-mcp-server==0.0.17
 # 공식 서버를 같은 프로세스 안에서 부르는 in-memory 클라이언트, 공식 서버가 쓰는 MCP SDK
 fastmcp==4.0.9
 mcp==2.2.0

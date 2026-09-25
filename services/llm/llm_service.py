@@ -408,6 +408,9 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
              get_role_policy, list_policies/get_managed_policy_document, list_groups/get_group, and
              simulate_principal_policy ("can this role do X on Y?" - use it to explain AccessDenied errors).
              You cannot change IAM; if the user asks to, explain what should be changed and let them do it.
+        5-4. Network (AWS official network MCP tools, read-only): for connectivity questions ("why can't X reach Y?")
+             call get_path_trace_methodology first, then find_ip_address → get_eni_details (security groups, NACLs,
+             route tables) → get_vpc_network; list_vpcs; get_vpc_flow_logs to confirm ACCEPT/REJECT traffic.
         6. Visualization: Generate charts/AWS diagrams (only if the user explicitly requests visualization)
         7. Changes (only when the user asks to change something): setLogRetention (WGA Lambda log group retention),
            setAlarmActions (turn WGA alarm notifications on/off). Calling them does NOT change anything yet: it creates
