@@ -281,7 +281,7 @@ GuardDuty에서 감지된 보안 이벤트가 있나요?
 React 18과 TypeScript로 채팅 화면을 만들었습니다. 화면 디자인은 이전에 만든 다른 프로젝트(AXPI)의 CSS를 가져와 색만 바꿔 썼습니다(위쪽 내비게이션, 패널, 목록 행, 확인창). 대화 목록과 메시지 상태는 Zustand store(`chatStore`)로 관리하고, AI 응답은 타이핑하듯 조금씩 보여 줍니다. 답변을 만들며 부른 MCP 도구는 답변 위에 목록으로 표시합니다. 대화 기록은 Chat History API(`/sessions/*`)를 통해 DynamoDB에 저장되어 이전 대화를 다시 불러올 수 있습니다. 마크다운은 직접 만든 파서(`utils/markdown.ts`)로 코드 블록, 표, 링크를 표시하고, 서버에서 생성한 차트·다이어그램은 S3 이미지로 표시합니다. 홈은 큰 제목과 설명 아래에 큰 입력칸을 둔 첫 화면이고(구성과 등장 효과는 다른 프로젝트인 FinGate-X 첫 화면을 참고), 입력칸을 누르면 예시 질문이 펼쳐집니다. 대화 화면에서는 대화 목록을 팝업창으로 엽니다.
 
 ### Cognito 인증
-앱 안의 로그인 화면에서 Amplify Auth로 Cognito User Pool에 로그인합니다(SRP 방식이라 비밀번호가 서버로 그대로 가지 않습니다). 회원가입과 이메일 인증, 비밀번호 재설정, 관리자가 만든 계정의 첫 로그인(새 비밀번호 정하기)도 같은 화면에서 처리합니다. 토큰 저장과 갱신은 Amplify가 맡고, API 요청에는 ID 토큰을 붙여 API Gateway의 Cognito Authorizer가 확인합니다. API가 401을 돌려주면 로그인 화면으로 돌아갑니다.
+로그인 화면의 로그인 버튼을 누르면 Cognito 로그인 페이지(Hosted UI)로 이동해 로그인하고 앱으로 돌아옵니다(OAuth 2.0 Authorization Code + PKCE). 회원가입, 이메일 인증, 비밀번호 찾기도 Cognito 페이지에서 처리하므로 앱은 비밀번호를 다루지 않습니다. 돌아온 뒤 code를 토큰으로 바꾸고 저장·갱신하는 일은 Amplify Auth(`signInWithRedirect`)가 맡고, API 요청에는 ID 토큰을 붙여 API Gateway의 Cognito Authorizer가 확인합니다. API가 401을 돌려주면 로그인 화면으로 돌아갑니다.
 
 ### Lambda 기반 MCP 서버 및 클라이언트 구현
 기존 MCP 프로토콜의 HTTP+SSE(Server-Sent Events) 방식은 AWS Lambda의 제약사항과 호환되지 않아, Streamable HTTP 방식으로 재설계했습니다. Lambda의 서버리스 환경에서 지속적인 연결을 유지할 수 없는 특성을 고려하여, 요청-응답 기반의 HTTP 프로토콜로 MCP 스펙을 구현했습니다. 이를 위해 전용 MCP 서버와 클라이언트를 직접 설계하고 개발했으며, 기존에 존재하는 MCP 서버들을 우리의 Streamable HTTP 방식과 호환되도록 리팩토링했습니다. 추가로, analyze_log_groups_insights 등 필요한 MCP 도구를 직접 설계하고 구현하였고, 기존의 MCP 도구 중 fetch_cloudwatch_logs_for_service()의 치명적인 결함을 발견 후 수정하였으며, 원작자의 Github Repo에 해당 내용을 반영한 Pull Request를 생성했습니다.
@@ -303,6 +303,7 @@ CloudFormation 기반 IaC와 `deploy.sh` 스크립트로 전체 시스템 배포
 ### 개발 환경 설정
 ```bash
 # 프론트엔드 개발 서버 (배포된 환경의 로그인·API 사용, deploy.sh가 만든 frontend/.env.local 필요)
+# 로그인 뒤 돌아올 주소로 http://localhost:5173/redirect만 등록되어 있으므로 포트 5173으로 띄운다
 cd frontend && npm install && npm run dev
 
 # 프론트엔드만 (AWS 없이): 로그인을 건너뛰고 가짜 API로 응답 → 화면만 고칠 때

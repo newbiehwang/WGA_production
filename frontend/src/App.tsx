@@ -1,7 +1,8 @@
 // 앱 틀: 로그인하지 않았으면 로그인 화면, 했으면 위쪽 내비게이션 + 화면(홈 / 대화)
-import { useEffect } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { setUnauthorizedHandler } from './api/http';
+import { isReturningFromLogin, onLoginResult } from './auth/authClient';
 import { useAuthStore } from './auth/authStore';
 import { LoginPage } from './components/layout/LoginPage';
 import { LogoutOverlay } from './components/layout/LogoutOverlay';
@@ -16,11 +17,28 @@ export default function App() {
     const user = useAuthStore((s) => s.user);
     const isLoggingOut = useAuthStore((s) => s.isLoggingOut);
     const refresh = useAuthStore((s) => s.refresh);
+    const navigate = useNavigate();
+    const [loginError, setLoginError] = useState('');
 
     useEffect(() => {
         setUnauthorizedHandler(() => useAuthStore.getState().expire());
-        refresh();
-    }, [refresh]);
+
+        // Cognito 로그인 페이지에서 /redirect?code=...로 돌아왔으면, Amplify가 code를 토큰으로 바꿀 때까지
+        // 로딩을 보여 준다 (그 사이 세션을 읽으면 아직 비어 있어 로그인 화면이 잠깐 보인다)
+        const returning = isReturningFromLogin();
+        const fallback = returning ? window.setTimeout(() => refresh(), 15000) : undefined; // 결과가 끝내 안 오면
+        const stop = onLoginResult((result) => {
+            window.clearTimeout(fallback);
+            if (!result.ok) setLoginError(result.message);
+            refresh();
+            navigate('/', { replace: true }); // /redirect 주소를 남기지 않는다
+        });
+        if (!returning) refresh();
+        return () => {
+            stop();
+            window.clearTimeout(fallback);
+        };
+    }, [refresh, navigate]);
 
     // 로그인하면 모델 목록을 받는다 (/health는 인증 없이 열려 있다)
     useEffect(() => {
@@ -42,7 +60,7 @@ export default function App() {
         );
     }
 
-    if (status === 'signedOut' || !user) return <LoginPage onSignedIn={refresh} />;
+    if (status === 'signedOut' || !user) return <LoginPage errorMessage={loginError} onSignedIn={refresh} />;
 
     return (
         <div className="app-shell">
@@ -52,7 +70,7 @@ export default function App() {
                     <Routes>
                         <Route path="/" element={<HomePage />} />
                         <Route path="/chat" element={<ChatPage />} />
-                        {/* 예전 주소(/start-chat, /redirect, /dashboard, /login)는 홈으로 */}
+                        {/* 예전 주소(/start-chat, /dashboard, /login)와 로그인·로그아웃 뒤 돌아오는 /redirect는 홈으로 */}
                         <Route path="*" element={<Navigate to="/" replace />} />
                     </Routes>
                 </div>

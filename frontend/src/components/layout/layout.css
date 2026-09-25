@@ -573,45 +573,9 @@
   justify-self: end;
 }
 
-/* 로그인 화면 아래 링크 (회원가입 · 비밀번호 찾기): Cognito Hosted UI가 하던 일 */
-.login-links {
-  display: flex;
-  justify-content: center;
-  gap: 18px;
-  margin-top: 16px;
-}
-
-.login-links button {
-  border: 0;
-  background: transparent;
-  padding: 0;
-  font-family: var(--font-label);
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--color-neutral);
-  cursor: pointer;
-}
-
-.login-links button:hover {
-  color: var(--color-primary);
-}
-
-/* 알림(코드를 보냈습니다 등): 오류 알림과 같은 모양, 파란색 */
-.login-notice {
-  border: 1px solid #cfe0f5;
-  background: #f1f6fd;
-  border-radius: 10px;
-  padding: 10px 12px;
-  font-family: var(--font-body);
-  font-size: 0.8rem;
-  line-height: 1.45;
-  color: #1f4f86;
-  animation: menu-in 160ms ease both;
-}
-
-.login-input[readonly] {
-  background: #f7f9fc;
-  color: var(--color-neutral);
+/* 로그인 버튼 아래 안내 (Cognito 로그인 페이지로 이동한다는 것) */
+.login-hint--center {
+  text-align: center;
 }
 
 /* 앱을 여는 중 (로그인 상태 확인) */
