@@ -860,3 +860,103 @@
   line-height: 1;
   cursor: pointer;
 }
+
+/* ---------------------------------------------------------------- AXPI 추진계획서 생성 팝업창 (닫기 버튼·본문·제목·아래 버튼) */
+
+.vdt-model-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 10;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: #a9b6c6;
+  cursor: pointer;
+  transition: color 120ms ease, transform 120ms ease;
+}
+
+.vdt-model-close svg {
+  width: 12px;
+  height: 12px;
+}
+
+.vdt-model-close:hover {
+  color: #0062cc;
+  transform: scale(1.12);
+}
+
+.create-plan-expanded-model-body {
+  flex: 1;
+  min-height: 0;
+  padding: 44px 18px 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f9fbfe 100%);
+  display: flex;
+  transition: filter 180ms ease, opacity 180ms ease;
+}
+
+.create-plan-step-heading {
+  margin: 0;
+  font-family: var(--font-headline);
+  font-size: 1.26rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  color: #1f2933;
+}
+
+.create-plan-step-description {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  line-height: 1.48;
+  color: #6b7785;
+}
+
+.create-plan-wizard-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+
+.create-plan-wizard-button {
+  min-width: 112px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  padding: 0 16px;
+  font-family: var(--font-label);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 160ms ease, filter 160ms ease, opacity 160ms ease,
+    border-color 160ms ease, background-color 160ms ease;
+}
+
+.create-plan-wizard-button:hover {
+  transform: translateY(-1px);
+}
+
+.create-plan-wizard-button:disabled {
+  transform: none;
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+.create-plan-wizard-button.is-secondary {
+  background: #f5f8fc;
+  border-color: #d6dee8;
+  color: #4a6078;
+}
+
+.create-plan-wizard-button.is-primary {
+  background: var(--color-primary);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 8px 14px rgba(0, 123, 255, 0.2);
+}

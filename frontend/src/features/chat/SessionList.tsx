@@ -1,6 +1,6 @@
-// 대화 목록 (예전 components/ChatHistory.vue).
+// 대화 목록 (예전 components/ChatHistory.vue). 대화 목록 팝업창(SessionListModal) 안에 들어간다.
 // 행 모양과 ··· 메뉴는 AXPI의 추진 계획서 목록 행을 그대로 쓴다.
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useChatStore } from '@/stores/chatStore';
@@ -13,7 +13,13 @@ type Dialog =
     | { kind: 'delete-all' }
     | null;
 
-export function SessionList({ onSelect }: { onSelect: (sessionId: string) => void }) {
+export function SessionList({
+    onSelect,
+    actions,
+}: {
+    onSelect: (sessionId: string) => void;
+    actions?: ReactNode; // 아래 버튼 줄 오른쪽에 둘 버튼 (팝업의 '+ 새 대화')
+}) {
     const sessions = useChatStore((s) => s.sessions);
     const currentId = useChatStore((s) => s.currentSession?.sessionId);
     const loaded = useChatStore((s) => s.loaded);
@@ -63,11 +69,6 @@ export function SessionList({ onSelect }: { onSelect: (sessionId: string) => voi
 
     return (
         <>
-            <div className="plan-table-header chat-sessions-header">
-                <span>대화 목록</span>
-                <span className="chat-sessions-count">{sessions.length}</span>
-            </div>
-
             {!loaded ? (
                 <div className="chat-sessions-empty">
                     <div className="plan-inline-spinner" />
@@ -125,22 +126,26 @@ export function SessionList({ onSelect }: { onSelect: (sessionId: string) => voi
                 </ul>
             )}
 
-            {sessions.length > 0 ? (
-                <button
-                    className="chat-delete-all"
-                    type="button"
-                    disabled={waiting}
-                    onClick={() => open({ kind: 'delete-all' })}
-                >
-                    대화 전체 삭제
-                </button>
-            ) : null}
+            <div className="create-plan-wizard-actions">
+                {sessions.length > 0 ? (
+                    <button
+                        className="create-plan-wizard-button is-secondary session-delete-all"
+                        type="button"
+                        disabled={waiting}
+                        onClick={() => open({ kind: 'delete-all' })}
+                    >
+                        대화 전체 삭제
+                    </button>
+                ) : null}
+                {actions}
+            </div>
 
             {menu
                 ? createPortal(
                       <div
                           className="plan-row-action-menu"
-                          style={{ position: 'fixed', top: menu.top, right: menu.right }}
+                          // 팝업창(z-index 90) 위에 떠야 한다
+                          style={{ position: 'fixed', top: menu.top, right: menu.right, zIndex: 120 }}
                           role="menu"
                           onMouseDown={(event) => event.stopPropagation()}
                       >
