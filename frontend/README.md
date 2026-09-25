@@ -20,10 +20,10 @@ npm run build      # tsc 타입 검사 + vite 빌드 → dist/ (deploy.sh가 Amp
 | `src/components/layout/` | 위쪽 내비게이션, 프로필 메뉴, 로그인 화면 (AXPI) |
 | `src/components/panel.css` | 패널·목록 행·버튼·확인창 (AXPI) |
 | `src/features/home/` | 홈: 큰 제목·설명·큰 입력칸 (FinGate-X 첫 화면 구성, 누르면 예시 질문이 펼쳐짐) |
-| `src/features/chat/` | 대화: 메시지, 질문 입력칸, 대화 목록 팝업창 |
+| `src/features/chat/` | 대화: 메시지, 질문 입력칸, 대화 목록 팝업창, 답변을 만드는 과정(`ProgressTrace`: 사고 요약·도구 호출·'생각하는 중… (12초)') |
 | `src/utils/markdown.ts` | 답변 마크다운 → HTML (표·코드 블록·목록) |
-| `src/utils/toolTrace.ts` | 답변을 만들며 부른 MCP 도구 목록 |
-| `src/mock/api.ts` | mock 모드의 가짜 API (배포용 빌드에는 들어가지 않는다) |
+| `src/utils/toolTrace.ts` | 답변을 만드는 과정(사고 요약·MCP 도구 호출)을 화면에 그릴 목록으로 바꾸기 |
+| `src/mock/api.ts` | mock 모드의 가짜 API (배포용 빌드에는 들어가지 않는다). 질문마다 몇 초짜리 진행 상황(사고 → 도구 → 사고)도 흉내 낸다 |
 
 ## 환경 값 (`.env.local`, deploy.sh가 만든다)
 
