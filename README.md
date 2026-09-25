@@ -44,7 +44,7 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 | frontend (`frontend.yaml`) | `wga-frontend-{env}` | Amplify App/Branch, 프론트엔드 버킷 정책 |
 | mcp (`mcp.yaml`) | `wga-mcp-{env}` | MCP 이미지용 ECR 리포지토리, CodeBuild 프로젝트 |
 | main (`main.yaml`) | `wga-{env}` | 아래 5개 Nested Stack과 API Gateway 최종 Deployment |
-| └ llm (`llm.yaml`) | Nested | LLM Lambda, MCP Lambda(Container Image, Function URL), `/llm1`, `/llm2` 등 |
+| └ llm (`llm.yaml`) | Nested | LLM Lambda, MCP Lambda(Container Image, Function URL), `/llm1`, `/llm1/progress/{requestId}`, `/llm2` 등, 답변 진행 상황 테이블 |
 | └ logs (`logs.yaml`) | Nested | Athena 유틸리티 Lambda, `/execute-query`, `/create-table` |
 | └ slackbot (`slackbot.yaml`) | Nested | Slack 봇 Lambda, `/login`, `/callback`, `/models`, `/req` 등 |
 | └ chat-history (`chat-history.yaml`) | Nested | 대화 기록 Lambda, `/sessions/*` |
@@ -300,6 +300,14 @@ MCP의 HTTP+SSE(Server-Sent Events) 방식은 연결을 오래 유지해야 해�
 | 차트 15종 | 직접 둠 (AntV 차트 서비스) |
 
 공식 도구 중 PromQL, 로그 인덱스 추천, 일괄 Insights 쿼리는 뺐습니다(권한이 문서에 없거나 쓰임이 겹침). 공식 도구는 설명과 스키마가 길어서 도구 목록이 커지므로, Anthropic 요청에서는 도구 목록을 프롬프트 캐시에 올립니다. 이전 버전에서는 공개 MCP 서버의 로그 조회 도구를 옮겨 와 쓰면서 결함을 고쳐 원작자 저장소에 Pull Request를 보냈고, 이후 AWS 공식 서버로 바꿨습니다.
+
+### 답변 진행 상황과 사고 과정
+답변을 만드는 동안 지금 무엇을 하는지(생각 중, 어떤 도구를 실행 중인지)와 모델의 사고 요약을 화면에 보여 줍니다. `/llm1`은 API Gateway REST의 동기 요청이라 답이 다 만들어진 뒤에 한 번만 응답하므로, 진행 상황은 따로 기록하고 화면이 따로 읽어 갑니다.
+
+- 화면이 요청마다 `requestId`를 만들어 `/llm1`에 함께 보내고, 답을 기다리는 동안 `GET /llm1/progress/{requestId}`를 1초마다 부릅니다.
+- LLM Lambda는 모델 요청·사고 요약·도구 시작과 끝마다 진행 상황 테이블(`wga-llm-progress-{env}`)에 기록합니다(`services/llm/llm_progress.py`). 요청한 사람만 쓰고 읽을 수 있고, 한 시간 뒤 TTL로 지워집니다.
+- 사고 과정(extended thinking)은 모델마다 받는 설정이 달라, Anthropic Models API가 알려 주는 모델의 지원 방식(adaptive / enabled)에 맞춰 켭니다. 도구를 쓰는 반복에서는 받은 사고 블록을 고치지 않고 다음 요청에 그대로 보냅니다.
+- 같은 단계 목록을 답변의 `inference.steps`에도 넣어, 다시 불러온 대화에서도 순서대로 볼 수 있습니다.
 
 ### Lambda 기반 서버리스 백엔드 아키텍처
 전체 백엔드 시스템을 AWS Lambda 함수 기반으로 구현하여 서버리스 아키텍처의 장점을 극대화했습니다. 각 마이크로서비스를 독립적인 Lambda 함수로 분리하여 개발, 배포, 확장이 용이하도록 설계했습니다. LLM Service, Database Service, Chat History Service, Slackbot Service를 각각 별도의 Lambda 함수로 구현하고, API Gateway를 통해 통합된 RESTful API로 제공합니다. Lambda의 이벤트 기반 실행 모델을 활용하여 요청이 있을 때만 실행되므로 비용 효율성을 확보했으며, AWS의 관리형 서비스와의 네이티브 통합을 통해 운영 부담을 최소화했습니다. Lambda Layer로 공통 라이브러리와 종속성을 관리하며, 함수별 메모리와 타임아웃은 역할에 따라 다르게 설정했습니다(예: MCP 서버 2048MB/180초, Slack 봇 256MB/15초).

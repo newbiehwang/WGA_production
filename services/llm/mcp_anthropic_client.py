@@ -6,11 +6,16 @@ from typing import Dict, Any, List, Optional
 from mcp_client import MCPClient
 
 
+# 응답 한 번의 최대 출력 토큰. 사고 과정(thinking)도 이 안에서 쓰므로 사고를 켠 뒤 8192에서 늘렸다
+MAX_TOKENS = 16000
+
+
 class AnthropicMCPClient:
     """Anthropic API와 통합된 MCP 클라이언트 (SDK 없이 직접 API 호출)"""
 
     def __init__(self, mcp_url: str, api_key: str = None, model_id: str = None,
-                 session_id: str = None, max_retries: int = 5, max_iterations: int = 15):
+                 session_id: str = None, max_retries: int = 5, max_iterations: int = 15,
+                 thinking: Optional[Dict[str, Any]] = None):
         """
         Anthropic MCP 클라이언트 초기화
 
@@ -21,6 +26,7 @@ class AnthropicMCPClient:
             session_id: 기존 세션 ID (선택 사항)
             max_retries: 작업 상태 확인을 위한 최대 재시도 횟수
             max_iterations: 도구 호출을 위한 최대 반복 횟수
+            thinking: 요청에 넣을 사고 설정 (llm_service.thinking_config가 모델에 맞게 정한다. None이면 넣지 않음)
         """
         self.mcp_client = MCPClient(mcp_url, None, session_id)
         if not model_id:
@@ -44,6 +50,23 @@ class AnthropicMCPClient:
         # 토큰 사용량 누적 추적
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.thinking = thinking
+        # 요청마다 llm_service가 넣어 주는 진행 상황 기록 (llm_progress.ProgressReporter).
+        # 클라이언트는 모델별로 캐시해 여러 요청이 함께 쓰므로 생성자가 아니라 요청마다 바꿔 끼운다
+        self.progress = None
+
+    def _report(self, event: str, *args) -> None:
+        """진행 상황에 한 단계를 알린다 (기록할 곳이 없으면 아무것도 하지 않는다)."""
+        if self.progress is not None:
+            getattr(self.progress, event)(*args)
+
+    @staticmethod
+    def _text_of(content) -> str:
+        """메시지 content(글자 또는 블록 목록)에서 글자만 모은다."""
+        if isinstance(content, str):
+            return content
+        return "".join(block.get("text", "") for block in content or []
+                       if isinstance(block, dict) and block.get("type") == "text")
 
     def initialize(self) -> str:
         """
@@ -638,9 +661,12 @@ class AnthropicMCPClient:
             # API 요청 페이로드 구성 - max_tokens 필드 추가
             payload = {
                 "model": self.model_id,
-                "max_tokens": 8192,
+                "max_tokens": MAX_TOKENS,
                 "messages": self.messages
             }
+            # 사고 과정: 화면에 보여 주려면 사고 요약을 받아야 한다 (display: summarized)
+            if self.thinking:
+                payload["thinking"] = self.thinking
             # 마지막 반복에서는 도구 호출 중지
             if iteration == self.max_iterations - 1:
                 payload["tool_choice"] = {"type": "none"}
@@ -658,7 +684,8 @@ class AnthropicMCPClient:
             # 디버깅을 위한 로깅 추가
             print(f"API 요청 페이로드: {json.dumps(payload, indent=2, ensure_ascii=False)[:500]}...")
 
-            # API 요청 전송
+            # API 요청 전송 (응답을 기다리는 동안 화면에는 '생각하는 중')
+            self._report("thinking_started")
             response = requests.post(
                 self.api_url,
                 headers=self.api_headers,
@@ -704,12 +731,14 @@ class AnthropicMCPClient:
             print(f"이번 반복 토큰 사용량: 입력={input_tokens}, 출력={output_tokens}")
             print(f"누적 토큰 사용량: 입력={self.total_input_tokens}, 출력={self.total_output_tokens}")
 
-            # 응답 콘텐츠에서 텍스트와 도구 사용 분리
+            # 응답 콘텐츠에서 텍스트와 도구 사용 분리. 사고 요약은 진행 상황으로 보낸다
             for item in content:
                 if item.get("type") == "text":
                     message_content += item.get("text", "")
                 elif item.get("type") == "tool_use":
                     tool_uses.append(item)
+                elif item.get("type") == "thinking":
+                    self._report("thought", item.get("thinking", ""))
 
             # 응답 저장
             print(f"응답 텍스트: {message_content[:100]}...")
@@ -729,12 +758,13 @@ class AnthropicMCPClient:
             if message_content:
                 all_responses.append(message_content)
 
-            # 메시지에 응답 추가 (텍스트만 추가)
-            if message_content:
-                print(f"텍스트 응답 추가: {message_content[:100]}...")
+            # 응답을 받은 그대로(사고·글·도구 호출 블록 모두) 한 assistant 메시지로 이어 붙인다.
+            # 사고 과정을 켜고 도구를 쓰면, 다음 요청에 사고 블록을 고치지 않고 그대로 돌려보내야 한다
+            # (예전처럼 글과 도구 호출을 따로 두 메시지로 나누면 사고 블록이 빠진다)
+            if content:
                 self.messages.append({
                     "role": "assistant",
-                    "content": message_content
+                    "content": content
                 })
 
             # 도구 사용 요청이 있는 경우
@@ -744,12 +774,6 @@ class AnthropicMCPClient:
                     "type": "tool_use_requests",
                     "count": len(tool_uses),
                     "timestamp": time.time()
-                })
-
-                # Append assistant tool_use message
-                self.messages.append({
-                    "role": "assistant",
-                    "content": tool_uses
                 })
 
                 # 각 도구에 대해 MCP 도구 호출
@@ -762,6 +786,7 @@ class AnthropicMCPClient:
                         tool_input = tool_use.get("input", {})
 
                         print(f"도구 호출: {tool_name}, 입력: {json.dumps(tool_input, ensure_ascii=False)}")
+                        self._report("tool_started", tool_use_id, tool_name, tool_input)
 
                         # 디버그 로그에 도구 사용 요청 기록
                         self.debug_log.append({
@@ -778,6 +803,10 @@ class AnthropicMCPClient:
                         )
 
                         print(f"도구 결과: {json.dumps(result, ensure_ascii=False)[:200]}...")
+                        # MCP 도구는 실패를 예외 대신 결과의 isError로 알리기도 한다
+                        failed = isinstance(result, dict) and result.get("isError") is True
+                        self._report("tool_finished", tool_use_id, not failed,
+                                     self._tool_error_text(result) if failed else None)
 
                         # 디버그 로그에 도구 결과 기록
                         self.debug_log.append({
@@ -797,6 +826,7 @@ class AnthropicMCPClient:
                     except Exception as e:
                         # 오류 처리
                         print(f"도구 호출 오류: {str(e)}")
+                        self._report("tool_finished", tool_use_id, False, str(e))
 
                         # 디버그 로그에 도구 오류 기록
                         self.debug_log.append({
@@ -850,7 +880,7 @@ class AnthropicMCPClient:
 
         # 루프를 빠져나왔을 때 마지막 어시스턴트 응답 반환
         if self.messages and self.messages[-1].get("role") == "assistant":
-            last = self.messages[-1]["content"]
+            last = self._text_of(self.messages[-1]["content"])
         else:
             last = ""
         return {
@@ -860,6 +890,14 @@ class AnthropicMCPClient:
                 }
             }
         }
+
+    @staticmethod
+    def _tool_error_text(result) -> str:
+        """isError 결과의 첫 글자 블록 (화면에 보일 실패 이유)."""
+        for block in (result or {}).get("content", []) or []:
+            if isinstance(block, dict) and block.get("type") == "text":
+                return block.get("text", "")
+        return "도구가 오류를 돌려주었습니다"
 
     def _extract_text_from_response(self, response):
         """
@@ -955,7 +993,7 @@ class AnthropicMCPClient:
         if not final_text:
             for message in reversed(self.messages):
                 if message.get("role") == "assistant":
-                    final_text = message.get("content", "")
+                    final_text = self._text_of(message.get("content", ""))
                     print(f"마지막 assistant 메시지 사용: {final_text[:200]}...")
                     break
 
@@ -1021,7 +1059,7 @@ class AnthropicMCPClient:
         if not final_text:
             for message in reversed(self.messages):
                 if message.get("role") == "assistant":
-                    final_text = message.get("content", "")
+                    final_text = self._text_of(message.get("content", ""))
                     print(f"마지막 assistant 메시지 사용: {final_text[:200]}...")
                     break
 
