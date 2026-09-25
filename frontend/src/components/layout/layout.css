@@ -573,19 +573,24 @@
   justify-self: end;
 }
 
-/* 'AWS에서 로그인' 버튼: 글자 왼쪽에 AWS 로고를 두고 둘을 한가운데에 모은다 */
+/* '(AWS 로고)에서 로그인' 버튼: 로고가 'AWS' 글자 자리에 들어가 한 낱말처럼 읽히도록 붙여 두고,
+   둘을 버튼 한가운데에 모은다 */
 .login-submit {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 3px;
 }
 
-/* 로고 폭은 글자 높이에 맞춘다 (AWS 로고 비율 640:512) */
+/* 로고의 'aws' 글자를 옆 글자('에서 로그인')와 한 줄의 낱말처럼 맞춘다 (AWS 로고 비율 640:512).
+   - 크기: 'aws' 글자 높이가 옆 한글 높이의 5/6쯤(11px)이 되게 한다. 소문자라 한글보다 조금 낮아야 자연스럽다
+   - 위치: 로고 아래쪽 절반은 화살표라, 가운데 정렬만 하면 'aws'가 위로 떠 보인다.
+     'aws' 글자의 아래 끝이 한글의 글자 기준선에 오도록 5px 내린다 */
 .login-submit-logo {
-  width: 30px;
-  height: 24px;
+  width: 35px;
+  height: 28px;
   flex-shrink: 0;
+  transform: translateY(5px);
 }
 
 /* 앱을 여는 중 (로그인 상태 확인) */

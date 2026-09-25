@@ -1,4 +1,4 @@
-// 로그인 화면 (AXPI LoginPage.tsx의 카드 모양). 'AWS에서 로그인' 버튼 하나만 있다.
+// 로그인 화면 (AXPI LoginPage.tsx의 카드 모양). '(AWS 로고)에서 로그인' 버튼 하나만 있다.
 // 누르면 AWS(Cognito) 로그인 페이지로 간다. 가입·이메일 인증·비밀번호 찾기도 그 페이지에서 한다 (auth/authClient.ts).
 import { useState } from 'react';
 import { login } from '@/auth/authClient';
@@ -54,9 +54,17 @@ export function LoginPage({
                         </div>
                     ) : null}
 
-                    <button className="login-submit" type="button" disabled={isRedirecting} onClick={handleLogin}>
+                    {/* 로고가 'AWS' 글자를 대신해 '(AWS 로고)에서 로그인'으로 읽힌다.
+                        로고는 화면 읽기 프로그램에 보이지 않으므로(aria-hidden) 버튼 이름은 aria-label로 준다 */}
+                    <button
+                        className="login-submit"
+                        type="button"
+                        disabled={isRedirecting}
+                        onClick={handleLogin}
+                        aria-label={isRedirecting ? '로그인 페이지로 이동 중' : 'AWS에서 로그인'}
+                    >
                         <AwsLogo className="login-submit-logo" />
-                        <span>{isRedirecting ? '로그인 페이지로 이동 중...' : 'AWS에서 로그인'}</span>
+                        <span>{isRedirecting ? '로그인 페이지로 이동 중...' : '에서 로그인'}</span>
                     </button>
                 </div>
             </section>
