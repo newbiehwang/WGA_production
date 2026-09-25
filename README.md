@@ -44,7 +44,7 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 | frontend (`frontend.yaml`) | `wga-frontend-{env}` | Amplify App/Branch, 프론트엔드 버킷 정책 |
 | mcp (`mcp.yaml`) | `wga-mcp-{env}` | MCP 이미지용 ECR 리포지토리, CodeBuild 프로젝트 |
 | main (`main.yaml`) | `wga-{env}` | 아래 5개 Nested Stack과 API Gateway 최종 Deployment |
-| └ llm (`llm.yaml`) | Nested | LLM Lambda, MCP Lambda(Container Image, Function URL), `/llm1`, `/llm1/progress/{requestId}`, `/llm2`, `/audit` 등, 답변 진행 상황 테이블, 감사 로그 테이블·로그 그룹 |
+| └ llm (`llm.yaml`) | Nested | LLM Lambda, MCP Lambda(Container Image, Function URL), `/llm1`, `/llm1/progress/{requestId}`, `/llm2`, `/audit`, `/actions/{actionId}` 등, 답변 진행 상황 테이블, 감사 로그 테이블·로그 그룹, 변경 작업 승인 테이블 |
 | └ logs (`logs.yaml`) | Nested | Athena 유틸리티 Lambda, `/execute-query`, `/create-table` |
 | └ slackbot (`slackbot.yaml`) | Nested | Slack 봇 Lambda, `/login`, `/callback`, `/models`, `/req` 등 |
 | └ chat-history (`chat-history.yaml`) | Nested | 대화 기록 Lambda, `/sessions/*` |
@@ -119,7 +119,24 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 aws cognito-idp admin-add-user-to-group --user-pool-id <UserPoolId> --username <이메일> --group-name admins
 ```
 
-### 9. 간편한 배포
+### 9. 변경 작업 승인
+AI가 스스로 AWS를 바꾸지 못하게, 사람이 승인한 변경만 실행합니다 (`services/llm/approvals.py`, `mcp/lambda_mcp/risk.py`·`approval.py`).
+- **변경 도구**: 로그 보존 기간 바꾸기(`setLogRetention`), 알람 알림 켜기·끄기(`setAlarmActions`). 이 환경의 WGA 리소스(`/aws/lambda/wga-*-<env>`, `wga-<env>-*`)만 바꿀 수 있고, IAM도 같은 범위로만 허용합니다. AWS를 바꾸는 권한은 MCP Lambda 역할에만 있습니다.
+- **위험도 목록**: MCP 서버가 도구마다 위험도(조회·결과물·변경)를 MCP 표준 `annotations`와 `_meta`로 붙여 내보냅니다. 목록에 없는 도구는 변경 도구로 봅니다(안전하게 실패).
+- **흐름**:
+  1. 모델이 변경 도구를 부르면 실행하지 않고, 바뀔 내용만 미리 봅니다(예: "보존 기간 30일 → 14일").
+  2. 승인 요청을 저장하고(`wga-pending-actions-<env>`, 10분 유효), 답변에 승인 요청을 담습니다.
+  3. 사용자가 승인하면(`POST /actions/{id}/approve`) 결정을 감사 로그에 먼저 남깁니다. 남기지 못하면 실행하지 않습니다.
+  4. 작업 ID를 붙여 MCP를 부릅니다. MCP Lambda는 승인 테이블을 직접 다시 확인하고(상태·도구·인자 해시·만료) 조건부 쓰기로 한 번만 실행합니다.
+  5. 화면이 `actionId`로 `/llm1`을 부르면, 서버가 저장된 실행 결과로 질문을 만들어 모델이 결과를 설명합니다.
+- **승인자**: dev·test는 요청한 본인 또는 `approvers` 그룹, prod는 `approvers` 그룹의 다른 사람만 승인합니다(요청한 본인은 불가). 거절(`POST /actions/{id}/deny`)은 본인도 할 수 있습니다.
+- **Slack 봇**: 승인 화면이 없어 변경 작업을 요청할 수 없습니다(조회는 그대로).
+
+```bash
+aws cognito-idp admin-add-user-to-group --user-pool-id <UserPoolId> --username <이메일> --group-name approvers
+```
+
+### 10. 간편한 배포
 - **단일 스크립트 배포**: `deploy.sh` 하나로 전체 인프라와 프론트엔드 배포
 - **CloudFormation 기반**: AWS 네이티브 IaC로 인프라 관리
 - **이미지 빌드 자동화**: CodeBuild로 MCP 서버 Docker 이미지 빌드 후 ECR 푸시

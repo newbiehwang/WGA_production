@@ -105,13 +105,15 @@ class MCPClient:
 
         return result.get('result', {}).get('tools', [])
 
-    def call_tool(self, tool_name: str, tool_args: Dict[str, Any] = None) -> Dict[str, Any]:
+    def call_tool(self, tool_name: str, tool_args: Dict[str, Any] = None,
+                  meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         특정 도구 호출
 
         Args:
             tool_name: 호출할 도구 이름
             tool_args: 도구에 전달할 인자 (선택 사항)
+            meta: MCP params._meta (변경 도구의 승인된 작업 ID·미리 보기 요청, approvals.py)
 
         Returns:
             도구 실행 결과
@@ -129,6 +131,8 @@ class MCPClient:
                 "arguments": tool_args or {}
             }
         }
+        if meta:
+            payload["params"]["_meta"] = meta
 
         response = self._send('POST', payload)
 

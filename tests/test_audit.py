@@ -102,8 +102,9 @@ def client_run(audit_env, monkeypatch):
     monkeypatch.setattr(mcp_anthropic_client.requests, "post", fake_post)
     client = mcp_anthropic_client.AnthropicMCPClient(
         mcp_url="https://example.invalid", api_key="k", model_id="claude-sonnet-5")
-    client.tools = [{"name": "describe_log_groups", "description": "", "inputSchema": {}},
-                    {"name": "analyze_log_group", "description": "", "inputSchema": {}}]
+    read = {"wga/risk": "read"}  # MCP tools/list가 붙이는 위험도 (없으면 변경 도구로 본다)
+    client.tools = [{"name": "describe_log_groups", "description": "", "inputSchema": {}, "_meta": read},
+                    {"name": "analyze_log_group", "description": "", "inputSchema": {}, "_meta": read}]
     monkeypatch.setattr(client.mcp_client, "call_tool", fake_call_tool)
     client.progress = ProgressReporter()
     client.redactor = Redactor([ACCOUNT])
@@ -393,7 +394,9 @@ class CfnLoader(yaml.SafeLoader):
     pass
 
 
-CfnLoader.add_multi_constructor("!", lambda loader, suffix, node: None)
+# !GetAtt·!Sub 등은 글자 그대로 둔다 (어떤 리소스를 가리키는지 확인할 수 있게)
+CfnLoader.add_multi_constructor("!", lambda loader, suffix, node: loader.construct_scalar(node)
+                                if isinstance(node, yaml.ScalarNode) else None)
 
 
 def template(name):
@@ -413,9 +416,10 @@ def test_audit_resources_in_template():
 def test_llm_role_can_only_append_and_read_audit_records():
     statements = template("llm.yaml")["Resources"]["LlmLambdaExecutionRole"]["Properties"]["Policies"][0][
         "PolicyDocument"]["Statement"]
-    actions = {action for statement in statements for action in statement["Action"] if action.startswith("dynamodb:")}
-    assert "dynamodb:UpdateItem" not in actions and "dynamodb:DeleteItem" not in actions
-    assert {"dynamodb:PutItem", "dynamodb:Query"} <= actions
+    # 감사 테이블에 대한 권한만 본다 (승인 테이블에는 UpdateItem이 있다)
+    audit = [s for s in statements if "AuditTable" in json.dumps(s.get("Resource"), default=str)]
+    actions = {action for statement in audit for action in statement["Action"] if action.startswith("dynamodb:")}
+    assert actions == {"dynamodb:PutItem", "dynamodb:Query"}
 
 
 def test_admins_group_exists():

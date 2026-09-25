@@ -5,6 +5,7 @@ import requests
 from typing import Dict, Any, List, Optional
 from mcp_client import MCPClient
 from redaction import Redactor
+from approvals import PREVIEW_META, risk_of
 
 
 # 응답 한 번의 최대 출력 토큰. 사고 과정(thinking)도 이 안에서 쓰므로 사고를 켠 뒤 8192에서 늘렸다
@@ -59,6 +60,8 @@ class AnthropicMCPClient:
         self.redactor = Redactor()
         # 요청마다 llm_service가 넣어 주는 감사 로그 (audit.AuditLog). 진행 상황과 같은 지점에서 기록한다
         self.audit = None
+        # 요청마다 llm_service가 넣어 주는 승인 요청 (approvals.ApprovalRequester). 없으면(Slack 등) 변경 도구를 쓸 수 없다
+        self.approvals = None
 
     def _report(self, event: str, *args) -> None:
         """한 단계를 진행 상황과 감사 로그에 알린다 (기록할 곳이 없으면 아무것도 하지 않는다).
@@ -69,6 +72,42 @@ class AnthropicMCPClient:
             getattr(self.progress, event)(*self.redactor.redact(list(args)))
         if self.audit is not None and hasattr(self.audit, event):
             getattr(self.audit, event)(*args)
+
+    def _tool_risk(self, name: str) -> str:
+        """MCP tools/list가 알려 준 위험도 (mcp/lambda_mcp/risk.py). 모르는 도구는 변경 도구로 본다."""
+        return risk_of(next((tool for tool in self.tools if tool.get("name") == name), None))
+
+    def _request_approval(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+        """변경 도구: 실행하지 않고 승인 요청을 만든다. 모델에 돌려줄 도구 결과(MCP 형식)를 돌려준다.
+
+        1. 승인 요청을 받을 수 없는 경로(Slack 등)면 거절한다.
+        2. MCP에 미리 보기만 받는다 (지금 상태 → 바뀔 상태, 범위 밖 리소스는 여기서 거절된다).
+        3. 승인 요청을 저장하고, 모델에는 '승인 대기 중'을 알린다. 모델은 이것으로 답변을 마무리한다.
+        """
+        def error(text: str) -> Dict[str, Any]:
+            return {"isError": True, "content": [{"type": "text", "text": text}]}
+
+        if self.approvals is None:
+            return error("이 경로(Slack 등)에서는 AWS를 바꾸는 작업을 요청할 수 없습니다. "
+                         "웹 화면에서 요청하면 사용자가 승인한 뒤 실행됩니다.")
+        # 모델은 가명(********9012 등)만 안다. 승인 요청에는 실제로 실행될 값을 저장한다
+        args = self.redactor.restore(tool_input)
+        preview_result = self.mcp_client.call_tool(tool_name, args, meta={PREVIEW_META: True})
+        if isinstance(preview_result, dict) and preview_result.get("isError"):
+            return preview_result  # 범위 밖 리소스·잘못된 값: 모델이 읽고 사용자에게 설명한다
+        try:
+            preview = json.loads(self._tool_error_text(preview_result))
+        except ValueError:
+            preview = {}
+        action = self.approvals.request(tool_name, args, preview)
+        return {"content": [{"type": "text", "text": json.dumps({
+            "status": "approval_required",
+            "actionId": action["actionId"],
+            "summary": action.get("summary"),
+            "message": ("아직 실행하지 않았습니다. 사용자가 화면의 승인 요청에서 승인해야 실행됩니다 (10분 안에). "
+                        "무엇이 바뀌는지와 승인이 필요하다는 것을 사용자에게 알리고 답변을 마치세요. "
+                        "같은 작업을 다시 요청하지 마세요."),
+        }, ensure_ascii=False)}]}
 
     def _redact_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """이전 대화의 메시지 하나를 가린 사본. 사고 블록은 서명과 함께 받은 그대로 보내야 하므로 건드리지 않는다
@@ -819,11 +858,15 @@ class AnthropicMCPClient:
                             "timestamp": time.time()
                         })
 
-                        # MCP 도구 호출. 모델은 가명(********9012 등)만 알기 때문에 도구에는 원래 값으로 되돌려 넘긴다
-                        result = self.mcp_client.call_tool(
-                            tool_name,
-                            self.redactor.restore(tool_input)
-                        )
+                        # MCP 도구 호출. 모델은 가명(********9012 등)만 알기 때문에 도구에는 원래 값으로 되돌려 넘긴다.
+                        # AWS를 바꾸는 도구는 실행하지 않고 승인 요청을 만든다 (approvals.py)
+                        if self._tool_risk(tool_name) == "write":
+                            result = self._request_approval(tool_name, tool_input)
+                        else:
+                            result = self.mcp_client.call_tool(
+                                tool_name,
+                                self.redactor.restore(tool_input)
+                            )
 
                         print(f"도구 결과: {self.redactor.text(json.dumps(result, ensure_ascii=False))[:200]}...")
                         # MCP 도구는 실패를 예외 대신 결과의 isError로 알리기도 한다

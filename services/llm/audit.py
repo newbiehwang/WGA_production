@@ -8,6 +8,7 @@
 기록 단위
 - 도구 호출 한 번 = 항목 하나 (kind "tool"): 도구, 입력, 성공·실패, 오류, 걸린 시간, 결과 크기
 - 질문 하나 = 항목 하나 (kind "request"): 질문, 모델, 성공·실패, 도구 호출 수, 가린 값의 수, 걸린 시간
+- 변경 작업의 사건 하나 = 항목 하나 (kind "action"): 요청·승인·거절·실행·실패, 작업 ID, 도구, 인자, 결정한 사람
 두 종류 모두 요청자(sub, 이메일, 웹·Slack), 질문 ID(requestId), 대화 ID(sessionId)를 함께 남긴다.
 
 가리기 (redaction.py)
@@ -17,8 +18,8 @@
 
 추가만 한다: 이미 있는 항목을 덮어쓰지 않고(조건부 쓰기), LLM Lambda에는 수정·삭제 권한을 주지 않는다.
 
-기록에 실패해도 답변은 계속 만든다 (지금 도구는 모두 조회용이다).
-변경 도구를 넣을 때는(승인 흐름) 기록하지 못하면 실행하지 않도록 바꾼다.
+기록에 실패해도 답변은 계속 만든다 (조회 도구). 변경 작업의 사건(action_event)은 기록하지 못하면 예외를 올려
+승인·실행을 멈춘다 (기록 없이 AWS가 바뀌지 않게, approvals.py).
 """
 import base64
 import json
@@ -146,8 +147,26 @@ class AuditLog:
             record["error"] = _clip(self._redactor.secrets_only(str(error)), ERROR_LIMIT)
         self._write(self._started, f"request#{self._common['requestId']}", record)
 
+    # ---------------------------------------------------------------- 변경 작업 (approvals.py, llm_service)
+    def action_event(self, event: str, action: Dict[str, Any], decided_by: Optional[str] = None,
+                     result: Optional[str] = None) -> None:
+        """변경 작업의 사건 (requested · approved · denied · executed · failed). 저장하지 못하면 예외를 올린다."""
+        record = {
+            "kind": "action",
+            "event": event,
+            "actionId": action.get("actionId"),
+            "tool": action.get("tool"),
+            "input": _clip(self._redactor.secrets_only(action.get("args") or "{}"), INPUT_LIMIT),
+            "summary": action.get("summary"),
+            "status": "error" if event == "failed" else "ok",
+            "decidedBy": decided_by,
+        }
+        if result:
+            record["result"] = _clip(self._redactor.secrets_only(result), ERROR_LIMIT)
+        self._write(_now(), f"action#{action.get('actionId')}#{event}", record, strict=True)
+
     # ---------------------------------------------------------------- 저장
-    def _write(self, moment: datetime, suffix: str, record: Dict[str, Any]) -> None:
+    def _write(self, moment: datetime, suffix: str, record: Dict[str, Any], strict: bool = False) -> None:
         at = _iso(moment)
         item = {**self._common, **record,
                 # 정렬 키: 시각 + 도구 호출 ID 또는 질문 ID (같은 밀리초에 여러 건이어도 겹치지 않게)
@@ -155,11 +174,15 @@ class AuditLog:
                 "day": at[:10],  # 날짜 인덱스 (관리자가 기간으로 전체 사용자를 조회)
                 "expiresAt": int(time.time()) + AUDIT_TTL_DAYS * 86400}
         item = {key: value for key, value in item.items() if value is not None}
+        if strict and self._table is None:
+            raise RuntimeError("감사 로그 테이블이 설정되지 않아 변경 작업을 기록할 수 없습니다")
         try:
             if self._table is not None:
                 # 추가만: 같은 키가 이미 있으면 덮어쓰지 않고 실패한다
                 self._table.put_item(Item=item, ConditionExpression="attribute_not_exists(userId)")
         except Exception as error:
+            if strict:
+                raise
             print(f"감사 로그 저장 실패 (DynamoDB, 계속 진행): {error}")
         try:
             if self._sink is not None:

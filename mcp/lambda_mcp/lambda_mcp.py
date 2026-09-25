@@ -9,6 +9,8 @@ from .mcp_types import (
     ErrorContent
 )
 from .session import SessionManager
+from .approval import ACTION_ID_META, PREVIEW_META
+from .risk import annotate, needs_approval
 import json
 import logging
 from typing import Optional, Any, Dict, Callable, get_type_hints, List, TypeVar, Generic
@@ -50,6 +52,10 @@ class LambdaMCPServer:
         self.tool_implementations: Dict[str, Callable] = {}
         # 다른 곳에서 가져온 도구 (AWS 공식 MCP 서버, official.OfficialTools). 없으면 직접 만든 도구만 쓴다
         self.external = None
+        # 변경 도구의 미리 보기 (도구 이름 → 함수). 실행하지 않고 지금 상태와 바뀔 내용을 돌려준다
+        self.previews: Dict[str, Callable] = {}
+        # 변경 도구 실행 직전의 승인 재확인 (approval.ApprovalGate). 없으면 변경 도구는 하나도 실행되지 않는다
+        self.approval_gate = None
         self.session_manager = SessionManager(table_name=session_table)
         # Ensure session table exists
         self.session_manager.create_table(table_name=session_table)
@@ -60,6 +66,14 @@ class LambdaMCPServer:
         tools/list에는 직접 만든 도구와 함께 보이고, tools/call은 이름으로 해당 묶음에 넘긴다.
         """
         self.external = external
+
+    def preview(self, tool_name: str):
+        """변경 도구의 미리 보기 함수를 등록한다. 도구와 같은 인자를 받아 {summary, before, after}를 돌려준다.
+        조회 권한만으로 동작해야 한다 (승인 전에 부른다)."""
+        def decorator(func: Callable):
+            self.previews[tool_name] = func
+            return func
+        return decorator
 
     def get_session(self) -> Optional[SessionData]:
         """Get the current session data wrapper.
@@ -229,6 +243,33 @@ class LambdaMCPServer:
             "headers": headers
         }
 
+    def _call_write_tool(self, tool_name: str, tool_args: Dict, action_id: Optional[str], request_id,
+                         session_id) -> Dict:
+        """승인된 작업이면 한 번만 실행하고 결과를 승인 테이블에 남긴다. 아니면 실행하지 않고 이유를 돌려준다."""
+        def refused(reason: str) -> Dict:
+            logger.warning("변경 도구 %s 실행 거절: %s", tool_name, reason)
+            content = [TextContent(text=f"실행하지 않았습니다: {reason}").model_dump()]
+            return self._create_success_response({"content": content, "isError": True}, request_id, session_id)
+
+        if tool_name not in self.tools:
+            return refused("변경 도구 목록에 없는 도구입니다.")
+        if self.approval_gate is None:
+            return refused("승인 확인 설정이 없어 변경 도구를 실행할 수 없습니다.")
+        ok, reason = self.approval_gate.claim(action_id, tool_name, tool_args)
+        if not ok:
+            return refused(reason)
+        try:
+            result = self.tool_implementations[tool_name](**tool_args)
+        except Exception as e:
+            logger.error(f"Error executing write tool {tool_name}: {e}")
+            self.approval_gate.finish(action_id, False, str(e))
+            content = [TextContent(text=str(e)).model_dump()]
+            return self._create_success_response({"content": content, "isError": True}, request_id, session_id)
+        text = json.dumps(result, ensure_ascii=False, default=str) if isinstance(result, (dict, list)) else str(result)
+        self.approval_gate.finish(action_id, True, text)
+        return self._create_success_response({"content": [TextContent(text=text).model_dump()]}, request_id,
+                                             session_id)
+
     def handle_request(self, event: Dict, context: Any) -> Dict:
         """Handle an incoming Lambda request"""
         request_id = None
@@ -316,12 +357,38 @@ class LambdaMCPServer:
                 tools = list(self.tools.values())
                 if self.external:
                     tools += self.external.schemas()
-                return self._create_success_response({"tools": tools}, request.id, session_id)
+                # 도구마다 위험도(조회·결과물·변경)를 붙인다. LLM Lambda는 이것으로 승인이 필요한지 정한다 (risk.py)
+                return self._create_success_response({"tools": [annotate(tool) for tool in tools]},
+                                                     request.id, session_id)
             
             # Handle tool calls
             if request.method == "tools/call":
                 tool_name = request.params.get("name")
                 tool_args = request.params.get("arguments", {})
+                meta = request.params.get("_meta") or {}
+
+                # 변경 도구의 미리 보기: 실행하지 않고 지금 상태와 바뀔 내용만 돌려준다 (승인 요청 카드에 쓴다)
+                if meta.get(PREVIEW_META):
+                    if tool_name not in self.previews:
+                        return self._create_error_response(-32602, f"Tool '{tool_name}' has no preview",
+                                                           request.id, session_id=session_id)
+                    try:
+                        preview = self.previews[tool_name](**tool_args)
+                        content = [TextContent(text=json.dumps(preview, ensure_ascii=False)).model_dump()]
+                        return self._create_success_response({"content": content}, request.id, session_id)
+                    except Exception as e:  # 잘못된 인자(범위 밖 리소스 등)는 모델이 읽도록 결과로 돌려준다
+                        content = [TextContent(text=str(e)).model_dump()]
+                        return self._create_success_response({"content": content, "isError": True},
+                                                             request.id, session_id)
+
+                if tool_name not in self.tools and not (self.external and self.external.has(tool_name)):
+                    return self._create_error_response(-32601, f"Tool '{tool_name}' not found", request.id,
+                                                       session_id=session_id)
+
+                # 변경 도구(위험도 목록에 없는 공식 도구 포함): 승인 테이블을 직접 다시 확인한 뒤에만 실행한다 (approval.py)
+                if needs_approval(tool_name):
+                    return self._call_write_tool(tool_name, tool_args, meta.get(ACTION_ID_META),
+                                                 request.id, session_id)
                 
                 # 공식 MCP 서버 도구: 결과(content)와 오류 여부(isError)를 MCP 형식 그대로 돌려준다.
                 # 도구 안의 오류(권한 없음 등)는 JSON-RPC 오류가 아니라 isError 결과다 (MCP 규약). 모델이 읽고 다음 수를 정한다

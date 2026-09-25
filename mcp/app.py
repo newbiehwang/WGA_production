@@ -9,11 +9,18 @@
    - CloudWatch 대시보드 목록·요약 (공식 CloudWatch 서버에 대시보드 도구가 없다)
    - 아키텍처 다이어그램 (공식 diagram 서버는 PyPI에서 폐기되었다. 폐기 전 공식 서버를 옮겨 온 코드)
    - 차트 (AntV 차트 서비스, AWS와 무관)
+   - 변경 도구 2개: 로그 보존 기간, 알람 알림 켜기·끄기 (이 환경의 WGA 리소스만, 사람이 승인해야 실행된다)
+
+변경 도구의 통제 (lambda_mcp/risk.py, lambda_mcp/approval.py)
+- tools/list가 도구마다 위험도를 붙인다. LLM Lambda는 변경 도구를 바로 실행하지 않고 승인 요청을 만든다.
+- 사용자가 승인하면 LLM Lambda가 작업 ID를 붙여 부르고, 이 서버가 승인 테이블을 직접 다시 확인한 뒤 한 번만 실행한다.
+- 도구 안에서도 이름으로 이 환경의 WGA 리소스인지 확인하고, IAM도 같은 범위(wga-*)로만 허용한다.
 """
 import os
 import json
 import boto3
 from typing import Dict, Any
+from lambda_mcp.approval import ApprovalGate
 from lambda_mcp.lambda_mcp import LambdaMCPServer
 from lambda_mcp.official import OfficialTools
 from lambda_mcp.diagram_utils import (
@@ -30,11 +37,17 @@ session_table = os.environ.get('MCP_SESSION_TABLE', f'wga-mcp-sessions-{os.envir
 aws_region = os.environ.get("AWS_REGION", "ap-northeast-2")
 
 cloudwatch_client = boto3.client('cloudwatch', region_name=aws_region)
+logs_client = boto3.client('logs', region_name=aws_region)
+environment = os.environ.get("ENV", "dev")
 
 # Initialize the MCP server
 mcp_server = LambdaMCPServer(name="cloudguard", version="1.0.0", session_table=session_table)
 # 공식 서버는 여기서 불러오지 않고 도구 목록이 처음 필요할 때 불러온다 (콜드 스타트, lambda_mcp/official.py)
 mcp_server.attach(OfficialTools.default())
+# 변경 도구 실행 직전의 승인 재확인. 테이블 이름이 없으면(로컬 등) 변경 도구는 실행되지 않는다
+_pending_table_name = os.environ.get("PENDING_ACTIONS_TABLE")
+if _pending_table_name:
+    mcp_server.approval_gate = ApprovalGate(boto3.resource("dynamodb", region_name=aws_region).Table(_pending_table_name))
 
 
 @mcp_server.tool()
@@ -103,6 +116,111 @@ def get_dashboard_summary(dashboard_name: str) -> Dict[str, Any]:
 
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
+
+
+# ---------------------------------------------------------------- 변경 도구 (승인 필요)
+# 범위: 이 환경(ENV)의 WGA 리소스만. 이름 규칙은 CloudFormation과 같다
+#   Lambda 로그 그룹 /aws/lambda/wga-<서비스>-<env>, 알람 wga-<env>-<이름>
+# 오류는 dict로 돌려주지 않고 예외로 올린다 (서버가 실패로 기록하고 승인 테이블에 failed를 남긴다)
+
+# CloudWatch Logs가 받는 보존 기간(일)
+RETENTION_DAYS = [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922,
+                  3288, 3653]
+
+
+def _check_log_group(log_group_name: str) -> None:
+    if not (log_group_name.startswith("/aws/lambda/wga-") and log_group_name.endswith(f"-{environment}")):
+        raise ValueError(f"이 환경의 WGA Lambda 로그 그룹(/aws/lambda/wga-*-{environment})만 바꿀 수 있습니다: "
+                         f"{log_group_name}")
+
+
+def _current_retention(log_group_name: str):
+    for page in logs_client.get_paginator('describe_log_groups').paginate(logGroupNamePrefix=log_group_name):
+        for group in page.get('logGroups', []):
+            if group.get('logGroupName') == log_group_name:
+                return group.get('retentionInDays')  # 없으면 영구 보관
+    raise ValueError(f"로그 그룹이 없습니다: {log_group_name}")
+
+
+def _retention_text(days) -> str:
+    return "영구 보관" if days is None else f"{days}일"
+
+
+@mcp_server.tool()
+def set_log_retention(log_group_name: str, retention_days: int) -> Dict[str, Any]:
+    """
+    Changes the retention period of a WGA Lambda log group in this environment. This modifies AWS resources, so it
+    runs only after the user approves it; calling it creates an approval request instead of running immediately.
+
+    Args:
+        log_group_name: Log group name, e.g. /aws/lambda/wga-llm-dev (only /aws/lambda/wga-*-<env> is allowed).
+        retention_days: New retention in days. One of 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653.
+
+    Returns:
+        The log group with the retention before and after the change.
+    """
+    preview = preview_log_retention(log_group_name, retention_days)
+    logs_client.put_retention_policy(logGroupName=log_group_name, retentionInDays=retention_days)
+    return {"status": "success", **preview}
+
+
+@mcp_server.preview("setLogRetention")
+def preview_log_retention(log_group_name: str, retention_days: int) -> Dict[str, Any]:
+    _check_log_group(log_group_name)
+    if retention_days not in RETENTION_DAYS:
+        raise ValueError(f"보존 기간은 {RETENTION_DAYS} 중 하나여야 합니다: {retention_days}")
+    before = _current_retention(log_group_name)
+    return {"target": log_group_name, "before": _retention_text(before), "after": _retention_text(retention_days),
+            "summary": f"{log_group_name} 로그 보존 기간 {_retention_text(before)} → {_retention_text(retention_days)}"
+                       + (" (지난 로그 일부가 지워질 수 있습니다)" if before is None or retention_days < before else "")}
+
+
+def _check_alarm(alarm_name: str) -> None:
+    if not alarm_name.startswith(f"wga-{environment}-"):
+        raise ValueError(f"이 환경의 WGA 알람(wga-{environment}-*)만 바꿀 수 있습니다: {alarm_name}")
+
+
+def _alarm_actions_enabled(alarm_name: str) -> bool:
+    alarms = cloudwatch_client.describe_alarms(AlarmNames=[alarm_name])
+    found = alarms.get('MetricAlarms', []) + alarms.get('CompositeAlarms', [])
+    if not found:
+        raise ValueError(f"알람이 없습니다: {alarm_name}")
+    return bool(found[0].get('ActionsEnabled'))
+
+
+def _actions_text(enabled: bool) -> str:
+    return "알림 켜짐" if enabled else "알림 꺼짐"
+
+
+@mcp_server.tool()
+def set_alarm_actions(alarm_name: str, enabled: bool) -> Dict[str, Any]:
+    """
+    Turns notifications (alarm actions) of a WGA CloudWatch alarm in this environment on or off, e.g. to silence an
+    alarm during maintenance. This modifies AWS resources, so it runs only after the user approves it; calling it
+    creates an approval request instead of running immediately.
+
+    Args:
+        alarm_name: Alarm name (only wga-<env>-* is allowed).
+        enabled: true to turn notifications on, false to turn them off.
+
+    Returns:
+        The alarm with the notification state before and after the change.
+    """
+    preview = preview_alarm_actions(alarm_name, enabled)
+    if enabled:
+        cloudwatch_client.enable_alarm_actions(AlarmNames=[alarm_name])
+    else:
+        cloudwatch_client.disable_alarm_actions(AlarmNames=[alarm_name])
+    return {"status": "success", **preview}
+
+
+@mcp_server.preview("setAlarmActions")
+def preview_alarm_actions(alarm_name: str, enabled: bool) -> Dict[str, Any]:
+    _check_alarm(alarm_name)
+    before = _alarm_actions_enabled(alarm_name)
+    return {"target": alarm_name, "before": _actions_text(before), "after": _actions_text(enabled),
+            "summary": f"{alarm_name} {_actions_text(before)} → {_actions_text(enabled)}"
+                       + (" (알람이 울려도 알림이 가지 않습니다)" if not enabled else "")}
 
 
 @mcp_server.tool()
