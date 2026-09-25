@@ -21,7 +21,7 @@
    - 차트 (AntV 차트 서비스, AWS와 무관)
    - 변경 도구 4개 (사람이 승인해야 실행된다)
      로그 보존 기간, 알람 알림 켜기·끄기: 이 환경의 WGA 리소스만
-     EC2 인스턴스 중지·시작: wga-managed=true 태그가 붙은 인스턴스만 (태그 기반 접근 제어, IAM 조건도 같다)
+     EC2 인스턴스 중지·시작: 이 리전의 모든 인스턴스 (통제는 사람의 승인과 MCP의 승인 재확인이 한다)
      S3 퍼블릭 액세스 차단 켜기: 보안을 강화하는 방향만 (끄는 도구는 없다)
 
 변경 도구의 통제 (lambda_mcp/risk.py, lambda_mcp/approval.py)
@@ -675,29 +675,22 @@ def preview_alarm_actions(alarm_name: str, enabled: bool) -> Dict[str, Any]:
                        + (" (알람이 울려도 알림이 가지 않습니다)" if not enabled else "")}
 
 
-MANAGED_TAG = "wga-managed"  # 이 태그가 "true"인 인스턴스만 AI가 중지·시작을 요청할 수 있다 (IAM 조건도 같은 태그)
 EC2_ACTIONS = {"stop": ("running", "stopped"), "start": ("stopped", "running")}  # 동작 → (필요한 지금 상태, 바뀔 상태)
 
 
-def _managed_instance(instance_id: str) -> Dict[str, Any]:
+def _instance(instance_id: str) -> Dict[str, Any]:
     reservations = ec2_client.describe_instances(InstanceIds=[instance_id]).get('Reservations', [])
     instances = [i for r in reservations for i in r.get('Instances', [])]
     if not instances:
         raise ValueError(f"인스턴스가 없습니다: {instance_id}")
-    instance = instances[0]
-    tags = {t['Key']: t['Value'] for t in instance.get('Tags', [])}
-    if tags.get(MANAGED_TAG) != "true":
-        raise ValueError(f"{MANAGED_TAG}=true 태그가 붙은 인스턴스만 중지·시작할 수 있습니다: {instance_id} "
-                         "(태그는 사람이 콘솔·IaC로 붙인다. 이 서비스는 태그를 바꿀 수 없다)")
-    return instance
+    return instances[0]
 
 
 @mcp_server.tool()
 def set_ec2_instance_state(instance_id: str, action: str) -> Dict[str, Any]:
     """
-    Stops or starts an EC2 instance that is tagged wga-managed=true. This modifies AWS resources, so it runs only after
-    the user approves it; calling it creates an approval request instead of running immediately. Instances without
-    the tag cannot be changed (the IAM policy has the same condition).
+    Stops or starts an EC2 instance in this deployment's region. This modifies AWS resources, so it runs only after
+    the user approves it; calling it creates an approval request instead of running immediately.
 
     Args:
         instance_id: The instance ID, e.g. i-0123456789abcdef0.
@@ -720,7 +713,7 @@ def set_ec2_instance_state(instance_id: str, action: str) -> Dict[str, Any]:
 def preview_ec2_instance_state(instance_id: str, action: str) -> Dict[str, Any]:
     if action not in EC2_ACTIONS:
         raise ValueError(f'action은 "stop" 또는 "start"여야 합니다: {action}')
-    instance = _managed_instance(instance_id)
+    instance = _instance(instance_id)
     current = instance.get('State', {}).get('Name')
     needed, target = EC2_ACTIONS[action]
     if current != needed:

@@ -99,10 +99,7 @@ def test_mcp_role_gets_only_ec2_describe():
     template = yaml.load((ROOT / "cloudformation" / "llm.yaml").read_text(encoding="utf-8"), Loader=Loader)
     statements = template["Resources"]["McpLambdaExecutionRole"]["Properties"]["Policies"][0]["PolicyDocument"][
         "Statement"]
-    # 조건 없이 허용한 EC2 권한은 모두 조회다. 변경(중지·시작, PR 13)은 wga-managed 태그 조건이 붙은 것만 있다
-    unconditioned = {a for s in statements if s["Effect"] == "Allow" and "Condition" not in s
-                     for a in s["Action"] if a.startswith("ec2:")}
-    assert unconditioned and all(a.startswith("ec2:Describe") for a in unconditioned), unconditioned
-    conditioned = [s for s in statements if s["Effect"] == "Allow" and "Condition" in s
-                   and any(a.startswith("ec2:") for a in s["Action"])]
-    assert all("aws:ResourceTag/wga-managed" in json.dumps(s["Condition"]) for s in conditioned)
+    # EC2 권한은 조회뿐이다. 변경은 승인을 거쳐 실행되는 중지·시작 두 가지만 있다 (PR 13)
+    actions = {a for s in statements if s["Effect"] == "Allow" for a in s["Action"] if a.startswith("ec2:")}
+    changes = {a for a in actions if not a.startswith("ec2:Describe")}
+    assert actions and changes == {"ec2:StopInstances", "ec2:StartInstances"}, changes

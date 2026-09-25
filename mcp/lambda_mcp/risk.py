@@ -102,7 +102,7 @@ TOOL_RISK: Dict[str, str] = {
     # 변경 도구 (app.py). 승인된 작업만 실행된다
     "setLogRetention": WRITE,
     "setAlarmActions": WRITE,
-    "setEc2InstanceState": WRITE,  # wga-managed=true 태그가 붙은 인스턴스만 (IAM 조건도 같다)
+    "setEc2InstanceState": WRITE,  # 이 리전의 모든 인스턴스 (사람의 승인과 MCP 재확인으로 통제)
     "enableS3PublicAccessBlock": WRITE,  # 보안을 강화하는 방향만. 끄는 도구는 없다
 }
 
