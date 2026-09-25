@@ -63,26 +63,40 @@ export function isReturningFromLogin(): boolean {
 
 export type LoginResult = { ok: true } | { ok: false; message: string };
 
-// 돌아온 뒤의 결과. Amplify는 configure 직후부터 code를 토큰으로 바꾸므로, 화면(App)이 결과를 들을
-// 준비가 되기 전에 끝날 수도 있다. 그래서 configure 때부터 듣고 결과를 받아 두었다가 나중에 온 쪽에도 전한다
-let loginResult: LoginResult | null = null;
+// 돌아온 뒤의 결과는 한 번만 알린다.
+// Amplify는 configure 직후부터 code를 토큰으로 바꾸므로, 화면(App)이 결과를 들을 준비가 되기 전에 끝날 수도 있다.
+// 그래서 듣는 쪽이 없으면 결과를 받아 두었다가 처음 듣는 쪽에 한 번 넘기고 지운다.
+// 받아 둔 결과를 지우지 않으면, 나중에 다시 듣기 시작하는 쪽(예: 화면을 다시 그리며 구독을 새로 한 App)이
+// 이미 끝난 로그인 결과를 또 받아 홈으로 다시 보내 버린다
+let pendingResult: LoginResult | null = null;
 const loginListeners = new Set<(result: LoginResult) => void>();
+
+function publishLoginResult(result: LoginResult) {
+    if (loginListeners.size === 0) {
+        pendingResult = result;
+        return;
+    }
+    loginListeners.forEach((listener) => listener(result));
+}
 
 function listenLoginResult() {
     Hub.listen('auth', ({ payload }) => {
-        if (payload.event === 'signInWithRedirect') loginResult = { ok: true };
+        if (payload.event === 'signInWithRedirect') publishLoginResult({ ok: true });
         else if (payload.event === 'signInWithRedirect_failure') {
             const error = (payload.data as { error?: { message?: string } } | undefined)?.error;
-            loginResult = { ok: false, message: error?.message || 'Cognito 로그인을 끝내지 못했습니다.' };
-        } else return;
-        loginListeners.forEach((listener) => listener(loginResult!));
+            publishLoginResult({ ok: false, message: error?.message || 'Cognito 로그인을 끝내지 못했습니다.' });
+        }
     });
 }
 
-// 결과를 알려 준다 (이미 나온 결과가 있으면 바로). 반환값은 구독 해제 함수
+// 결과를 알려 준다 (받아 둔 결과가 있으면 바로, 한 번만). 반환값은 구독 해제 함수
 export function onLoginResult(handler: (result: LoginResult) => void) {
-    if (loginResult) handler(loginResult);
     loginListeners.add(handler);
+    if (pendingResult) {
+        const result = pendingResult;
+        pendingResult = null;
+        handler(result);
+    }
     return () => {
         loginListeners.delete(handler);
     };

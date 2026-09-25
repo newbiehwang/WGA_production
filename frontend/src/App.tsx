@@ -1,5 +1,5 @@
 // 앱 틀: 로그인하지 않았으면 로그인 화면, 했으면 위쪽 내비게이션 + 화면(홈 / 대화)
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { setUnauthorizedHandler } from './api/http';
 import { isReturningFromLogin, onLoginResult } from './auth/authClient';
@@ -19,7 +19,12 @@ export default function App() {
     const refresh = useAuthStore((s) => s.refresh);
     const navigate = useNavigate();
     const [loginError, setLoginError] = useState('');
+    // useNavigate가 돌려주는 함수는 주소가 바뀔 때마다 새로 만들어진다 (React Router v6).
+    // 아래 로그인 처리가 navigate에 따라 다시 실행되면 탭을 옮길 때마다 구독을 새로 하므로, 최신 함수를 ref로 들고 쓴다
+    const navigateRef = useRef(navigate);
+    navigateRef.current = navigate;
 
+    // 앱을 열 때 한 번만: 로그인 상태를 읽고, Cognito에서 돌아왔으면 그 결과를 기다린다
     useEffect(() => {
         setUnauthorizedHandler(() => useAuthStore.getState().expire());
 
@@ -31,14 +36,14 @@ export default function App() {
             window.clearTimeout(fallback);
             if (!result.ok) setLoginError(result.message);
             refresh();
-            navigate('/', { replace: true }); // /redirect 주소를 남기지 않는다
+            navigateRef.current('/', { replace: true }); // /redirect 주소를 남기지 않는다
         });
         if (!returning) refresh();
         return () => {
             stop();
             window.clearTimeout(fallback);
         };
-    }, [refresh, navigate]);
+    }, [refresh]); // refresh는 스토어 함수라 바뀌지 않는다
 
     // 로그인하면 모델 목록을 받는다 (/health는 인증 없이 열려 있다)
     useEffect(() => {
