@@ -76,6 +76,8 @@ interface MockEntry {
     "actionId" | "status" | "createdAt" | "expiresAt"
   >;
   actionId?: string; // 승인한 작업의 결과 설명 (/llm1 {actionId})
+  // 도구 검색 (services/llm/tool_search.py): 처음부터 싣지 않는 도구는 모델이 찾아 불러온 뒤 부른다
+  search?: { query: string; found: string[] };
 }
 
 const ANSWERS: MockEntry[] = [
@@ -182,6 +184,7 @@ const APPROVAL_ENTRIES: Record<"retention" | "alarm", MockEntry> = {
       "",
       "아래 승인 요청에서 바뀌는 내용을 확인한 뒤 승인해 주세요. 보존 기간을 줄이면 14일보다 오래된 로그는 지워집니다.",
     ].join("\n"),
+    search: { query: "setLogRetention", found: ["setLogRetention"] },
     tools: [
       {
         tool_name: "setLogRetention",
@@ -204,6 +207,7 @@ const APPROVAL_ENTRIES: Record<"retention" | "alarm", MockEntry> = {
   alarm: {
     answer:
       "점검하는 동안 `wga-dev-api-5xx` 알람의 알림을 끄려면 승인이 필요합니다. 알림을 끄면 알람이 울려도 메일이 가지 않습니다.",
+    search: { query: "setAlarmActions", found: ["setAlarmActions"] },
     tools: [
       {
         tool_name: "setAlarmActions",
@@ -308,6 +312,10 @@ const planRun = (entry: (typeof ANSWERS)[number]): Omit<Run, "started"> => {
   let at = FIRST_THINKING_AT;
   plan.push({ at, step: { type: "thinking", text: entry.thinking[0] } });
   at += STEP_GAP_MS;
+  if (entry.search) {
+    plan.push({ at, step: { type: "search", ...entry.search } });
+    at += STEP_GAP_MS;
+  }
   for (const tool of entry.tools) {
     plan.push({
       at,

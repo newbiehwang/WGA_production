@@ -3,6 +3,8 @@
 //   ▸ ✻ 생각  로그 그룹부터 찾아야 한다…          ← 사고 요약. 첫 줄만 보이고 누르면 펼쳐진다
 //   ● 로그 그룹 조회  /aws/lambda · 5
 //     ⎿ 1.2초                                      ← 도구 결과 (실패면 이유)
+//   ● 도구 찾기  lookup_events
+//     ⎿ CloudTrail 이벤트 조회                     ← 도구 검색: 모델이 필요한 도구를 찾아 불러왔다
 //   ✶ 생각하는 중… (12초)                          ← 답을 기다리는 동안만. 도는 별표와 지금 하는 일·지난 시간
 //
 // 답을 기다리는 동안에는 진행 상황(GET /llm1/progress)으로, 답이 온 뒤에는 답변의 inference.steps로 같은 목록을 그린다.
@@ -77,7 +79,11 @@ function ThinkingStep({ step }: { step: Extract<TraceStep, { kind: 'thinking' }>
 function ToolStepView({ step }: { step: Extract<TraceStep, { kind: 'tool' }> }) {
     // 실패는 색만이 아니라 글자('실패')로도 알린다
     const result =
-        step.status === 'error' ? `실패${step.error ? `: ${step.error}` : ''}` : step.status === 'ok' ? step.seconds : null;
+        step.status === 'error'
+            ? `실패${step.error ? `: ${step.error}` : ''}`
+            : step.status === 'ok'
+              ? (step.result ?? step.seconds)
+              : null;
     return (
         <li className={`trace-step trace-tool is-${step.status}`} title={step.name}>
             <span className="trace-tool-line">

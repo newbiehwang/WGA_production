@@ -122,6 +122,7 @@ def test_anthropic_tools_keep_the_full_input_schema(aws):
     }
     client.tools = [{"name": "get_metric_data", "description": "메트릭 조회", "inputSchema": schema},
                     {"name": "listCloudwatchDashboards", "description": "대시보드 목록", "inputSchema": {}}]
+    client.tool_search = False  # 모든 도구를 싣는 경우 (도구 검색을 켠 경우는 test_tool_search.py)
 
     converted = {tool["name"]: tool for tool in client._convert_tools_format()}
 

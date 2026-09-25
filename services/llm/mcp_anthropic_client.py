@@ -7,6 +7,7 @@ from mcp_client import MCPClient
 from redaction import Redactor
 from approvals import PREVIEW_META, risk_of
 import injection
+import tool_search
 
 
 # 응답 한 번의 최대 출력 토큰. 사고 과정(thinking)도 이 안에서 쓰므로 사고를 켠 뒤 8192에서 늘렸다
@@ -50,10 +51,15 @@ class AnthropicMCPClient:
         self.pending_tasks = {}  # 대기 중인 작업 ID 및 상태 추적
         self.system_prompt = None
         self.debug_log = []  # 디버그 로그 추가 - 사고 과정과 도구 사용 추적
-        # 토큰 사용량 누적 추적
+        # 토큰 사용량 누적 추적. 캐시에서 읽은·캐시에 쓴 입력은 input_tokens와 따로 온다 (도구 검색 전후 비교에 쓴다)
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_cache_read_tokens = 0
+        self.total_cache_write_tokens = 0
+        self.tool_search_count = 0
         self.thinking = thinking
+        # 도구 검색 (tool_search.py). 모델이 지원하지 않아 거절되면 이 클라이언트(모델별로 캐시된다)에서는 끈다
+        self.tool_search = tool_search.enabled_by_env()
         # 요청마다 llm_service가 넣어 주는 진행 상황 기록 (llm_progress.ProgressReporter).
         # 클라이언트는 모델별로 캐시해 여러 요청이 함께 쓰므로 생성자가 아니라 요청마다 바꿔 끼운다
         self.progress = None
@@ -162,13 +168,30 @@ class AnthropicMCPClient:
                 "input_schema": schema,
             })
 
-        # 도구 목록을 프롬프트 캐시에 올린다. 마지막 도구에 표시하면 그 앞까지(도구 전체)가 캐시된다.
-        # AWS 공식 MCP 도구는 설명이 길어 도구 목록만 수만 자이고, 질문 하나에서도 도구를 부를 때마다 다시 보낸다.
-        # 5분 안에 같은 목록을 보내면 캐시에서 읽어 입력 비용이 크게 줄어든다
-        if anthropic_tools:
-            anthropic_tools[-1]["cache_control"] = {"type": "ephemeral"}
+        # 도구 목록을 프롬프트 캐시에 올리고(마지막으로 싣는 도구에 표시하면 그 앞까지 캐시된다),
+        # 도구 검색을 켰으면 자주 쓰는 도구만 처음부터 싣고 나머지는 모델이 찾을 때 싣는다 (tool_search.py).
+        # AWS 공식 MCP 도구는 설명이 길어 도구 목록만 수만 토큰이고, 질문 하나에서도 도구를 부를 때마다 다시 보낸다
+        return tool_search.build(anthropic_tools, self.tool_search)
 
-        return anthropic_tools
+    def _system_prompt(self, system_prompt: Optional[str]) -> Optional[str]:
+        """요청에 넣을 시스템 프롬프트. 도구 검색을 켰으면 찾는 방법을 덧붙인다."""
+        if system_prompt and self.tool_search:
+            return system_prompt + tool_search.SYSTEM_HINT
+        return system_prompt
+
+    def _post(self, payload: Dict[str, Any], system_prompt: Optional[str]):
+        """Messages API 요청. 모델이 도구 검색을 받지 않으면(400) 끄고 모든 도구를 실어 한 번 다시 보낸다.
+        self.tool_search를 끄므로 같은 질문의 다음 반복과 이 모델의 다음 질문도 모든 도구로 보낸다.
+        거절은 첫 요청에서 오므로 대화에 검색 블록이 남아 있지 않다."""
+        response = requests.post(self.api_url, headers=self.api_headers, json=payload)
+        if self.tool_search and tool_search.is_unsupported(response.status_code, response.text):
+            print(f"도구 검색을 쓸 수 없어 모든 도구를 싣고 다시 보냅니다 ({self.model_id}): {response.text[:300]}")
+            self.tool_search = False
+            payload["tools"] = self._convert_tools_format()
+            if system_prompt:
+                payload["system"] = system_prompt
+            response = requests.post(self.api_url, headers=self.api_headers, json=payload)
+        return response
 
     def _is_response_complete(self, message_content: str, tool_uses: List) -> bool:
         """
@@ -465,7 +488,7 @@ class AnthropicMCPClient:
 
             # 시스템 프롬프트가 있는 경우 추가
             if self.system_prompt:
-                payload["system"] = self.system_prompt
+                payload["system"] = self._system_prompt(self.system_prompt)
 
             # API 요청 전송
             response = requests.post(
@@ -567,7 +590,7 @@ class AnthropicMCPClient:
 
             # 시스템 프롬프트가 있는 경우 추가
             if self.system_prompt:
-                payload["system"] = self.system_prompt
+                payload["system"] = self._system_prompt(self.system_prompt)
 
             # API 요청 전송
             response = requests.post(
@@ -667,6 +690,9 @@ class AnthropicMCPClient:
         # 토큰 사용량 초기화
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_cache_read_tokens = 0
+        self.total_cache_write_tokens = 0
+        self.tool_search_count = 0
 
         # 디버그 로그에 사용자 입력 기록
         self.debug_log.append({
@@ -721,11 +747,12 @@ class AnthropicMCPClient:
                 "timestamp": time.time()
             })
 
-            # API 요청 페이로드 구성 - max_tokens 필드 추가
+            # API 요청 페이로드 구성 - max_tokens 필드 추가.
+            # 대화에도 캐시 표시를 둔다: 다음 반복에서 앞 대화(도구 결과, 검색으로 찾은 도구 정의)를 캐시로 읽는다
             payload = {
                 "model": self.model_id,
                 "max_tokens": MAX_TOKENS,
-                "messages": self.messages
+                "messages": tool_search.with_cache_breakpoint(self.messages)
             }
             # 사고 과정: 화면에 보여 주려면 사고 요약을 받아야 한다 (display: summarized)
             if self.thinking:
@@ -736,24 +763,21 @@ class AnthropicMCPClient:
             else:
                 payload["tool_choice"] = {"type": "auto"}
 
-            # 도구가 있는 경우 추가
+            # 도구가 있는 경우 추가 (도구 검색이 도중에 꺼졌을 수 있어 반복마다 다시 만든다)
+            anthropic_tools = self._convert_tools_format()
             if anthropic_tools:
                 payload["tools"] = anthropic_tools
 
             # 시스템 프롬프트가 있는 경우 추가
             if system_prompt:
-                payload["system"] = system_prompt
+                payload["system"] = self._system_prompt(system_prompt)
 
             # 디버깅을 위한 로깅 추가
             print(f"API 요청 페이로드: {json.dumps(payload, indent=2, ensure_ascii=False)[:500]}...")
 
             # API 요청 전송 (응답을 기다리는 동안 화면에는 '생각하는 중')
             self._report("thinking_started")
-            response = requests.post(
-                self.api_url,
-                headers=self.api_headers,
-                json=payload
-            )
+            response = self._post(payload, system_prompt)
 
             # 디버깅을 위한 응답 로깅
             print(f"API 응답 상태 코드: {response.status_code}")
@@ -790,8 +814,12 @@ class AnthropicMCPClient:
             output_tokens = usage.get("output_tokens", 0)
             self.total_input_tokens += input_tokens
             self.total_output_tokens += output_tokens
+            self.total_cache_read_tokens += usage.get("cache_read_input_tokens") or 0
+            self.total_cache_write_tokens += usage.get("cache_creation_input_tokens") or 0
 
-            print(f"이번 반복 토큰 사용량: 입력={input_tokens}, 출력={output_tokens}")
+            print(f"이번 반복 토큰 사용량: 입력={input_tokens}, 출력={output_tokens}, "
+                  f"캐시 읽기={usage.get('cache_read_input_tokens') or 0}, "
+                  f"캐시 쓰기={usage.get('cache_creation_input_tokens') or 0}")
             print(f"누적 토큰 사용량: 입력={self.total_input_tokens}, 출력={self.total_output_tokens}")
 
             # 응답 콘텐츠에서 텍스트와 도구 사용 분리. 사고 요약은 진행 상황으로 보낸다
@@ -802,6 +830,10 @@ class AnthropicMCPClient:
                     tool_uses.append(item)
                 elif item.get("type") == "thinking":
                     self._report("thought", item.get("thinking", ""))
+            # 도구 검색(서버에서 돈다)은 실행할 것이 없고, 무엇을 찾았는지만 화면에 알린다
+            for search in tool_search.searches(content):
+                self.tool_search_count += 1
+                self._report("tool_search", search["query"], search["found"], search.get("error"))
 
             # 응답 저장
             print(f"응답 텍스트: {message_content[:100]}...")
@@ -824,11 +856,16 @@ class AnthropicMCPClient:
             # 응답을 받은 그대로(사고·글·도구 호출 블록 모두) 한 assistant 메시지로 이어 붙인다.
             # 사고 과정을 켜고 도구를 쓰면, 다음 요청에 사고 블록을 고치지 않고 그대로 돌려보내야 한다
             # (예전처럼 글과 도구 호출을 따로 두 메시지로 나누면 사고 블록이 빠진다)
+            # 도구 검색 블록(server_tool_use, tool_search_tool_result)도 그대로 돌려보내야 찾은 도구가 이어진다
             if content:
                 self.messages.append({
                     "role": "assistant",
                     "content": content
                 })
+
+            # 서버 도구(도구 검색)가 길어져 응답이 중간에 멈췄다: 받은 그대로 다시 보내면 이어서 한다
+            if response_json.get("stop_reason") == "pause_turn" and not tool_uses:
+                continue
 
             # 도구 사용 요청이 있는 경우
             if tool_uses:
@@ -1062,6 +1099,7 @@ class AnthropicMCPClient:
             "content": final_text,
             "input_tokens": self.total_input_tokens,
             "output_tokens": self.total_output_tokens,
+            **self._usage_extra(),
             "timestamp": time.time()
         })
 
@@ -1128,6 +1166,7 @@ class AnthropicMCPClient:
             "content": final_text,
             "input_tokens": self.total_input_tokens,
             "output_tokens": self.total_output_tokens,
+            **self._usage_extra(),
             "timestamp": time.time()
         })
 
@@ -1140,6 +1179,14 @@ class AnthropicMCPClient:
                     break
 
         return final_text
+
+    def _usage_extra(self) -> Dict[str, int]:
+        """토큰 사용량 중 입력·출력 밖의 것: 캐시에서 읽은·캐시에 쓴 입력과 도구 검색 횟수 (도구 검색 전후 비교용)."""
+        return {
+            "cache_read_input_tokens": self.total_cache_read_tokens,
+            "cache_creation_input_tokens": self.total_cache_write_tokens,
+            "tool_searches": self.tool_search_count,
+        }
 
     def get_debug_log(self) -> List[Dict[str, Any]]:
         """
