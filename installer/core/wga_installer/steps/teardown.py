@@ -2,9 +2,13 @@
 
 안전장치
 - prod는 --allow-prod 없이는 거부한다.
-- 먼저 지울 대상을 모두 찾아 보여 주고(읽기 전용), 환경 이름을 직접 입력해야 진행한다.
-- 단계마다 지울 명령 목록을 보여 주고 다시 승인받는다. --yes는 적용하지 않는다(allow_assume_yes=False).
-- 한 단계가 실패하거나 거절되면 거기서 멈춘다. 다시 실행하면 남은 것만 찾아 이어서 지운다.
+- 먼저 지울 대상을 모두 찾아 보여 주고(읽기 전용), 확인은 한 번만 받는다: 환경 이름을 직접 입력해야 진행한다.
+  y/N 대신 이름을 입력하게 하는 이유: 습관적으로 y를 눌러 다른 환경을 지우는 일을 막는다.
+  --yes로는 이 확인을 건너뛸 수 없다 (입력이 없으면 아무것도 지우지 않는다).
+- 확인한 뒤에는 단계마다 다시 묻지 않고 끝까지 지운다. 대신 지금 무엇을 지우는지 한 줄씩 출력한다.
+  단계마다 묻던 방식은 질문이 7번까지 나와, 중간에 거절하면 절반만 지워진 상태로 남기 쉬웠다.
+  실행할 명령 전체를 미리 보려면 --dry-run으로 실행한다.
+- 한 단계가 실패하면 거기서 멈춘다. 다시 실행하면 남은 것만 찾아 이어서 지운다.
 
 지우는 순서
     1. 저장소 변수 AWS_DEPLOY_ROLE_ARN_<ENV>  정리 도중 main push가 배포를 다시 시작하지 않도록 가장 먼저
@@ -31,7 +35,7 @@ from ..aws import (SECRET_PARAMS, aws_json, env_buckets, error_text, existing_pa
                    mcp_repository, oidc_stack, shared_bucket, stack_failures)
 from ..context import ENVIRONMENTS, Context
 from ..events import CHECK_INFO, CHECK_WARN, STEP_FAILED, STEP_OK, STEP_SKIPPED, Emitter, format_command
-from ..runner import DECLINED, DRY_RUN, EXECUTED, Runner, secret_file
+from ..runner import Runner, secret_file
 from .oidc import PROVIDER_LOGICAL_ID
 
 STEP = "teardown"
@@ -75,8 +79,10 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
         emitter.step_finished(STEP, STEP_OK, f"{ctx.env} 환경에 지울 것이 없습니다")
         return 0
 
+    # 유일한 확인. dry-run은 아무것도 지우지 않으므로 묻지 않는다
     if not runner.dry_run:
-        typed = runner.interaction.text("confirm_env", f"되돌릴 수 없습니다. 삭제하려면 환경 이름 '{ctx.env}'을(를) 입력하세요")
+        typed = runner.interaction.text("confirm_env", f"위 대상을 모두 지웁니다. 되돌릴 수 없습니다. "
+                                                       f"계속하려면 환경 이름 '{ctx.env}'을(를) 입력하세요")
         if typed != ctx.env:
             emitter.error(STEP, "환경 이름이 일치하지 않아 아무것도 지우지 않았습니다")
             emitter.step_finished(STEP, STEP_SKIPPED, "취소했습니다 (아무것도 지우지 않음)")
@@ -89,9 +95,6 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
         outcome = action(ctx, runner, emitter, plan)
         if outcome == "failed":
             emitter.step_finished(STEP, STEP_FAILED, f"{name} 단계에서 멈췄습니다. 원인을 해결하고 다시 실행하면 남은 것만 지웁니다")
-            return 1
-        if outcome == "declined":
-            emitter.step_finished(STEP, STEP_SKIPPED, f"{name} 단계에서 중단했습니다 (앞 단계까지만 지움)")
             return 1
 
     emitter.step_finished(STEP, STEP_OK, "정리 확인 끝 (지운 것 없음)" if runner.dry_run
@@ -218,21 +221,31 @@ def _report(emitter: Emitter, id_: str, title: str, status: str, detail: str, hi
     emitter.check(id_, title, status, detail, hint)
 
 
-# ---------------------------------------------------------------- 지우기 (단계별 승인)
+# ---------------------------------------------------------------- 지우기 (시작할 때 한 번 확인받음)
 
-def _approve(runner: Runner, id_: str, reason: str, commands: list[list[str] | str]) -> str:
-    shown = [c if isinstance(c, str) else format_command(c) for c in commands]
-    return runner.approve(id_, reason, shown, allow_assume_yes=False)
+def _announce(runner: Runner, emitter: Emitter, id_: str, reason: str, commands: list[list[str] | str]) -> bool:
+    """한 단계를 알린다. 실제로 지울 차례면 True, dry-run이면 실행할 명령만 보여 주고 False.
+
+    확인은 run()에서 환경 이름으로 이미 받았으므로 여기서 다시 묻지 않는다.
+    - dry-run: 명령 목록을 모두 보여 준다 ([예정]). 지우기 전에 무엇을 실행할지 보는 곳이 여기다.
+    - 실제 실행: 무엇을 지우는지 한 줄만 쓴다. 명령 목록(버킷만 16줄)을 다시 쏟아 내면 진행 상황이 묻힌다.
+      스택·버킷은 뒤이어 하나씩 [1/5] 같은 진행 줄이 나온다.
+    명령 실행은 run_approved를 써서 dry-run이면 절대 실행되지 않게 한다 (이중 안전장치)."""
+    if runner.dry_run:
+        shown = [c if isinstance(c, str) else format_command(c) for c in commands]
+        emitter.dry_run(id_, "\n".join(shown), reason)
+        return False
+    emitter.log(reason, stream="info")
+    return True
 
 
 def _delete_role_variable(ctx: Context, runner: Runner, emitter: Emitter, plan: Plan) -> str:
     if not plan.role_variable:
         return "done"
     cmd = ["gh", "variable", "delete", plan.role_variable, "--repo", plan.repo]
-    outcome = _approve(runner, "delete_role_variable",
-                       f"자동 배포를 끄기 위해 저장소 변수 {plan.role_variable}을(를) 지웁니다", [cmd])
-    if outcome != EXECUTED:
-        return _skipped(outcome)
+    if not _announce(runner, emitter, "delete_role_variable",
+                     f"자동 배포를 끄기 위해 저장소 변수 {plan.role_variable}을(를) 지웁니다", [cmd]):
+        return "done"
     result = runner.run_approved(cmd, timeout=60)
     if not result.ok:
         emitter.error(STEP, "저장소 변수를 지우지 못했습니다", raw=github.error_text(result))
@@ -250,10 +263,9 @@ def _delete_stacks(ctx: Context, runner: Runner, emitter: Emitter, plan: Plan) -
         commands.append(["aws", "cloudformation", "delete-stack", "--stack-name", stack])
     if f"wga-mcp-{ctx.env}" in plan.stacks:
         commands.append(format_command(force_ecr) + "   # MCP 스택이 ECR 이미지 때문에 삭제에 실패할 때만, 이후 재시도")
-    outcome = _approve(runner, "delete_stacks", f"스택 {len(plan.stacks)}개를 순서대로 지웁니다 (중첩 스택 포함, 수십 분 걸릴 수 있음)",
-                       commands)
-    if outcome != EXECUTED:
-        return _skipped(outcome)
+    if not _announce(runner, emitter, "delete_stacks",
+                     f"스택 {len(plan.stacks)}개를 순서대로 지웁니다 (중첩 스택 포함, 수십 분 걸릴 수 있음)", commands):
+        return "done"
 
     for index, stack in enumerate(plan.stacks, 1):
         emitter.progress(STEP, f"{index}/{len(plan.stacks)}", f"스택 삭제: {stack}")
@@ -297,9 +309,8 @@ def _delete_leftover_repository(ctx: Context, runner: Runner, emitter: Emitter, 
         if not result.ok:
             return "done"
     cmd = ["aws", "ecr", "delete-repository", "--repository-name", repo_name, "--force"]
-    outcome = _approve(runner, "delete_ecr", f"남아 있는 ECR 저장소 {repo_name}을(를) 이미지와 함께 지웁니다", [cmd])
-    if outcome != EXECUTED:
-        return _skipped(outcome)
+    if not _announce(runner, emitter, "delete_ecr", f"남아 있는 ECR 저장소 {repo_name}을(를) 이미지와 함께 지웁니다", [cmd]):
+        return "done"
     result = runner.run_approved(cmd, timeout=120)
     if not result.ok:
         emitter.error(STEP, "ECR 저장소를 지우지 못했습니다", raw=error_text(result))
@@ -314,10 +325,9 @@ def _delete_buckets(ctx: Context, runner: Runner, emitter: Emitter, plan: Plan) 
     for bucket in plan.buckets:
         commands.append(f"aws s3api delete-objects --bucket {bucket} --delete file://<목록>   # 모든 버전·삭제 마커, 1000개씩 반복")
         commands.append(["aws", "s3api", "delete-bucket", "--bucket", bucket])
-    outcome = _approve(runner, "delete_buckets", f"버킷 {len(plan.buckets)}개를 비우고 지웁니다 (저장된 파일이 모두 사라집니다)",
-                       commands)
-    if outcome != EXECUTED:
-        return _skipped(outcome)
+    if not _announce(runner, emitter, "delete_buckets",
+                     f"버킷 {len(plan.buckets)}개를 비우고 지웁니다 (저장된 파일이 모두 사라집니다)", commands):
+        return "done"
     for index, bucket in enumerate(plan.buckets, 1):
         emitter.progress(STEP, f"{index}/{len(plan.buckets)}", f"버킷 삭제: {bucket}")
         if not _empty_bucket(runner, emitter, bucket):
@@ -369,10 +379,9 @@ def _delete_log_groups(ctx: Context, runner: Runner, emitter: Emitter, plan: Pla
     if not plan.log_groups:
         return "done"
     commands = [["aws", "logs", "delete-log-group", "--log-group-name", group] for group in plan.log_groups]
-    outcome = _approve(runner, "delete_log_groups", f"로그 그룹 {len(commands)}개를 지웁니다 (로그 기록이 사라집니다)",
-                       commands)
-    if outcome != EXECUTED:
-        return _skipped(outcome)
+    if not _announce(runner, emitter, "delete_log_groups",
+                     f"로그 그룹 {len(commands)}개를 지웁니다 (로그 기록이 사라집니다)", commands):
+        return "done"
     for cmd in commands:
         result = runner.run_approved(cmd, timeout=60)
         if not result.ok and "ResourceNotFound" not in result.stderr:
@@ -385,9 +394,8 @@ def _delete_parameters(ctx: Context, runner: Runner, emitter: Emitter, plan: Pla
     if not plan.parameters:
         return "done"
     cmd = ["aws", "ssm", "delete-parameters", "--names", *plan.parameters, "--output", "json"]
-    outcome = _approve(runner, "delete_parameters", "setup이 등록한 SSM 파라미터를 지웁니다 (API 키 등)", [cmd])
-    if outcome != EXECUTED:
-        return _skipped(outcome)
+    if not _announce(runner, emitter, "delete_parameters", "setup이 등록한 SSM 파라미터를 지웁니다 (API 키 등)", [cmd]):
+        return "done"
     result = runner.run_approved(cmd, timeout=60)
     if not result.ok:
         emitter.error(STEP, "SSM 파라미터를 지우지 못했습니다", raw=error_text(result))
@@ -399,16 +407,10 @@ def _delete_github_environment(ctx: Context, runner: Runner, emitter: Emitter, p
     if not plan.github_environment:
         return "done"
     cmd = ["gh", "api", "-X", "DELETE", f"repos/{plan.repo}/environments/{ctx.env}"]
-    outcome = _approve(runner, "delete_github_environment", f"GitHub Environment {ctx.env}을(를) 지웁니다", [cmd])
-    if outcome != EXECUTED:
-        return _skipped(outcome)
+    if not _announce(runner, emitter, "delete_github_environment", f"GitHub Environment {ctx.env}을(를) 지웁니다", [cmd]):
+        return "done"
     result = runner.run_approved(cmd, timeout=60)
     if not result.ok:
         emitter.error(STEP, "GitHub Environment를 지우지 못했습니다", raw=github.error_text(result))
         return "failed"
     return "done"
-
-
-def _skipped(outcome: str) -> str:
-    """approve 결과를 단계 결과로: dry-run이면 계속 진행(다음 단계도 보여 줌), 거절이면 중단."""
-    return "done" if outcome == DRY_RUN else "declined" if outcome == DECLINED else outcome
