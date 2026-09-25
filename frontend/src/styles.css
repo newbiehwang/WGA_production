@@ -1,0 +1,136 @@
+/* 디자인: AXPI(LG Entrue) 화면의 CSS를 그대로 가져오고 색만 WGA 색(파랑·AWS 남색·차가운 회색)으로 바꿨다.
+   색 바꾸기 규칙은 PR 설명 참고. 레이아웃 공통(위쪽 내비게이션·로그인·프로필 메뉴)은 components/layout/layout.css,
+   패널·목록·확인창은 components/panel.css에 있다. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Public+Sans:wght@500;600;700&display=swap");
+@import "./components/layout/layout.css";
+@import "./components/panel.css";
+
+:root {
+  --color-primary: #007bff;
+  --color-secondary: #3d7cc9;
+  --color-tertiary: #232f3e;
+  --color-neutral: #6c757d;
+  --color-ink: #232f3e;
+  --color-line: #e1e7ef;
+  --color-surface: rgba(255, 255, 255, 0.84);
+  --color-canvas: #f7f9fc;
+  --color-chip: #eef4ff;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --font-headline: "Inter", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --font-body: "Plus Jakarta Sans", "Apple SD Gothic Neo", "Noto Sans KR",
+    sans-serif;
+  --font-label: "Public Sans", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --main-content-top: 132px;
+  --main-content-bottom: 72px;
+  --tab-panel-max-width: 1460px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  background: radial-gradient(
+      80% 80% at 10% -10%,
+      rgba(0, 123, 255, 0.16) 0%,
+      transparent 70%
+    ),
+    radial-gradient(
+      70% 70% at 110% 120%,
+      rgba(35, 47, 62, 0.12) 0%,
+      transparent 70%
+    ),
+    linear-gradient(180deg, #ffffff 0%, var(--color-canvas) 100%);
+}
+
+a {
+  color: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  position: relative;
+  isolation: isolate;
+}
+
+.app-shell.is-view-transitions .plan-panel,
+.app-shell.is-view-transitions .ai-capability-panel,
+.app-shell.is-view-transitions .dev-panel {
+  animation: none;
+}
+
+@keyframes nav-enter {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    transform: translateY(22px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes menu-in {
+  from {
+    transform: translateY(-6px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes model-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes model-sheet-in {
+  from {
+    transform: translateY(14px) scale(0.985);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+

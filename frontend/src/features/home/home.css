@@ -1,0 +1,59 @@
+/* 홈: AXPI 추진 계획서 목록 화면과 같은 패널. 질문 입력칸과 자주 묻는 질문 행만 새로 맞췄다 */
+
+.home-panel .plan-panel-header-stage > div:first-child {
+  min-width: 0;
+}
+
+.home-col-category {
+  width: 132px;
+  flex-shrink: 0;
+}
+
+.home-example-list {
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+/* AXPI 행 이름은 한 줄로 자르지만(…), 질문은 끝까지 읽혀야 하므로 줄을 바꾼다 */
+.home-example-list .home-question {
+  color: var(--color-ink);
+  white-space: normal;
+  overflow: visible;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+.home-row-arrow {
+  font-size: 1.2rem;
+  color: var(--color-neutral);
+}
+
+.plan-table-row:hover .home-row-arrow {
+  color: var(--color-primary);
+}
+
+@media (max-width: 760px) {
+  .home-examples .plan-table-header {
+    display: none;
+  }
+
+  .home-example-list .plan-table-row {
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    padding: 12px 14px;
+  }
+
+  .home-example-list .home-col-category {
+    width: auto;
+  }
+
+  .home-example-list .plan-row-project {
+    flex-basis: 100%;
+    min-width: 0;
+    order: 3;
+  }
+
+  .home-example-list .home-row-arrow {
+    display: none;
+  }
+}

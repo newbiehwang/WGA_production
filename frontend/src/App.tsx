@@ -1,0 +1,63 @@
+// 앱 틀: 로그인하지 않았으면 로그인 화면, 했으면 위쪽 내비게이션 + 화면(홈 / 대화)
+import { useEffect } from 'react';
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { setUnauthorizedHandler } from './api/http';
+import { useAuthStore } from './auth/authStore';
+import { LoginPage } from './components/layout/LoginPage';
+import { LogoutOverlay } from './components/layout/LogoutOverlay';
+import { Navigation } from './components/layout/Navigation';
+import { ChatPage } from './features/chat/ChatPage';
+import { HomePage } from './features/home/HomePage';
+import { useChatStore } from './stores/chatStore';
+import { useModelsStore } from './stores/modelsStore';
+
+export default function App() {
+    const status = useAuthStore((s) => s.status);
+    const user = useAuthStore((s) => s.user);
+    const isLoggingOut = useAuthStore((s) => s.isLoggingOut);
+    const refresh = useAuthStore((s) => s.refresh);
+
+    useEffect(() => {
+        setUnauthorizedHandler(() => useAuthStore.getState().expire());
+        refresh();
+    }, [refresh]);
+
+    // 로그인하면 모델 목록을 받는다 (/health는 인증 없이 열려 있다)
+    useEffect(() => {
+        if (status === 'signedIn') useModelsStore.getState().fetchModels().catch(() => {});
+    }, [status]);
+
+    const handleLogout = async () => {
+        useChatStore.getState().cancelRequest();
+        await useAuthStore.getState().signOut();
+        // 다른 사람이 로그인할 수 있으므로 앞 사람의 대화를 화면에 남기지 않는다
+        useChatStore.setState({ sessions: [], currentSession: null, loaded: false, error: null });
+    };
+
+    if (status === 'loading') {
+        return (
+            <div className="app-loading" role="status">
+                <div className="plan-inline-spinner" />
+            </div>
+        );
+    }
+
+    if (status === 'signedOut' || !user) return <LoginPage onSignedIn={refresh} />;
+
+    return (
+        <div className="app-shell">
+            <Navigation user={user} onLogout={handleLogout} isLoggingOut={isLoggingOut} />
+            <main className="main-content">
+                <div className="main-tab-stage">
+                    <Routes>
+                        <Route path="/" element={<HomePage />} />
+                        <Route path="/chat" element={<ChatPage />} />
+                        {/* 예전 주소(/start-chat, /redirect, /dashboard, /login)는 홈으로 */}
+                        <Route path="*" element={<Navigate to="/" replace />} />
+                    </Routes>
+                </div>
+            </main>
+            {isLoggingOut ? <LogoutOverlay /> : null}
+        </div>
+    );
+}

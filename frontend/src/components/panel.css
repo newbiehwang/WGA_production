@@ -1,0 +1,862 @@
+/* AXPI(LG Entrue) plan.css에서 패널·목록 행·버튼·상태 표시·행 메뉴·확인창 부분만 가져와 색을 바꿨다 */
+
+.plan-panel {
+  width: min(var(--tab-panel-max-width), 100%);
+  height: clamp(
+    360px,
+    calc(100vh - var(--main-content-top) - var(--main-content-bottom)),
+    860px
+  );
+  border-radius: 16px;
+  border: 1px solid var(--color-line);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 14px 34px rgba(35, 47, 62, 0.1);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  animation: rise-in 360ms ease both;
+}
+
+.plan-panel.is-loading > *:not(.plan-loading-overlay) {
+  opacity: 0.6;
+}
+
+.plan-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.plan-panel-header-stage {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.plan-create-button {
+  border: 0;
+  border-radius: 10px;
+  background: var(--color-primary);
+  color: #fff;
+  font-family: var(--font-label);
+  font-size: 0.84rem;
+  font-weight: 700;
+  height: 36px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  box-shadow: 0 8px 16px rgba(0, 123, 255, 0.18);
+  transition: transform 140ms ease, filter 140ms ease;
+}
+
+.plan-create-button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+}
+
+.plan-create-button:focus-visible {
+  outline: 2px solid rgba(0, 123, 255, 0.4);
+  outline-offset: 2px;
+}
+
+.plan-create-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+  box-shadow: none;
+}
+
+.plan-panel-eyebrow {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #3d7cc9;
+}
+
+.plan-panel-title {
+  margin: 6px 0 0;
+  font-family: var(--font-headline);
+  font-size: clamp(1.3rem, 2.6vw, 1.9rem);
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  color: #1f2933;
+}
+
+.plan-panel-subtitle {
+  margin: 8px 0 0;
+  font-family: var(--font-body);
+  font-size: 0.86rem;
+  color: #6b7785;
+}
+
+.plan-panel-subtitle strong {
+  color: #3c4650;
+  font-weight: 700;
+}
+
+.plan-reload-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  transform: none;
+  background: #eef4fb;
+}
+
+.plan-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.plan-table-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px 10px;
+  border-bottom: 1px solid #e8edf3;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: #fff;
+}
+
+.plan-table-header span {
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 600;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.plan-table-sort-button {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.plan-table-sort-button:focus-visible {
+  outline: 2px solid rgba(0, 123, 255, 0.24);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.plan-table-sort-button.is-active {
+  color: #4a5563;
+}
+
+.plan-table-sort-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  font-size: 9px;
+  line-height: 1;
+  color: rgba(108, 117, 125, 0.72);
+  transition: color 140ms ease, opacity 140ms ease;
+}
+
+.plan-table-sort-button.is-active .plan-table-sort-indicator {
+  color: #6c757d;
+  opacity: 1;
+}
+
+.plan-table-sort-button:not(.is-active) .plan-table-sort-indicator {
+  color: rgba(108, 117, 125, 0.38);
+  opacity: 0.42;
+}
+
+.plan-table-col-project { flex: 1; min-width: 200px; }
+
+.plan-table-col-progress { width: 400px; flex-shrink: 0; }
+
+.plan-table-col-status { width: 80px;  flex-shrink: 0; }
+
+.plan-table-header .plan-table-col-status {
+  text-align: center;
+}
+
+.plan-table-header .plan-table-col-status .plan-table-sort-button {
+  justify-content: center;
+}
+
+.plan-table-col-date { width: 180px; flex-shrink: 0; }
+
+.plan-table-col-creator { width: 200px; flex-shrink: 0; }
+
+.plan-table-col-action { width: 36px;  flex-shrink: 0; }
+
+.plan-table-body {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  align-content: start;
+}
+
+.plan-table-row {
+  display: flex;
+  align-items: center;
+  padding: 14px 16px;
+  gap: 12px;
+  background: #fff;
+  border: 1px solid #e1e7ef;
+  border-radius: 12px;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  cursor: default;
+  position: relative;
+  z-index: 0;
+}
+
+.plan-table-row.is-clickable {
+  cursor: pointer;
+}
+
+.plan-table-row.is-clickable:focus-visible {
+  outline: 2px solid rgba(0, 123, 255, 0.32);
+  outline-offset: 2px;
+}
+
+.plan-table-row:hover {
+  border-color: rgba(0, 123, 255, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.08);
+}
+
+.plan-table-row.is-action-open {
+  z-index: 12;
+}
+
+.plan-row-project {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.plan-row-progress {
+  width: 400px;
+  flex-shrink: 0;
+  display: block;
+}
+
+.plan-row-status {
+  width: 80px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.plan-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.plan-status-active {
+  background: rgba(0, 123, 255, 0.1);
+  color: #007bff;
+}
+
+.plan-status-complete {
+  background: rgba(88, 167, 121, 0.15);
+  color: #3f8a61;
+}
+
+.plan-status-pending {
+  background: rgba(120, 120, 120, 0.14);
+  color: #5f6670;
+}
+
+.plan-row-date,
+.plan-row-creator {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: #555;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan-row-date { width: 180px; }
+
+.plan-row-creator { width: 200px; }
+
+.plan-row-action {
+  width: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 3;
+}
+
+.plan-row-action-menu-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.plan-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #6c757d;
+  font-size: 16px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  line-height: 1;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.plan-action-btn:hover {
+  background: rgba(0, 123, 255, 0.08);
+  color: #007bff;
+}
+
+.plan-row-action-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 132px;
+  border-radius: 10px;
+  border: 1px solid #dfe6ee;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 10px 22px rgba(35, 47, 62, 0.16);
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+  animation: menu-in 140ms ease both;
+  z-index: 30;
+}
+
+.plan-row-action-menu-item {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #1f2933;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-family: var(--font-label);
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-align: left;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.plan-row-action-menu-item:hover {
+  background: #f1f6fd;
+}
+
+.plan-row-action-menu-item.is-danger {
+  color: #dc3545;
+}
+
+.plan-row-action-menu-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.plan-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px 0 4px;
+  flex-shrink: 0;
+}
+
+.plan-pagination-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #23364d;
+  font-size: 14px;
+  font-family: var(--font-label);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  line-height: 1;
+}
+
+.plan-pagination-btn:hover:not(:disabled):not(.is-active) {
+  border-color: rgba(0, 123, 255, 0.4);
+  background: rgba(0, 123, 255, 0.05);
+}
+
+.plan-pagination-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.plan-pagination-page.is-active {
+  background: #007bff;
+  border-color: #007bff;
+  color: #fff;
+  font-weight: 600;
+  cursor: default;
+}
+
+.plan-pagination-page.is-active:hover {
+  background: #007bff;
+  border-color: #007bff;
+}
+
+.plan-row-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: rgba(0, 123, 255, 0.1);
+  color: #007bff;
+}
+
+.plan-row-name {
+  font-family: var(--font-headline);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-neutral);
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan-panel-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  gap: 12px;
+}
+
+.plan-panel-body.is-edit-guide-open > *:not(.plan-edit-guide-overlay) {
+  filter: blur(2px);
+  opacity: 0.58;
+  pointer-events: none;
+  user-select: none;
+}
+
+.plan-panel-body.is-edit-guide-open .plan-content-stage {
+  overflow: hidden;
+}
+
+.plan-panel-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+.plan-panel-body::-webkit-scrollbar-thumb {
+  background: rgba(140, 160, 185, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.88);
+  border-radius: 999px;
+}
+
+.plan-panel-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.plan-body-loading {
+  min-height: 100%;
+  border-radius: 12px;
+  background: rgba(250, 252, 255, 0.52);
+  backdrop-filter: blur(1.2px);
+  display: grid;
+  place-items: center;
+  animation: menu-in 140ms ease both;
+}
+
+.plan-panel-loading,
+.plan-panel-empty,
+.plan-panel-error {
+  border: 1px dashed #dde4ec;
+  border-radius: 12px;
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  text-align: center;
+}
+
+.plan-panel-loading p,
+.plan-panel-empty p {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: 0.9rem;
+  color: #6b7785;
+}
+
+.plan-inline-spinner {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 3px solid rgba(0, 123, 255, 0.2);
+  border-top-color: var(--color-primary);
+  animation: spin 0.85s linear infinite;
+  margin-bottom: 10px;
+}
+
+.plan-panel-error-title {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: 0.94rem;
+  font-weight: 700;
+  color: #b02a37;
+}
+
+.plan-panel-error-message {
+  margin: 6px 0 12px;
+  font-family: var(--font-body);
+  font-size: 0.84rem;
+  color: #8f3b44;
+}
+
+.plan-panel-error-inline {
+  margin: 0 0 12px;
+  border: 1px solid #f3c2c7;
+  border-radius: 10px;
+  background: #fdf1f2;
+  padding: 10px 12px;
+}
+
+.plan-panel-error-inline p {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #8f3b44;
+}
+
+.plan-loading-bubble {
+  border: 1px solid #dfe6ee;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 24px rgba(35, 47, 62, 0.14);
+  min-width: 164px;
+  padding: 12px 14px;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+
+.plan-loading-bubble .plan-inline-spinner {
+  margin: 0;
+}
+
+.plan-loading-bubble p {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #1f4f86;
+}
+
+.create-plan-model-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(15, 23, 42, 0.34);
+  backdrop-filter: blur(1.5px);
+  display: grid;
+  place-items: center;
+  animation: model-overlay-in 180ms ease both;
+}
+
+.create-plan-model-overlay.is-closing {
+  pointer-events: none;
+  animation: model-overlay-out 180ms ease both;
+}
+
+.create-plan-model {
+  width: min(1140px, calc(100% - 40px));
+  height: min(940px, calc(100vh - 48px));
+  max-height: calc(100vh - 36px);
+  border-radius: 14px;
+  border: 1px solid rgba(223, 230, 238, 0.95);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 22px 34px rgba(15, 23, 42, 0.26);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  animation: model-sheet-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: width 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.create-plan-model.is-expanded {
+  width: min(1460px, calc(100vw - 28px));
+  height: calc(100vh - 28px);
+  border-radius: 16px;
+}
+
+.create-plan-model.requirement-level-model {
+  width: min(1460px, calc(100vw - 28px));
+  height: calc(100vh - 28px);
+  border-radius: 16px;
+}
+
+.create-plan-model.ai-agent-workflow-modal {
+  width: min(560px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.create-plan-model-overlay.is-closing .create-plan-model {
+  animation: model-sheet-out 180ms ease both;
+}
+
+.create-plan-model-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e6ebf1;
+}
+
+.create-plan-model-header h2 {
+  margin: 0;
+  font-family: var(--font-headline);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1f2933;
+}
+
+.create-plan-model-header button {
+  border: 1px solid #d6dee8;
+  border-radius: 9px;
+  background: #f5f8fc;
+  color: #4a6078;
+  font-family: var(--font-label);
+  font-size: 0.78rem;
+  font-weight: 700;
+  height: 32px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.create-plan-model-header button:hover {
+  background: #eaf2fc;
+}
+
+.create-plan-model-stage.is-create {
+  view-transition-name: none;
+  animation: create-plan-stage-fade-in 240ms ease both;
+}
+
+.create-plan-model.agent-select-modal {
+  width: min(680px, calc(100vw - 28px));
+  height: min(600px, calc(100vh - 60px));
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.create-plan-model.agent-def-dialog {
+  width: min(900px, calc(100vw - 28px));
+}
+
+.confirm-delete-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(3px);
+}
+
+.confirm-delete-card {
+  width: min(400px, 100%);
+  border-radius: 16px;
+  border: 1px solid #dfe6ee;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 20px 44px rgba(35, 47, 62, 0.25);
+  padding: 28px 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.confirm-delete-message {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #1f2933;
+  margin: 0;
+  word-break: keep-all;
+}
+
+.confirm-delete-message strong {
+  color: #b02a37;
+}
+
+.confirm-delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.confirm-delete-cancel-btn {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid #cfd7e0;
+  background: #fff;
+  color: #1f2933;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.confirm-delete-cancel-btn:hover {
+  background: #f1f4f8;
+}
+
+.confirm-delete-btn {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 0;
+  background: #dc3545;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.confirm-delete-btn:hover {
+  background: #b02a37;
+}
+
+.confirm-delete-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.confirm-delete-error {
+  margin: 0;
+  font-size: 13px;
+  color: #b02a37;
+  background: #fdf1f2;
+  border: 1px solid #f3c2c7;
+  border-radius: 8px;
+  padding: 8px 12px;
+  line-height: 1.5;
+}
+
+/* ---------------------------------------------------------------- WGA에서 더한 것 */
+
+/* 이름 바꾸기처럼 되돌릴 수 있는 작업의 확인 버튼 */
+.confirm-delete-btn.is-primary {
+  background: var(--color-primary);
+}
+
+.confirm-delete-btn.is-primary:hover {
+  background: #0062cc;
+}
+
+.dialog-label {
+  display: block;
+  margin-bottom: 8px;
+  font-family: var(--font-label);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #3c4650;
+}
+
+/* AXPI에서 가져온 보조 버튼(다시 불러오기) 모양: 흰 바탕 테두리 버튼 */
+.plan-reload-button {
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: #fff;
+  color: #3c4650;
+  font-family: var(--font-label);
+  font-size: 0.84rem;
+  font-weight: 700;
+  height: 36px;
+  padding: 0 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.plan-reload-button:hover {
+  border-color: rgba(0, 123, 255, 0.3);
+  background: #f1f6fd;
+}
+
+.plan-panel-error-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plan-panel-error-inline button {
+  border: 0;
+  background: transparent;
+  color: #8f3b44;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
