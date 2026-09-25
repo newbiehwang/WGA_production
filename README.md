@@ -185,11 +185,27 @@ aws configure
 git clone https://github.com/WeGoAWS/WGA_production.git
 cd WGA_production
 
-# SSM 파라미터 설정 (필요한 경우)
+# 환경 값: 루트 .env에 Anthropic API 키를 적는다 (.env는 git에 올라가지 않는다)
+cp .env.example .env
+# .env를 열어 ANTHROPIC_API_KEY=sk-ant-... 를 적는다.
+# deploy.sh가 배포할 때 SSM의 /wga/<env>/ANTHROPIC_API_KEY(SecureString)로 올린다
+
+# Slack 봇을 쓰는 경우 SSM 파라미터 설정
 aws ssm put-parameter --name "/wga/${Environment}/SlackbotToken" --value "your-slack-token" --type "SecureString"
 aws ssm put-parameter --name "/wga/${Environment}/SlackSigningSecret" --value "your-slack-signing-secret" --type "SecureString"
+
+# .env 없이 배포하는 경우(GitHub Actions만 쓰는 경우 등) Anthropic API 키를 SSM에 직접 등록
 aws ssm put-parameter --name "/wga/${Environment}/ANTHROPIC_API_KEY" --value "your-anthropic-key" --type "SecureString"
 ```
+
+루트 `.env`(예시는 `.env.example`)에는 두 종류의 값이 들어갑니다.
+
+| 값 | 누가 채우나 | 쓰는 곳 |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | 직접 적는다 | deploy.sh가 SSM(SecureString)으로 올리고 LLM Lambda가 SSM에서 읽는다. 비워 두면 SSM에 있는 값을 그대로 쓴다(GitHub Actions 배포 등) |
+| `VITE_API_DEST`, `AWS_REGION`, `USER_POOL_ID`, `COGNITO_CLIENT_ID`, `COGNITO_DOMAIN` | deploy.sh가 배포할 때 채운다 | 프론트엔드 빌드와 로컬 개발 서버 (`frontend/vite.config.ts`) |
+
+deploy.sh는 키 값을 명령 인자에 넣지 않고 권한 600 임시 파일로 SSM에 올리며, SSM 값과 같으면 올리지 않습니다. 프론트엔드 번들에는 `vite.config.ts`가 고른 값만 들어가고 `ANTHROPIC_API_KEY`는 들어가지 않습니다.
 
 ### 2단계: 통합 배포
 ```bash
@@ -325,7 +341,7 @@ CloudFormation 기반 IaC와 `deploy.sh` 스크립트로 전체 시스템 배포
 
 ### 개발 환경 설정
 ```bash
-# 프론트엔드 개발 서버 (배포된 환경의 로그인·API 사용, deploy.sh가 만든 frontend/.env.local 필요)
+# 프론트엔드 개발 서버 (배포된 환경의 로그인·API 사용, deploy.sh가 값을 채운 루트 .env 필요)
 # 로그인 뒤 돌아올 주소로 http://localhost:5173/redirect만 등록되어 있으므로 포트 5173으로 띄운다
 cd frontend && npm install && npm run dev
 

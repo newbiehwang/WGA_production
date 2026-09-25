@@ -145,6 +145,92 @@ PY
     rm -f "$response"
 }
 
+# ---------------------------------------------------------------- 루트 .env
+# 저장소 루트의 .env 하나에 환경 값을 모은다 (.env.example 참고, git에는 올리지 않는다).
+# - 직접 적는 값: ANTHROPIC_API_KEY. 배포할 때 SSM Parameter Store(SecureString)로 올린다 (Lambda는 SSM에서 읽는다)
+# - deploy.sh가 채우는 값: 프론트엔드 빌드에 들어가는 API 주소·Cognito 설정 (frontend/vite.config.ts가 읽는다)
+# .env는 셸로 source하지 않는다: 값 안의 글자가 명령으로 실행될 수 있고, 비밀 값이 셸 변수로 퍼진다.
+ROOT_ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.env"
+
+# .env의 KEY=VALUE 한 줄을 바꾸거나(없으면 끝에 더한다) 다른 줄은 그대로 둔다 ($1: 파일, $2: 키, $3: 값).
+# 직접 적어 둔 ANTHROPIC_API_KEY와 주석을 지우지 않으려고 파일을 새로 쓰지 않고 줄 단위로 고친다
+dotenv_set() {
+    python3 - "$1" "$2" "$3" <<'PY'
+import sys
+path, key, value = sys.argv[1:4]
+with open(path, encoding="utf-8") as f:
+    lines = f.read().splitlines()
+line = f"{key}={value}"
+for i, current in enumerate(lines):
+    if current.split("=", 1)[0].strip() == key:
+        lines[i] = line
+        break
+else:
+    lines.append(line)
+with open(path, "w", encoding="utf-8") as f:
+    f.write("\n".join(lines) + "\n")
+PY
+}
+
+# .env의 ANTHROPIC_API_KEY를 SSM의 $SSM_PATH_PREFIX/ANTHROPIC_API_KEY(SecureString)로 올린다.
+# - 키 값은 셸 변수·명령 인자에 올리지 않는다(ps로 보인다). python이 .env에서 읽어 권한 600 임시 파일에 요청을 쓰고,
+#   aws CLI는 그 파일을 읽는다 (installer와 같은 방식: --cli-input-json file://)
+# - SSM 값과 같으면 올리지 않는다 (배포마다 새 버전이 쌓이지 않게)
+# - .env가 없거나 키가 비어 있으면(GitHub Actions 배포 등) SSM에 있는 값을 그대로 쓴다
+sync_anthropic_key() {
+    local name="$SSM_PATH_PREFIX/ANTHROPIC_API_KEY"
+    local dir status
+    if [ ! -f "$ROOT_ENV_FILE" ]; then
+        echo "루트 .env가 없어 SSM의 Anthropic API 키를 그대로 씁니다."
+        return 0
+    fi
+    dir=$(mktemp -d)
+    chmod 700 "$dir"
+    # 지금 SSM 값 (없으면 빈 파일). 화면에 찍지 않고 파일로만 받는다
+    aws ssm get-parameter --name "$name" --with-decryption --output json > "$dir/current.json" 2>/dev/null || : > "$dir/current.json"
+    status=0
+    python3 - "$ROOT_ENV_FILE" "$name" "$dir" <<'PY' || status=$?
+import json, os, sys
+env_path, name, work = sys.argv[1:4]
+value = ""
+with open(env_path, encoding="utf-8") as f:
+    for line in f:
+        key, sep, rest = line.strip().partition("=")
+        if sep and key.strip() == "ANTHROPIC_API_KEY":
+            value = rest.strip().strip('"').strip("'")
+if not value:
+    sys.exit(3)  # .env에 키가 없다
+try:
+    with open(os.path.join(work, "current.json"), encoding="utf-8") as f:
+        current = json.load(f)["Parameter"]
+    if current["Value"] == value and current["Type"] == "SecureString":
+        sys.exit(4)  # SSM 값과 같다
+except (ValueError, KeyError):
+    pass  # SSM에 아직 없다
+request = os.path.join(work, "request.json")
+fd = os.open(request, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8") as f:
+    json.dump({"Name": name, "Value": value, "Type": "SecureString", "Overwrite": True}, f)
+PY
+    case $status in
+        0)
+            if aws ssm put-parameter --cli-input-json "file://$dir/request.json" > /dev/null; then
+                echo "✅ .env의 Anthropic API 키를 SSM($name)에 올렸습니다."
+            else
+                rm -rf "$dir"
+                echo "❌ Anthropic API 키를 SSM에 올리지 못했습니다." >&2
+                return 1
+            fi ;;
+        3) echo "루트 .env에 ANTHROPIC_API_KEY가 없어 SSM의 값을 그대로 씁니다." ;;
+        4) echo "Anthropic API 키: SSM 값과 같아 그대로 둡니다." ;;
+        *) rm -rf "$dir"; echo "❌ 루트 .env를 읽지 못했습니다." >&2; return 1 ;;
+    esac
+    rm -rf "$dir"
+}
+
+# Anthropic API 키: .env에 적은 값을 SSM으로 올린다 (Lambda가 SSM에서 읽는다)
+sync_anthropic_key
+
 #################################################
 # 1. CloudFormation 버킷 확인 및 템플릿 업로드
 #################################################
@@ -688,27 +774,21 @@ echo "[INFO] SSM에서 구성 값을 가져옵니다."
 USER_POOL_ID=$(aws ssm get-parameter --name "$SSM_PATH_PREFIX/UserPoolId" --query "Parameter.Value" --output text)
 USER_POOL_CLIENT_ID=$(aws ssm get-parameter --name "$SSM_PATH_PREFIX/UserPoolClientId" --query "Parameter.Value" --output text)
 USER_POOL_DOMAIN=$(aws ssm get-parameter --name "$SSM_PATH_PREFIX/UserPoolDomain" --query "Parameter.Value" --output text)
-IDENTITY_POOL_ID=$(aws ssm get-parameter --name "$SSM_PATH_PREFIX/IdentityPoolId" --query "Parameter.Value" --output text)
-ENV_FILE="frontend/.env.local"
 
-echo "환경 파일 생성 중: $ENV_FILE"
-
-cat <<EOF > $ENV_FILE
-AWS_REGION=$REGION
-API_URL=/api
-API_DEST=$API_URL
-
-VITE_API_URL=/api
-VITE_API_DEST=$API_URL
-
-COGNITO_DOMAIN=$(echo "$USER_POOL_DOMAIN" | sed -E 's#https://([^.]*)\..*#\1#')
-COGNITO_CLIENT_ID=$USER_POOL_CLIENT_ID
-COGNITO_REDIRECT_URI=https://${ENV}.${FRONTEND_URL}/redirect
-COGNITO_IDENTITY_POOL_ID=$IDENTITY_POOL_ID
-USER_POOL_ID=$USER_POOL_ID
-EOF
-
-echo "환경 파일($ENV_FILE)이 업데이트되었습니다."
+# 프론트엔드 빌드에 들어가는 값을 루트 .env에 채운다 (frontend/vite.config.ts가 읽는다).
+# 직접 적어 둔 ANTHROPIC_API_KEY 등 다른 줄은 그대로 둔다. .env가 없으면 .env.example로 만든다
+if [ ! -f "$ROOT_ENV_FILE" ]; then
+    cp "$(dirname "$ROOT_ENV_FILE")/.env.example" "$ROOT_ENV_FILE"
+    chmod 600 "$ROOT_ENV_FILE"
+fi
+echo "환경 파일 업데이트 중: $ROOT_ENV_FILE (프론트엔드 값)"
+dotenv_set "$ROOT_ENV_FILE" VITE_API_DEST "$API_URL"
+dotenv_set "$ROOT_ENV_FILE" AWS_REGION "$REGION"
+dotenv_set "$ROOT_ENV_FILE" USER_POOL_ID "$USER_POOL_ID"
+dotenv_set "$ROOT_ENV_FILE" COGNITO_CLIENT_ID "$USER_POOL_CLIENT_ID"
+# Cognito 도메인은 앞부분만 (https://<앞부분>.auth.<리전>.amazoncognito.com)
+dotenv_set "$ROOT_ENV_FILE" COGNITO_DOMAIN "$(echo "$USER_POOL_DOMAIN" | sed -E 's#https://([^.]*)\..*#\1#')"
+echo "환경 파일($ROOT_ENV_FILE)이 업데이트되었습니다."
 
 #################################################
 # 6. 프론트엔드 빌드 및 배포

@@ -3,10 +3,12 @@
 aws.json
 aws-credentials.json
 
-# 환경 설정 파일
+# 환경 설정 파일 (루트 .env에 Anthropic API 키 등 비밀 값을 둔다)
 .env
 .env.*
 *.env
+# 예제 파일은 올린다 (값 없이 이름과 설명만)
+!.env.example
 env/
 venv/
 ENV/
