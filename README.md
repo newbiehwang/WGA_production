@@ -121,7 +121,7 @@ aws cognito-idp admin-add-user-to-group --user-pool-id <UserPoolId> --username <
 
 ### 9. 변경 작업 승인
 AI가 스스로 AWS를 바꾸지 못하게, 사람이 승인한 변경만 실행합니다 (`services/llm/approvals.py`, `mcp/lambda_mcp/risk.py`·`approval.py`).
-- **변경 도구**: 로그 보존 기간 바꾸기(`setLogRetention`), 알람 알림 켜기·끄기(`setAlarmActions`). 이 환경의 WGA 리소스(`/aws/lambda/wga-*-<env>`, `wga-<env>-*`)만 바꿀 수 있고, IAM도 같은 범위로만 허용합니다. AWS를 바꾸는 권한은 MCP Lambda 역할에만 있습니다.
+- **변경 도구**: 로그 보존 기간 바꾸기(`setLogRetention`), 알람 알림 켜기·끄기(`setAlarmActions`)는 이 환경의 WGA 리소스(`/aws/lambda/wga-*-<env>`, `wga-<env>-*`)만 바꿀 수 있습니다. EC2 인스턴스 중지·시작(`setEc2InstanceState`)은 `wga-managed=true` 태그가 붙은 인스턴스만 됩니다(태그 기반 접근 제어: IAM 조건 `aws:ResourceTag/wga-managed`, 이 역할은 태그를 붙이거나 지울 수 없게 명시적으로 거부). S3 퍼블릭 액세스 차단 켜기(`enableS3PublicAccessBlock`)는 보안을 강화하는 방향만 있고 끄는 도구·권한은 없습니다. IAM도 같은 범위로만 허용하고, AWS를 바꾸는 권한은 MCP Lambda 역할에만 있습니다.
 - **위험도 목록**: MCP 서버가 도구마다 위험도(조회·결과물·변경)를 MCP 표준 `annotations`와 `_meta`로 붙여 내보냅니다. 목록에 없는 도구는 변경 도구로 봅니다(안전하게 실패).
 - **흐름**:
   1. 모델이 변경 도구를 부르면 실행하지 않고, 바뀔 내용만 미리 봅니다(예: "보존 기간 30일 → 14일").

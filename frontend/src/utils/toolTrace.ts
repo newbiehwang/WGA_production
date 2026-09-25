@@ -97,6 +97,8 @@ const LABELS: Record<string, string> = {
     // 변경 도구: 부르면 실행되지 않고 승인 요청이 만들어진다 (답변 아래의 승인 카드)
     set_log_retention: '로그 보존 기간 변경 요청',
     set_alarm_actions: '알람 알림 변경 요청',
+    set_ec2_instance_state: 'EC2 인스턴스 중지·시작 요청',
+    enable_s3_public_access_block: 'S3 퍼블릭 액세스 차단 요청',
 };
 
 // listCloudwatchDashboards → list_cloudwatch_dashboards. 도구 이름·입력 요약은 감사 로그 화면(features/audit)도 쓴다
