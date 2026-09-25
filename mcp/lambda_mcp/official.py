@@ -81,6 +81,14 @@ class OfficialTools:
         """이 서비스가 쓰는 공식 서버: CloudWatch, AWS 문서, Cost Explorer."""
         # 공식 서버는 import할 때 loguru로 로그를 남긴다. Lambda 로그가 넘치지 않게 경고 이상만 남긴다
         os.environ.setdefault("FASTMCP_LOG_LEVEL", "ERROR")
+        # Lambda에서는 /tmp만 쓸 수 있고 패키지가 설치된 곳(site-packages)은 읽기 전용이다.
+        # billing-cost-management 서버는 import하는 순간 로그 파일을 자기 설치 폴더(awslabs/logs)에 만들려고 해서,
+        # 그대로 두면 "Read-only file system"으로 MCP Lambda가 시작하지 못한다. 로그 파일 위치를 /tmp로 옮긴다
+        os.environ.setdefault("FASTMCP_LOG_FILE", "/tmp/billing-cost-management-mcp-server.log")
+        # 같은 서버는 응답이 크면(기본 25KB) 설치 폴더에 SQLite 파일을 만들어 옮겨 두고, 그 표를 SQL 도구로
+        # 다시 읽게 한다. 이 서비스는 SQL 도구를 붙이지 않았으므로 옮기지 말고 응답을 그대로 받는다
+        # (Lambda 응답 한도 6MB보다 작게)
+        os.environ.setdefault("MCP_SQL_THRESHOLD", str(5 * 1024 * 1024))
         from awslabs.aws_documentation_mcp_server.server_aws import mcp as documentation
         from awslabs.billing_cost_management_mcp_server.tools.cost_explorer_tools import cost_explorer_server
         from awslabs.cloudwatch_mcp_server.server import mcp as cloudwatch

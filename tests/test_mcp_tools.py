@@ -170,3 +170,63 @@ def test_inline_refs_resolves_nested_definitions():
     assert "$defs" not in json.dumps(resolved) and "$ref" not in json.dumps(resolved)
     # 자기 자신을 가리키는 참조는 한 번만 풀고 멈춘다
     assert resolved["properties"]["loop"]["properties"]["child"] == {"type": "object"}
+
+
+# ---------------------------------------------------------------- Lambda처럼 설치 폴더가 읽기 전용일 때
+# Lambda 컨테이너에서 쓸 수 있는 곳은 /tmp뿐이다. 공식 서버 중 파일을 설치 폴더에 쓰려는 것이 있으면
+# MCP Lambda가 시작하지 못한다 (billing-cost-management 서버가 import할 때 awslabs/logs 폴더를 만들려다 실패했다).
+# 로컬·CI의 가상 환경은 쓸 수 있어서 위 테스트로는 드러나지 않으므로, 읽기 전용 설치 폴더를 만들어 확인한다.
+
+READ_ONLY_CHECK = r"""
+import json, sys
+sys.path[:0] = [sys.argv[1], sys.argv[2]]  # 읽기 전용 awslabs, mcp 폴더
+from moto import mock_aws
+
+with mock_aws():
+    from lambda_mcp.official import OfficialTools
+    tools = OfficialTools.default()
+    import awslabs.billing_cost_management_mcp_server as billing
+    names = [schema["name"] for schema in tools.schemas()]
+    content, is_error = tools.call("cost-explorer", {
+        "operation": "getCostAndUsage", "start_date": "2026-09-01", "end_date": "2026-09-20",
+        "granularity": "DAILY", "metrics": '["UnblendedCost"]'})
+    print(json.dumps({"billing_file": billing.__file__, "names": names, "is_error": is_error}))
+"""
+
+
+def test_official_servers_start_when_package_dir_is_read_only(tmp_path):
+    import os
+    import stat
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import awslabs.billing_cost_management_mcp_server as billing
+
+    if os.geteuid() == 0:
+        pytest.skip("root는 읽기 전용 폴더에도 쓸 수 있어 확인할 수 없다")
+
+    # 설치된 awslabs 폴더와 같은 모양의 폴더를 만든다: 하위 패키지는 링크로 두고 폴더 자체는 읽기 전용.
+    # 공식 서버는 자기 파일 경로(__file__)를 기준으로 폴더를 찾으므로, 이 폴더 안에 쓰려고 하면 실패한다
+    installed = Path(billing.__file__).resolve().parent.parent
+    read_only = tmp_path / "awslabs"
+    read_only.mkdir()
+    for entry in installed.iterdir():
+        if entry.name.endswith("_mcp_server") or entry.name == "__init__.py":
+            (read_only / entry.name).symlink_to(entry)
+    read_only.chmod(stat.S_IRUSR | stat.S_IXUSR)
+
+    # 설정을 새로 읽도록 새 프로세스에서 import한다 (이 프로세스는 이미 공식 서버를 불러왔다)
+    env = {k: v for k, v in os.environ.items() if k not in ("FASTMCP_LOG_FILE", "MCP_SQL_THRESHOLD")}
+    mcp_dir = Path(__file__).resolve().parent.parent / "mcp"
+    try:
+        done = subprocess.run([sys.executable, "-c", READ_ONLY_CHECK, str(tmp_path), str(mcp_dir)],
+                              env=env, capture_output=True, text=True, timeout=120)
+    finally:
+        read_only.chmod(stat.S_IRWXU)  # pytest가 임시 폴더를 지울 수 있게
+
+    assert done.returncode == 0, done.stderr[-3000:]
+    result = json.loads(done.stdout.strip().splitlines()[-1])
+    assert result["billing_file"].startswith(str(read_only))  # 정말 읽기 전용 폴더에서 불러왔는지
+    assert "cost-explorer" in result["names"] and "describe_log_groups" in result["names"]
+    assert result["is_error"] is False
