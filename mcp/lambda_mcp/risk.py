@@ -43,6 +43,11 @@ TOOL_RISK: Dict[str, str] = {
     "cost-explorer": READ,
     # AWS 공식 CloudTrail MCP 서버 (최근 90일 관리 이벤트 조회만. Lake 도구는 official.py에서 뺐다)
     "lookup_events": READ,
+    # AWS 공식 Pricing MCP 서버 (공개 가격표 조회. 파일을 읽거나 쓰는 도구는 official.py에서 뺐다)
+    "get_pricing_service_codes": READ,
+    "get_pricing_service_attributes": READ,
+    "get_pricing_attribute_values": READ,
+    "get_pricing": READ,
     # 직접 둔 도구 (app.py, 이름은 camelCase로 등록된다)
     "listCloudwatchDashboards": READ,
     "getDashboardSummary": READ,
