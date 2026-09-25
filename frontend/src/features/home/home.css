@@ -1,75 +1,146 @@
-/* 홈: AXPI 추진 계획서 목록 화면과 같은 패널. 질문 입력칸 아래에 내 대화 목록 */
+/* 홈: 흰 카드(AXPI .plan-panel)는 그대로 두고, 안의 구성과 글자 크기·굵기·등장 효과는 FinGate-X 첫 화면
+   (fingate/client/src/styles.css의 .entry-wrap · h1.hero · .standfirst · .prompt · .reveal)을 가져왔다.
+   색은 FinGate-X(갈색·로즈) 대신 WGA 색을 쓴다. */
 
-.home-panel .plan-panel-header {
-  margin-bottom: 12px;
+/* 내용을 카드 가운데보다 조금 위에 둔다. 정가운데면 입력칸 아래로 펼쳐지는 예시 목록이 카드 바닥에 잘린다 */
+.home-hero {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding-top: clamp(2rem, 9vh, 6rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.1rem;
+  text-align: center;
+  word-break: keep-all; /* 한국어 단어 중간에서 줄이 바뀌지 않게 ('어떤 도 / 구를') */
 }
 
-.home-col-date {
-  width: 200px;
-  flex-shrink: 0;
-}
-
-/* 행이 많으면 목록만 스크롤한다 (AXPI 목록은 페이지를 넘기는 방식이라 overflow: hidden이었다) */
-.home-session-list {
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-.home-session-title {
+.home-headline {
+  margin: 0;
+  font-family: var(--font-headline);
+  font-size: clamp(1.75rem, 3.4vw, 2.5rem);
+  font-weight: 300;
+  letter-spacing: -0.03em;
+  line-height: 1.24;
+  text-wrap: balance;
   color: var(--color-ink);
-  letter-spacing: 0;
 }
 
-.home-sessions-state {
-  flex: 1;
-  margin-top: 8px;
+/* 두 줄이 한 박자씩 따로 떠오르므로 줄마다 따로 둔다 */
+.home-headline > span,
+.home-headline > b {
+  display: block;
 }
 
-.home-sessions-state > div {
-  display: grid;
-  justify-items: center;
-}
-
-.home-row-arrow {
-  font-size: 1.2rem;
-  color: var(--color-neutral);
-}
-
-.plan-table-row:hover .home-row-arrow {
+.home-headline b {
+  font-weight: 700;
   color: var(--color-primary);
 }
 
-.home-session-list::-webkit-scrollbar {
-  width: 10px;
+.home-standfirst {
+  margin: 0;
+  max-width: 38rem;
+  font-family: var(--font-body);
+  font-size: 1.0625rem;
+  line-height: 1.62;
+  color: #6b7785;
 }
 
-.home-session-list::-webkit-scrollbar-thumb {
-  background: rgba(140, 160, 185, 0.55);
-  border: 2px solid rgba(255, 255, 255, 0.88);
-  border-radius: 999px;
+.reveal {
+  animation: home-enter 0.52s cubic-bezier(0.22, 0.9, 0.3, 1) backwards;
+}
+
+@keyframes home-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    animation: none;
+  }
+}
+
+/* 큰 입력창 (FinGate-X .prompt): 2줄 입력칸 + 아래 줄(키 안내 · 모델 · 보내기) */
+.home-hero .composer-wrap {
+  width: 100%;
+  margin-top: 1.4rem;
+  text-align: left;
+}
+
+.composer.composer--home {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.85rem;
+  padding: 1.15rem 1.15rem 0.8rem;
+  border-radius: 16px;
+  box-shadow: 0 2px 4px rgba(35, 47, 62, 0.06), 0 16px 40px rgba(35, 47, 62, 0.08);
+}
+
+.composer--home .composer-input {
+  min-height: 3.6rem;
+  padding: 0;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+}
+
+.composer--home .composer-actions {
+  width: 100%;
+}
+
+.composer-hint {
+  margin: 0 auto 0 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-label);
+  font-size: 0.75rem;
+  color: #8a94a0;
+}
+
+.composer-hint kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.6875rem;
+  line-height: 1;
+  padding: 0.22rem 0.4rem;
+  border: 1px solid #d9e0e8;
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  color: #3c4650;
+  background: #fff;
+}
+
+.composer--home.is-suggesting {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.composer-wrap--home .composer-suggestions {
+  border-radius: 0 0 16px 16px;
 }
 
 @media (max-width: 760px) {
-  .home-sessions .plan-table-header {
-    display: none;
+  .home-hero {
+    padding-top: 1.5rem;
+    gap: 0.9rem;
   }
 
-  .home-session-list .plan-table-row {
-    flex-wrap: wrap;
-    gap: 4px 10px;
-    padding: 12px 14px;
+  .home-standfirst {
+    font-size: 0.95rem;
   }
 
-  .home-session-list .plan-row-project {
-    flex-basis: 100%;
-    min-width: 0;
+  .composer.composer--home {
+    padding: 0.9rem 0.9rem 0.7rem;
   }
 
-  .home-session-list .home-col-date {
-    width: auto;
-  }
-
-  .home-session-list .home-row-arrow {
+  /* 좁은 화면: 키 안내는 숨긴다 (휴대폰에는 Tab 키가 없다) */
+  .composer-hint {
     display: none;
   }
 }
