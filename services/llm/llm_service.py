@@ -414,6 +414,10 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
         5-5. S3 (read-only, object contents are never read): listS3Buckets, checkS3BucketSecurity (omit bucket_name
              to audit all buckets, e.g. "any public buckets?"), getS3BucketSize (daily CloudWatch storage metrics),
              listS3Objects (keys, sizes, dates under a prefix).
+        5-6. EC2 (read-only, this deployment's region; user data and console output are never read):
+             listEc2Instances, getEc2CpuRanking ("which instance had the highest CPU in the last 24h?" - one call),
+             getEc2StatusChecks (impaired checks, scheduled events), findEc2Waste (unattached volumes, long-stopped
+             instances, unassociated Elastic IPs).
         6. Visualization: Generate charts/AWS diagrams (only if the user explicitly requests visualization)
         7. Changes (only when the user asks to change something): setLogRetention (WGA Lambda log group retention),
            setAlarmActions (turn WGA alarm notifications on/off). Calling them does NOT change anything yet: it creates

@@ -76,6 +76,11 @@ TOOL_RISK: Dict[str, str] = {
     "checkS3BucketSecurity": READ,
     "getS3BucketSize": READ,
     "listS3Objects": READ,
+    # EC2 조회 (사용자 데이터·콘솔 출력·Windows 암호는 읽지 않는다)
+    "listEc2Instances": READ,
+    "getEc2CpuRanking": READ,
+    "getEc2StatusChecks": READ,
+    "findEc2Waste": READ,
     "getDiagramCodeExamples": READ,
     "listAvailableDiagramIcons": READ,
     "generateArchitectureDiagram": ARTIFACT,  # 다이어그램 버킷에 이미지를 올린다

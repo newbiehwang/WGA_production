@@ -12,6 +12,9 @@
 3. S3 조회 도구 (공식 S3 서버가 없다. S3 Tables 서버는 일반 버킷용이 아니다)
    - 버킷 목록, 버킷 보안 점검, 버킷 크기·객체 수(CloudWatch 지표), 객체 목록(이름·크기·날짜)
    - 객체 내용은 읽지 않는다: 데이터가 계정 밖(Claude)으로 나가지 않게. IAM도 s3:GetObject를 명시적으로 거부한다
+4. EC2 조회 도구 (공식 EC2 서버가 없다)
+   - 인스턴스 목록, CPU 사용률 순위, 상태 검사, 비용 낭비 찾기(연결 안 된 볼륨·오래 멈춘 인스턴스·쓰지 않는 탄력적 IP)
+   - 사용자 데이터·콘솔 출력·Windows 암호는 읽지 않는다 (비밀 값이 흔히 들어 있다). IAM도 명시적으로 거부한다
 2. 이 파일에 직접 둔 도구 (공식 서버가 없거나 폐기된 것)
    - CloudWatch 대시보드 목록·요약 (공식 CloudWatch 서버에 대시보드 도구가 없다)
    - 아키텍처 다이어그램 (공식 diagram 서버는 PyPI에서 폐기되었다. 폐기 전 공식 서버를 옮겨 온 코드)
@@ -24,6 +27,7 @@
 - 도구 안에서도 이름으로 이 환경의 WGA 리소스인지 확인하고, IAM도 같은 범위(wga-*)로만 허용한다.
 """
 import os
+import re
 import json
 import boto3
 from datetime import datetime, timedelta, timezone
@@ -360,6 +364,194 @@ def list_s3_objects(bucket_name: str, prefix: Optional[str] = None, max_keys: Op
                              'storage_class': o.get('StorageClass')} for o in response.get('Contents', [])],
                 'prefixes': [p['Prefix'] for p in response.get('CommonPrefixes', [])],
                 'is_truncated': response.get('IsTruncated', False)}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+# ---------------------------------------------------------------- EC2 조회 (이 Lambda의 리전)
+# 인스턴스·볼륨·탄력적 IP의 설정과 상태, CloudWatch 지표만 본다.
+# 사용자 데이터(user data)·콘솔 출력·Windows 암호는 비밀 값이 흔히 들어 있어 읽지 않는다: 코드에서 부르지 않고
+# IAM에서도 명시적으로 거부한다 (llm.yaml). DescribeInstances 응답에는 사용자 데이터가 들어 있지 않다.
+
+ec2_client = boto3.client('ec2', region_name=aws_region)
+EC2_LIST_LIMIT = 200  # 인스턴스 목록 한 번에 최대
+EC2_METRIC_BATCH = 500  # GetMetricData 한 번에 넣을 수 있는 쿼리 수
+
+
+def _name_of(tags: Optional[List[Dict[str, str]]]) -> Optional[str]:
+    return next((tag['Value'] for tag in tags or [] if tag.get('Key') == 'Name'), None)
+
+
+def _instances(filters: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    found = []
+    for page in ec2_client.get_paginator('describe_instances').paginate(Filters=filters or []):
+        for reservation in page.get('Reservations', []):
+            found += reservation.get('Instances', [])
+    return found
+
+
+# 멈춘 인스턴스의 StateTransitionReason: "User initiated (2026-09-01 10:00:00 GMT)"
+_STOPPED_AT = re.compile(r"\((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?:GMT|UTC)\)")
+
+
+def _stopped_at(instance: Dict[str, Any]) -> Optional[datetime]:
+    match = _STOPPED_AT.search(instance.get('StateTransitionReason') or '')
+    return datetime.strptime(match.group(1), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc) if match else None
+
+
+@mcp_server.tool()
+def list_ec2_instances(state: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Lists EC2 instances in this deployment's region: ID, Name tag, type, state, availability zone, launch time,
+    private/public IP, and tags. User data and console output are never read.
+
+    Args:
+        state: Filter by state (pending, running, stopping, stopped, shutting-down, terminated). Omit for all.
+
+    Returns:
+        The instances (up to 200) and a count per state.
+    """
+    try:
+        filters = [{'Name': 'instance-state-name', 'Values': [state]}] if state else None
+        instances = _instances(filters)
+        items = [{'instance_id': i['InstanceId'], 'name': _name_of(i.get('Tags')), 'type': i.get('InstanceType'),
+                  'state': i.get('State', {}).get('Name'), 'availability_zone': i.get('Placement', {}).get('AvailabilityZone'),
+                  'launch_time': i.get('LaunchTime'), 'private_ip': i.get('PrivateIpAddress'),
+                  'public_ip': i.get('PublicIpAddress'), 'platform': i.get('PlatformDetails'),
+                  'lifecycle': i.get('InstanceLifecycle', 'on-demand'),
+                  'tags': {t['Key']: t['Value'] for t in i.get('Tags', [])}} for i in instances]
+        counts: Dict[str, int] = {}
+        for item in items:
+            counts[item['state']] = counts.get(item['state'], 0) + 1
+        return {'status': 'success', 'region': aws_region, 'instance_count': len(items), 'by_state': counts,
+                'instances': items[:EC2_LIST_LIMIT],
+                **({'note': f'인스턴스가 많아 처음 {EC2_LIST_LIMIT}개만 보여 줍니다'} if len(items) > EC2_LIST_LIMIT else {})}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@mcp_server.tool()
+def get_ec2_cpu_ranking(hours: Optional[int] = None, top: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Ranks running EC2 instances by CPU utilization over the last N hours (average and maximum, from CloudWatch
+    CPUUtilization), in a single metric query. Use this for "which instance had the highest CPU?".
+
+    Args:
+        hours: Look-back window in hours (1-336, default 24).
+        top: Number of instances to return (1-50, default 10).
+
+    Returns:
+        Instances sorted by maximum CPU (%), with average CPU and Name tag.
+    """
+    try:
+        hours = max(1, min(int(hours or 24), 336))
+        top = max(1, min(int(top or 10), 50))
+        running = _instances([{'Name': 'instance-state-name', 'Values': ['running']}])
+        if not running:
+            return {'status': 'success', 'region': aws_region, 'hours': hours, 'instances': [],
+                    'message': '실행 중인 인스턴스가 없습니다'}
+        end = datetime.now(timezone.utc)
+        period = hours * 3600  # 기간 전체를 한 점으로 모은다 (평균·최대)
+        queries, by_id = [], {}
+        for index, instance in enumerate(running[:EC2_METRIC_BATCH // 2]):
+            metric = {'Namespace': 'AWS/EC2', 'MetricName': 'CPUUtilization',
+                      'Dimensions': [{'Name': 'InstanceId', 'Value': instance['InstanceId']}]}
+            for stat in ('Average', 'Maximum'):
+                query_id = f'{stat[:3].lower()}{index}'
+                queries.append({'Id': query_id, 'MetricStat': {'Metric': metric, 'Period': period, 'Stat': stat}})
+                by_id[query_id] = (instance, stat)
+        results = cloudwatch_client.get_metric_data(MetricDataQueries=queries, StartTime=end - timedelta(hours=hours),
+                                                    EndTime=end)['MetricDataResults']
+        ranking: Dict[str, Dict[str, Any]] = {}
+        for result in results:  # 결과는 Id로 짝짓는다 (순서에 기대지 않는다)
+            instance, stat = by_id[result['Id']]
+            entry = ranking.setdefault(instance['InstanceId'], {
+                'instance_id': instance['InstanceId'], 'name': _name_of(instance.get('Tags')),
+                'type': instance.get('InstanceType'), 'average_cpu_percent': None, 'max_cpu_percent': None})
+            if result.get('Values'):
+                value = max(result['Values']) if stat == 'Maximum' else sum(result['Values']) / len(result['Values'])
+                entry['max_cpu_percent' if stat == 'Maximum' else 'average_cpu_percent'] = round(value, 2)
+        ordered = sorted(ranking.values(), key=lambda e: (e['max_cpu_percent'] is None, -(e['max_cpu_percent'] or 0)))
+        return {'status': 'success', 'region': aws_region, 'hours': hours, 'running_instances': len(running),
+                'instances': ordered[:top],
+                'without_data': [e['instance_id'] for e in ordered if e['max_cpu_percent'] is None]}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@mcp_server.tool()
+def get_ec2_status_checks(instance_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Gets EC2 status checks (system and instance reachability) and scheduled maintenance events. Omit instance_id to
+    check all instances in this deployment's region and list only the ones with problems or events.
+
+    Args:
+        instance_id: Instance to check. Omit to check all instances.
+
+    Returns:
+        Status per instance (ok, impaired, insufficient-data, ...) and scheduled events.
+    """
+    try:
+        kwargs: Dict[str, Any] = {'IncludeAllInstances': True}
+        if instance_id:
+            kwargs['InstanceIds'] = [instance_id]
+        statuses = []
+        for page in ec2_client.get_paginator('describe_instance_status').paginate(**kwargs):
+            for status in page.get('InstanceStatuses', []):
+                statuses.append({
+                    'instance_id': status['InstanceId'], 'state': status.get('InstanceState', {}).get('Name'),
+                    'system_status': status.get('SystemStatus', {}).get('Status'),
+                    'instance_status': status.get('InstanceStatus', {}).get('Status'),
+                    'scheduled_events': [{'code': e.get('Code'), 'description': e.get('Description'),
+                                          'not_before': e.get('NotBefore')} for e in status.get('Events', [])]})
+        problems = [s for s in statuses if s['scheduled_events'] or
+                    {s['system_status'], s['instance_status']} - {'ok', 'not-applicable', None}]
+        return {'status': 'success', 'region': aws_region, 'checked': len(statuses),
+                'instances': statuses if instance_id else problems,
+                **({} if instance_id else {'note': '문제가 있거나 예정된 이벤트가 있는 인스턴스만 보여 줍니다'})}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@mcp_server.tool()
+def find_ec2_waste(stopped_days: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Finds EC2 resources that cost money without being used, in this deployment's region: EBS volumes not attached
+    to any instance, instances stopped for a long time (their EBS volumes are still billed), and Elastic IPs not
+    associated with anything (public IPv4 addresses are billed hourly).
+
+    Args:
+        stopped_days: Report instances stopped for at least this many days (default 7).
+
+    Returns:
+        Unattached volumes (size, type, age), long-stopped instances, and unassociated Elastic IPs.
+    """
+    try:
+        stopped_days = max(0, int(stopped_days if stopped_days is not None else 7))
+        now = datetime.now(timezone.utc)
+        volumes = []
+        for page in ec2_client.get_paginator('describe_volumes').paginate(
+                Filters=[{'Name': 'status', 'Values': ['available']}]):
+            for volume in page.get('Volumes', []):
+                created = volume.get('CreateTime')
+                volumes.append({'volume_id': volume['VolumeId'], 'name': _name_of(volume.get('Tags')),
+                                'size_gib': volume.get('Size'), 'type': volume.get('VolumeType'),
+                                'created': created, 'age_days': (now - created).days if created else None})
+        stopped = []
+        for instance in _instances([{'Name': 'instance-state-name', 'Values': ['stopped']}]):
+            since = _stopped_at(instance)
+            days = (now - since).days if since else None
+            if days is None or days >= stopped_days:
+                stopped.append({'instance_id': instance['InstanceId'], 'name': _name_of(instance.get('Tags')),
+                                'type': instance.get('InstanceType'), 'stopped_since': since, 'stopped_days': days})
+        addresses = [{'allocation_id': a.get('AllocationId'), 'public_ip': a.get('PublicIp'),
+                      'name': _name_of(a.get('Tags'))}
+                     for a in ec2_client.describe_addresses().get('Addresses', [])
+                     if not a.get('AssociationId') and not a.get('InstanceId') and not a.get('NetworkInterfaceId')]
+        return {'status': 'success', 'region': aws_region,
+                'unattached_volumes': volumes, 'unattached_volume_gib': sum(v['size_gib'] or 0 for v in volumes),
+                'long_stopped_instances': stopped, 'unassociated_elastic_ips': addresses,
+                'note': '금액은 Pricing 도구(get_pricing)나 Cost Explorer로 확인하세요. 지우기 전에 스냅샷·용도를 확인하세요'}
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
 

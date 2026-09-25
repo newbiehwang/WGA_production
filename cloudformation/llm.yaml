@@ -179,6 +179,25 @@ Resources:
                   - ec2:DescribeVpcEndpoints
                   - ec2:DescribeFlowLogs
                 Resource: '*'
+              # EC2 조회 도구 (app.py): 인스턴스·상태 검사·볼륨·탄력적 IP. CPU는 위의 cloudwatch:GetMetricData로 읽는다
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeAddresses
+                Resource: '*'
+              # 사용자 데이터·콘솔 출력·Windows 암호·시작 템플릿 데이터는 비밀 값이 흔히 들어 있어 명시적으로 거부한다
+              # (DescribeInstanceAttribute는 userData를, 시작 템플릿 조회는 UserData를 돌려준다). 누가 나중에 넓은 Allow를 더해도 Deny가 우선한다
+              - Effect: Deny
+                Action:
+                  - ec2:DescribeInstanceAttribute
+                  - ec2:GetConsoleOutput
+                  - ec2:GetConsoleScreenshot
+                  - ec2:GetPasswordData
+                  - ec2:GetLaunchTemplateData
+                  - ec2:DescribeLaunchTemplateVersions
+                Resource: '*'
               # MCP 세션 테이블 (lambda_mcp/session.py)
               - Effect: Allow
                 Action:
