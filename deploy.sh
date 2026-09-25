@@ -83,6 +83,68 @@ cfn_update() {
     fi
 }
 
+# MCP Lambda를 한 번 불러 공식 MCP 서버를 미리 불러 둔다 (배포 직후 첫 질문이 콜드 스타트를 기다리지 않게).
+# LLM Lambda가 질문마다 하는 것과 같은 순서로 부른다: initialize → tools/list(여기서 공식 서버를 불러온다) → 세션 삭제.
+# - 효과는 배포 직후 잠깐이다. Lambda는 한동안 요청이 없으면 실행 환경을 정리하고, 동시에 온 요청은 새 환경에서 돈다.
+# - 미리 깨우지 못해도 서비스에는 문제가 없으므로(첫 질문이 느릴 뿐) 실패해도 배포는 계속한다.
+warm_up_mcp() {
+    local function_name="$1"
+    local response session_id tool_count started
+    response=$(mktemp)
+    started=$(date +%s)
+
+    # Function URL로 들어오는 요청과 같은 모양의 이벤트 ($1: JSON-RPC 메서드, $2: 세션 ID, $3: HTTP 메서드)
+    mcp_event() {
+        python3 - "$@" <<'PY'
+import json, sys
+method, session, http_method = sys.argv[1], sys.argv[2], sys.argv[3]
+headers = {"content-type": "application/json"}
+if session:
+    headers["mcp-session-id"] = session
+body = json.dumps({"jsonrpc": "2.0", "id": "warm-up", "method": method, "params": {}})
+print(json.dumps({"httpMethod": http_method, "headers": headers, "body": body}))
+PY
+    }
+
+    # 응답에서 값 하나를 꺼낸다 ($1: session | tools). 응답이 기대와 다르면 빈 값
+    mcp_read() {
+        python3 - "$1" "$response" <<'PY'
+import json, sys
+what, path = sys.argv[1], sys.argv[2]
+try:
+    response = json.load(open(path))
+    if response.get("statusCode") != 200:
+        raise ValueError(response)
+    if what == "session":
+        print(response["headers"]["MCP-Session-Id"])
+    else:
+        print(len(json.loads(response["body"])["result"]["tools"]))
+except Exception:
+    print("")
+PY
+    }
+
+    mcp_invoke() {
+        # 콜드 스타트에서 공식 서버를 불러오는 데 수십 초 걸릴 수 있어 응답 대기 시간을 넉넉히 둔다
+        aws lambda invoke --function-name "$function_name" \
+            --cli-binary-format raw-in-base64-out --cli-read-timeout 300 \
+            --payload "$(mcp_event "$@")" "$response" > /dev/null
+    }
+
+    echo "MCP Lambda 미리 깨우는 중: $function_name"
+    # 이미지가 바뀐 직후면 새 이미지로 바뀔 때까지 기다린다
+    aws lambda wait function-updated-v2 --function-name "$function_name" || true
+
+    if mcp_invoke initialize "" POST && session_id=$(mcp_read session) && [ -n "$session_id" ] \
+        && mcp_invoke tools/list "$session_id" POST && tool_count=$(mcp_read tools) && [ -n "$tool_count" ]; then
+        mcp_invoke "" "$session_id" DELETE || true  # 세션 기록은 남기지 않는다
+        echo "✅ MCP Lambda 준비 완료: 도구 ${tool_count}개, $(( $(date +%s) - started ))초"
+    else
+        echo "⚠️ MCP Lambda를 미리 깨우지 못했습니다. 배포는 계속하며, 첫 질문이 조금 느릴 수 있습니다."
+    fi
+    rm -f "$response"
+}
+
 #################################################
 # 1. CloudFormation 버킷 확인 및 템플릿 업로드
 #################################################
@@ -717,6 +779,9 @@ cfn_update $BASE_STACK_NAME \
                 ParameterKey=McpFunctionUrl,ParameterValue=$McpFunctionUrl \
     --tags Key=Project,Value=WGA Key=Environment,Value=$ENV \
     --capabilities CAPABILITY_NAMED_IAM
+
+# 배포 직후 첫 질문이 MCP Lambda의 콜드 스타트를 기다리지 않도록 한 번 깨워 둔다 (위 warm_up_mcp)
+warm_up_mcp "wga-mcp-$ENV"
 
 #################################################
 # 7. 배포 완료 요약
