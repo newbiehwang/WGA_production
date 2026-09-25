@@ -1,13 +1,12 @@
 // 대화 화면 (예전 views/EnhancedChatbotPage.vue).
-// AXPI 패널 하나 안에 왼쪽 대화 목록과 오른쪽 대화를 둔다. 좁은 화면(760px 이하)에서는 목록을 버튼으로 연다.
+// AXPI 패널 하나를 대화가 다 쓴다. 패널 머리 작은 제목 자리에 대화 제목, 오른쪽에 '대화 목록'(팝업) · '+ 새 대화'.
 import { useEffect, useRef, useState } from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { EXAMPLE_QUESTIONS } from '@/features/home/examples';
 import { useChatStore } from '@/stores/chatStore';
-import { formatKoreanDateTime } from '@/utils/formatters';
 import { ChatMessage } from './ChatMessage';
 import { Composer } from './Composer';
-import { SessionList } from './SessionList';
+import { SessionListModal } from './SessionListModal';
 import './chat.css';
 
 const NEAR_BOTTOM = 120; // 이만큼 안쪽까지 내려와 있으면 새 글이 올 때 따라 내려간다
@@ -39,56 +38,40 @@ export function ChatPage() {
     }, [currentSession?.sessionId]);
 
     const openSession = (sessionId: string) => {
-        if (sessionId === currentSession?.sessionId) {
-            setIsListOpen(false);
-            return;
-        }
+        if (sessionId === currentSession?.sessionId) return;
         // 답변을 기다리는 중에 옮기면 지금 질문을 취소하게 되므로 먼저 묻는다
         if (waiting) {
             setPendingSessionId(sessionId);
             return;
         }
         useChatStore.getState().selectSession(sessionId).catch(() => {});
-        setIsListOpen(false);
     };
 
-    const newChat = () => {
-        useChatStore.getState().newChat();
-        setIsListOpen(false);
-    };
+    const newChat = () => useChatStore.getState().newChat();
 
     const send = (text: string) => {
         stickToBottom.current = true;
         useChatStore.getState().sendMessage(text);
     };
 
-    const eyebrow = waiting
-        ? '답변을 만드는 중'
-        : currentSession
-          ? `마지막 대화: ${formatKoreanDateTime(currentSession.updatedAt)}`
-          : '새 대화';
-
     return (
         <section className="plan-panel chat-panel" aria-label="대화">
-            <div className="plan-panel-header">
-                <div className="plan-panel-header-stage">
-                    <div className="chat-heading">
-                        <p className="plan-panel-eyebrow">{eyebrow}</p>
-                        <h1 className="plan-panel-title">{currentSession?.title ?? '새 대화'}</h1>
-                    </div>
-                    <div className="chat-header-actions">
-                        <button
-                            className="plan-reload-button chat-list-toggle"
-                            type="button"
-                            aria-expanded={isListOpen}
-                            onClick={() => setIsListOpen((v) => !v)}
-                        >
-                            대화 목록
-                        </button>
-                        <button className="plan-create-button" type="button" disabled={waiting} onClick={newChat}>
-                            + 새 대화
-                        </button>
-                    </div>
+            <div className="plan-panel-header chat-header">
+                <h1 className="plan-panel-eyebrow chat-title" title={currentSession?.title}>
+                    {currentSession?.title ?? '새 대화'}
+                </h1>
+                <div className="chat-header-actions">
+                    <button
+                        className="plan-reload-button"
+                        type="button"
+                        aria-haspopup="dialog"
+                        onClick={() => setIsListOpen(true)}
+                    >
+                        대화 목록
+                    </button>
+                    <button className="plan-create-button" type="button" disabled={waiting} onClick={newChat}>
+                        + 새 대화
+                    </button>
                 </div>
             </div>
 
@@ -102,11 +85,6 @@ export function ChatPage() {
             ) : null}
 
             <div className="chat-body">
-                <aside className={`chat-sessions${isListOpen ? ' is-open' : ''}`} aria-label="대화 목록">
-                    <SessionList onSelect={openSession} />
-                </aside>
-                {isListOpen ? <div className="chat-sessions-backdrop" onClick={() => setIsListOpen(false)} /> : null}
-
                 <div className="chat-conversation">
                     <div
                         className="chat-messages"
@@ -146,6 +124,10 @@ export function ChatPage() {
                 </div>
             </div>
 
+            {isListOpen ? (
+                <SessionListModal onClose={() => setIsListOpen(false)} onSelect={openSession} onNewChat={newChat} />
+            ) : null}
+
             {pendingSessionId ? (
                 <ConfirmDialog
                     label="대화 전환 확인"
@@ -155,7 +137,6 @@ export function ChatPage() {
                     onConfirm={() => {
                         const target = pendingSessionId;
                         setPendingSessionId(null);
-                        setIsListOpen(false);
                         useChatStore.getState().cancelRequest();
                         useChatStore.getState().selectSession(target).catch(() => {});
                     }}

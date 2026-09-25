@@ -1,15 +1,15 @@
 /* 대화 화면: AXPI 패널 안에 목록(왼쪽)과 대화(오른쪽). 행·버튼·메뉴는 AXPI 것을 그대로 쓰고
    메시지 본문(마크다운·도구 목록)은 예전 ChatMessage.vue의 모양을 옮겨 색만 맞췄다 */
 
-.chat-panel .plan-panel-header-stage {
+/* 패널 머리: 큰 제목 없이 작은 제목 자리에 대화 제목, 오른쪽에 버튼 */
+.chat-header {
   align-items: center;
+  margin-bottom: 12px;
 }
 
-.chat-heading {
+.chat-title {
   min-width: 0;
-}
-
-.chat-heading .plan-panel-title {
+  text-transform: none; /* 작은 제목 모양은 대문자로 바꾸지만 대화 제목은 쓴 그대로 보여 준다 */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -21,10 +21,6 @@
   flex-shrink: 0;
 }
 
-.chat-list-toggle {
-  display: none;
-}
-
 .chat-error {
   margin-bottom: 12px;
 }
@@ -32,35 +28,35 @@
 .chat-body {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  gap: 20px;
-  position: relative;
-}
-
-/* ---------------------------------------------------------------- 대화 목록 */
-
-.chat-sessions {
-  min-height: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid #e8edf3;
-  padding-right: 16px;
 }
 
-.chat-sessions-header {
-  justify-content: space-between;
-  padding: 0 4px 10px;
+/* ---------------------------------------------------------------- 대화 목록 팝업창 */
+
+/* AXPI create-plan-model은 1140×940 크기의 생성 마법사다. 목록만 보이므로 폭과 높이를 줄였다 */
+.create-plan-model.session-list-model {
+  width: min(640px, calc(100vw - 28px));
+  height: min(680px, calc(100vh - 48px));
+  border-radius: 16px;
 }
 
-.chat-sessions-count {
-  font-family: var(--font-label);
-  color: var(--color-primary) !important;
+.session-list-page {
+  flex: 1;
+  min-height: 0;
+  padding: 0 6px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.session-list-page .create-plan-step-description {
+  margin-bottom: 4px;
 }
 
 .chat-session-list {
   overflow-y: auto;
-  padding-right: 2px;
+  padding: 0 2px 4px 0;
 }
 
 .chat-session-row {
@@ -92,12 +88,10 @@
 }
 
 .chat-sessions-empty {
-  flex: 1;
   display: grid;
   place-items: center;
   border: 1px dashed #dde4ec;
   border-radius: 12px;
-  margin-top: 8px;
 }
 
 .chat-sessions-empty p {
@@ -107,37 +101,21 @@
   color: #6b7785;
 }
 
-.chat-delete-all {
-  margin-top: 10px;
-  border: 0;
-  background: transparent;
-  padding: 6px 4px;
-  font-family: var(--font-label);
-  font-size: 0.8rem;
-  font-weight: 700;
+/* 전체 삭제는 왼쪽 끝, 새 대화는 오른쪽 끝 */
+.create-plan-wizard-button.session-delete-all {
+  margin-right: auto;
   color: #b02a37;
-  text-align: left;
-  cursor: pointer;
-  align-self: flex-start;
 }
 
-.chat-delete-all:hover:not(:disabled) {
-  text-decoration: underline;
-}
-
-.chat-delete-all:disabled,
 .plan-action-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-.chat-sessions-backdrop {
-  display: none;
-}
-
 /* ---------------------------------------------------------------- 대화 */
 
 .chat-conversation {
+  flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -556,10 +534,6 @@
   box-shadow: inset 0 0 0 1px rgba(0, 123, 255, 0.14);
 }
 
-.composer--home {
-  margin-bottom: 18px;
-}
-
 .composer-input {
   flex: 1;
   min-width: 0;
@@ -600,9 +574,17 @@
   cursor: pointer;
 }
 
+/* 보내기·취소: 글씨 없이 아이콘만 있는 정사각형 버튼 */
+.composer-send {
+  width: 36px;
+  padding: 0;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
 .composer-send svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -615,75 +597,123 @@
   box-shadow: none;
 }
 
-.composer-spinner {
-  width: 14px;
-  height: 14px;
-  border-width: 2px;
+.composer-send.is-cancel svg {
+  fill: currentColor;
+  stroke: none;
+}
+
+/* 예시 질문 (홈): 입력칸을 누르면 입력칸 아래에 붙어서 펼쳐진다 */
+.composer-wrap {
+  position: relative;
+  z-index: 20; /* 아래 대화 목록 행 위에 겹쳐 보이게 */
+}
+
+.composer-wrap--home {
+  margin-bottom: 18px;
+}
+
+.composer.is-suggesting {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.composer-suggestions {
+  position: absolute;
+  top: calc(100% - 1px);
+  left: 0;
+  right: 0;
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
+  border: 1px solid rgba(0, 123, 255, 0.56);
+  border-top-color: #e8edf3;
+  border-radius: 0 0 14px 14px;
+  background: #fff;
+  box-shadow: 0 16px 30px rgba(35, 47, 62, 0.14);
+  padding: 8px;
+  transform-origin: top center;
+  animation: composer-suggest-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.composer-suggestions.is-closing {
+  pointer-events: none;
+  animation: composer-suggest-out 160ms ease both;
+}
+
+@keyframes composer-suggest-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scaleY(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+@keyframes composer-suggest-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-6px) scaleY(0.96);
+  }
+}
+
+.composer-suggestions-title {
+  margin: 4px 8px 6px;
+  font-family: var(--font-label);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #3d7cc9;
+}
+
+.composer-suggestions ul {
+  list-style: none;
   margin: 0;
-  border-color: rgba(255, 255, 255, 0.35);
-  border-top-color: #fff;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.composer-suggestion {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 9px 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.composer-suggestion:hover,
+.composer-suggestion:focus-visible {
+  background: #f1f6fd;
+  outline: none;
+}
+
+.composer-suggestion .plan-status-badge {
+  width: 104px;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.composer-suggestion-text {
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  color: var(--color-ink);
 }
 
 /* ---------------------------------------------------------------- 좁은 화면 */
 
-@media (max-width: 980px) {
-  .chat-body {
-    grid-template-columns: 240px minmax(0, 1fr);
-    gap: 14px;
-  }
-}
-
 @media (max-width: 760px) {
-  .chat-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .chat-list-toggle {
-    display: inline-block;
-  }
-
-  /* 목록은 버튼을 누르면 패널 안에 겹쳐서 연다 */
-  .chat-sessions {
-    display: none;
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: min(300px, 86%);
-    z-index: 5;
-    background: #fff;
-    border: 1px solid #e1e7ef;
-    border-radius: 12px;
-    box-shadow: 0 14px 30px rgba(35, 47, 62, 0.16);
-    padding: 12px;
-    animation: menu-in 160ms ease both;
-  }
-
-  .chat-sessions.is-open {
-    display: flex;
-  }
-
-  .chat-sessions-backdrop {
-    display: block;
-    position: absolute;
-    inset: 0;
-    z-index: 4;
-    background: rgba(255, 255, 255, 0.6);
-  }
-
-  /* 좁은 화면: 제목을 한 줄 다 쓰고, 버튼은 그 아래 오른쪽에 작게 */
-  .chat-panel .plan-panel-header-stage {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
-  }
-
-  .chat-heading .plan-panel-title {
-    font-size: 1.15rem;
-  }
-
-  .chat-header-actions {
-    justify-content: flex-end;
-  }
-
   .chat-header-actions button {
     height: 32px;
     padding: 0 12px;
@@ -715,6 +745,16 @@
   .composer-model {
     margin-right: auto;
     max-width: 60%;
+  }
+
+  .composer-suggestion {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .composer-suggestion .plan-status-badge {
+    width: auto;
   }
 
   .markdown-image {

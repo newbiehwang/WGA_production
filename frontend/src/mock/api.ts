@@ -294,8 +294,10 @@ const mockAdapter: AxiosAdapter = (config) =>
 
     const timer = setTimeout(() => {
       const [status, data] = route(method, path, parseBody(config));
+      // 실제 서버처럼 JSON으로 한 번 바꿔서 넘긴다. 가짜 API가 들고 있는 배열을 그대로 넘기면
+      // 앱이 받은 메시지 목록과 가짜 API의 목록이 같은 배열이 되어, 메시지를 저장할 때 두 번 들어간다
       const response: AxiosResponse = {
-        data,
+        data: JSON.parse(JSON.stringify(data)),
         status,
         statusText: String(status),
         headers: {},

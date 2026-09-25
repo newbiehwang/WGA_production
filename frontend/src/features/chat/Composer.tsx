@@ -1,27 +1,42 @@
 // 질문 입력칸 (홈과 대화 화면에서 함께 쓴다).
 // Enter로 보내고 Shift+Enter로 줄을 바꾼다. 답변을 기다리는 중에는 보내기 버튼이 취소 버튼이 되고 Esc로도 취소한다.
-import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
+//
+// suggestions를 주면(홈), 입력칸을 누를 때 입력칸 아래에 붙어서 예시 질문이 펼쳐진다.
+// 입력칸과 예시 목록 밖으로 포커스가 나가면 접히는 효과를 보여 준 뒤 사라진다.
+import { type FocusEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useModelsStore } from '@/stores/modelsStore';
 
 const MAX_HEIGHT = 150; // 입력칸이 늘어나는 최대 높이
+const CLOSE_MS = 160; // 예시 목록이 접히는 시간 (CSS의 composer-suggest-out과 같게)
+
+export interface Suggestion {
+    category: string;
+    question: string;
+}
 
 export function Composer({
     variant,
     placeholder,
     onSend,
+    suggestions,
 }: {
     variant: 'home' | 'chat';
     placeholder: string;
     onSend: (text: string) => void;
+    suggestions?: Suggestion[];
 }) {
     const [text, setText] = useState('');
+    // 예시 목록: 'closed' → (포커스) 'open' → (포커스가 나감) 'closing' → CLOSE_MS 뒤 'closed'
+    const [suggest, setSuggest] = useState<'closed' | 'open' | 'closing'>('closed');
+    const closeTimer = useRef<number>();
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const waiting = useChatStore((s) => s.waitingForResponse);
     const models = useModelsStore((s) => s.models);
     const selectedModel = useModelsStore((s) => s.selectedModel);
     const selectModel = useModelsStore((s) => s.selectModel);
     const busy = variant === 'chat' && waiting;
+    const hasSuggestions = !!suggestions?.length;
 
     // 글이 늘어나면 입력칸도 함께 늘린다
     useEffect(() => {
@@ -31,9 +46,28 @@ export function Composer({
         input.style.height = `${Math.min(input.scrollHeight, MAX_HEIGHT)}px`;
     }, [text]);
 
-    const send = () => {
-        if (!text.trim() || busy) return;
-        onSend(text.trim());
+    useEffect(() => () => window.clearTimeout(closeTimer.current), []);
+
+    const openSuggestions = () => {
+        if (!hasSuggestions) return;
+        window.clearTimeout(closeTimer.current); // 접히는 중에 다시 누르면 그대로 다시 편다
+        setSuggest('open');
+    };
+
+    const closeSuggestions = () => {
+        setSuggest((state) => (state === 'closed' ? state : 'closing'));
+        window.clearTimeout(closeTimer.current);
+        closeTimer.current = window.setTimeout(() => setSuggest('closed'), CLOSE_MS);
+    };
+
+    // 포커스가 입력칸에서 예시 목록(또는 모델 선택)으로 옮겨 가는 것은 '나감'이 아니다 (Tab으로 예시를 고를 수 있게)
+    const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) closeSuggestions();
+    };
+
+    const submit = (value: string) => {
+        if (!value.trim() || busy) return;
+        onSend(value.trim());
         setText('');
     };
 
@@ -42,63 +76,96 @@ export function Composer({
         if (event.nativeEvent.isComposing) return;
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
-            send();
-        } else if (event.key === 'Escape' && busy) {
-            useChatStore.getState().cancelRequest();
+            submit(text);
+        } else if (event.key === 'Escape') {
+            if (busy) useChatStore.getState().cancelRequest();
+            else if (suggest === 'open') closeSuggestions();
         }
     };
 
     return (
-        <div className={`composer composer--${variant}`}>
-            <textarea
-                ref={inputRef}
-                className="composer-input"
-                rows={1}
-                placeholder={placeholder}
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                onKeyDown={handleKeyDown}
-                aria-label="질문"
-            />
-            <div className="composer-actions">
-                {models.length > 0 ? (
-                    <select
-                        className="composer-model"
-                        value={selectedModel.id}
-                        disabled={busy}
-                        onChange={(event) => selectModel(event.target.value)}
-                        aria-label="모델"
-                    >
-                        {models.map((model) => (
-                            <option key={model.id} value={model.id}>
-                                {model.display_name}
-                            </option>
-                        ))}
-                    </select>
-                ) : null}
-                {busy ? (
-                    <button
-                        className="plan-create-button composer-send is-cancel"
-                        type="button"
-                        onClick={() => useChatStore.getState().cancelRequest()}
-                    >
-                        <span className="plan-inline-spinner composer-spinner" aria-hidden="true" />
-                        취소
-                    </button>
-                ) : (
-                    <button
-                        className="plan-create-button composer-send"
-                        type="button"
-                        disabled={!text.trim()}
-                        onClick={send}
-                    >
-                        질문하기
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />
-                        </svg>
-                    </button>
-                )}
+        <div className={`composer-wrap composer-wrap--${variant}`} onBlur={handleBlur}>
+            <div className={`composer${suggest !== 'closed' ? ' is-suggesting' : ''}`}>
+                <textarea
+                    ref={inputRef}
+                    className="composer-input"
+                    rows={1}
+                    placeholder={placeholder}
+                    value={text}
+                    onChange={(event) => setText(event.target.value)}
+                    onKeyDown={handleKeyDown}
+                    onFocus={openSuggestions}
+                    aria-label="질문"
+                />
+                <div className="composer-actions">
+                    {models.length > 0 ? (
+                        <select
+                            className="composer-model"
+                            value={selectedModel.id}
+                            disabled={busy}
+                            onChange={(event) => selectModel(event.target.value)}
+                            aria-label="모델"
+                        >
+                            {models.map((model) => (
+                                <option key={model.id} value={model.id}>
+                                    {model.display_name}
+                                </option>
+                            ))}
+                        </select>
+                    ) : null}
+                    {busy ? (
+                        <button
+                            className="plan-create-button composer-send is-cancel"
+                            type="button"
+                            aria-label="답변 취소"
+                            title="답변 취소 (Esc)"
+                            onClick={() => useChatStore.getState().cancelRequest()}
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <rect x="7" y="7" width="10" height="10" rx="1.5" />
+                            </svg>
+                        </button>
+                    ) : (
+                        <button
+                            className="plan-create-button composer-send"
+                            type="button"
+                            aria-label="보내기"
+                            title="보내기 (Enter)"
+                            disabled={!text.trim()}
+                            onClick={() => submit(text)}
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />
+                            </svg>
+                        </button>
+                    )}
+                </div>
             </div>
+
+            {hasSuggestions && suggest !== 'closed' ? (
+                <div className={`composer-suggestions${suggest === 'closing' ? ' is-closing' : ''}`}>
+                    <p className="composer-suggestions-title">예시 질문</p>
+                    <ul>
+                        {suggestions!.map(({ category, question }) => (
+                            <li key={question}>
+                                <button
+                                    type="button"
+                                    className="composer-suggestion"
+                                    // 누르는 순간 입력칸 포커스가 빠져 목록이 접히기 시작하지 않도록 포커스를 옮기지 않는다
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => {
+                                        submit(question);
+                                        inputRef.current?.blur();
+                                    }}
+                                >
+                                    <span className="plan-status-badge plan-status-active">{category}</span>
+                                    <span className="composer-suggestion-text">{question}</span>
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            ) : null}
         </div>
     );
 }

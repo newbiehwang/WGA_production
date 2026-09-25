@@ -1,10 +1,12 @@
+// 공통 CSS(AXPI)를 화면 코드보다 먼저 불러온다. 화면별 CSS(home.css, chat.css)가 뒤에 와야
+// 같은 선택자 세기에서 화면별 규칙이 이긴다 (예: 목록 스크롤을 켜는 규칙이 AXPI의 overflow: hidden에 지지 않게)
+import './styles.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { setupHttp } from './api/http';
 import { configureAuth } from './auth/authClient';
-import './styles.css';
 
 // mock 모드(npm run dev:mock)에서는 백엔드 대신 가짜 API로 응답하고, Cognito 없이 로그인된다.
 // 조건이 빌드할 때 정해지므로 배포용 빌드에는 가짜 API 코드가 들어가지 않는다.

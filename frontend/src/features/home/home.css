@@ -1,26 +1,33 @@
-/* 홈: AXPI 추진 계획서 목록 화면과 같은 패널. 질문 입력칸과 자주 묻는 질문 행만 새로 맞췄다 */
+/* 홈: AXPI 추진 계획서 목록 화면과 같은 패널. 질문 입력칸 아래에 내 대화 목록 */
 
-.home-panel .plan-panel-header-stage > div:first-child {
-  min-width: 0;
+.home-panel .plan-panel-header {
+  margin-bottom: 12px;
 }
 
-.home-col-category {
-  width: 132px;
+.home-col-date {
+  width: 200px;
   flex-shrink: 0;
 }
 
-.home-example-list {
+/* 행이 많으면 목록만 스크롤한다 (AXPI 목록은 페이지를 넘기는 방식이라 overflow: hidden이었다) */
+.home-session-list {
   overflow-y: auto;
   padding-right: 2px;
 }
 
-/* AXPI 행 이름은 한 줄로 자르지만(…), 질문은 끝까지 읽혀야 하므로 줄을 바꾼다 */
-.home-example-list .home-question {
+.home-session-title {
   color: var(--color-ink);
-  white-space: normal;
-  overflow: visible;
   letter-spacing: 0;
-  font-weight: 600;
+}
+
+.home-sessions-state {
+  flex: 1;
+  margin-top: 8px;
+}
+
+.home-sessions-state > div {
+  display: grid;
+  justify-items: center;
 }
 
 .home-row-arrow {
@@ -32,28 +39,37 @@
   color: var(--color-primary);
 }
 
+.home-session-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.home-session-list::-webkit-scrollbar-thumb {
+  background: rgba(140, 160, 185, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.88);
+  border-radius: 999px;
+}
+
 @media (max-width: 760px) {
-  .home-examples .plan-table-header {
+  .home-sessions .plan-table-header {
     display: none;
   }
 
-  .home-example-list .plan-table-row {
+  .home-session-list .plan-table-row {
     flex-wrap: wrap;
-    gap: 6px 10px;
+    gap: 4px 10px;
     padding: 12px 14px;
   }
 
-  .home-example-list .home-col-category {
+  .home-session-list .plan-row-project {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+
+  .home-session-list .home-col-date {
     width: auto;
   }
 
-  .home-example-list .plan-row-project {
-    flex-basis: 100%;
-    min-width: 0;
-    order: 3;
-  }
-
-  .home-example-list .home-row-arrow {
+  .home-session-list .home-row-arrow {
     display: none;
   }
 }
