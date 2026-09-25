@@ -9,7 +9,9 @@
 type Align = '' | 'left' | 'center' | 'right';
 
 const TABLE_ROW = /^\s*\|.*\|\s*$/;
-const TABLE_SEPARATOR = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+// 구분 줄의 칸은 대시 1개 이상이면 된다 (GFM 규칙). 모델이 |:--|--:| 처럼 짧게 쓰는 경우가 많다.
+// 파이프(|)가 있어야 구분 줄로 본다: 파이프 없는 --- 는 구분선(가로줄)이다
+const TABLE_SEPARATOR = /^(?=.*\|)\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
 const PIPE = '\u0000'; // 셀 안의 \| (글자로서의 |)를 잠시 바꿔 둘 문자
 
 const splitRow = (line: string): string[] => {

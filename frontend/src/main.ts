@@ -70,4 +70,14 @@ axios.interceptors.response.use(
     },
 );
 
-app.mount('#app');
+// mock 모드(npm run dev:mock)에서는 백엔드 대신 가짜 API로 응답한다. 로그인도 건너뛴다 (stores/auth.ts).
+// 조건이 빌드할 때 정해지므로 배포용 빌드에는 가짜 API 코드가 들어가지 않는다.
+const start = async () => {
+    if (import.meta.env.MODE === 'mock') {
+        const { installMockApi } = await import('./mock/api');
+        installMockApi();
+    }
+    app.mount('#app');
+};
+
+start();

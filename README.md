@@ -302,14 +302,19 @@ CloudFormation 기반 IaC와 `deploy.sh` 스크립트로 전체 시스템 배포
 
 ### 개발 환경 설정
 ```bash
-# 프론트엔드 개발 서버
+# 프론트엔드 개발 서버 (배포된 환경의 로그인·API 사용, deploy.sh가 만든 frontend/.env.local 필요)
 cd frontend && npm install && npm run dev
+
+# 프론트엔드만 (AWS 없이): 로그인을 건너뛰고 가짜 API로 응답 → 화면만 고칠 때
+cd frontend && npm install && npm run dev:mock
 
 # 백엔드 테스트·정적 분석 (Python 3.12)
 pip install -r requirements-dev.txt
 ruff check .
 pytest
 ```
+
+`dev:mock`은 `frontend/src/mock/api.ts`가 axios 요청을 가로채 백엔드와 같은 모양으로 응답합니다. 처음에는 예시 대화가 하나 있고, 질문을 보낼 때마다 도구 목록·표·목록·코드·실패한 도구가 담긴 예시 답변이 차례로 나옵니다. 대화 기록은 메모리에만 있어 새로 고치면 처음으로 돌아갑니다. 배포용 빌드에는 들어가지 않습니다.
 
 ### 테스트
 `tests/`의 단위 테스트는 [moto](https://github.com/getmoto/moto)로 DynamoDB, CloudWatch Logs, CloudWatch를 모킹해 AWS 계정 없이 실행됩니다.
