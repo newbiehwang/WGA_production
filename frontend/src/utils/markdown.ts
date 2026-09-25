@@ -71,14 +71,28 @@ function extractTables(text: string, tables: string[]): string {
     return out.join('\n');
 }
 
+// ``` 사이의 글을 코드 블록 HTML로 바꾼다.
+// 여는 ``` 바로 뒤의 언어 이름(```bash)은 코드가 아니므로 본문에서 뺀다. 예전에는 코드 첫 줄처럼 찍혔다.
+// 언어 이름은 class="language-bash"로 남겨 둔다 (나중에 문법 강조를 붙일 때 쓸 수 있게).
+// 언어 이름은 여는 ``` 와 같은 줄에 있고 공백 없는 한 단어일 때만 인정한다: ```ls -la``` 같은 한 줄 코드는 그대로 둔다.
+const CODE_LANGUAGE = /^([\w+#.-]+)[ \t]*\n/;
+
+function codeBlock(body: string): string {
+    const language = body.match(CODE_LANGUAGE);
+    let code = language ? body.slice(language[0].length) : body.replace(/^[ \t]*\n/, '');
+    code = code.replace(/\n[ \t]*$/, ''); // 닫는 ``` 앞의 줄바꿈 (빈 줄이 하나 더 생긴다)
+    const attr = language ? ` class="language-${language[1]}"` : '';
+    return `<pre><code${attr}>${code}</code></pre>`;
+}
+
 export function parseMarkdown(markdown: string): string {
     if (!markdown) return '';
 
     let html = markdown;
 
     const codeBlocks: string[] = [];
-    html = html.replace(/```([^`]+)```/g, (match, code) => {
-        codeBlocks.push(`<pre><code>${code}</code></pre>`);
+    html = html.replace(/```([^`]+)```/g, (match, body: string) => {
+        codeBlocks.push(codeBlock(body));
         return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
     });
 

@@ -173,19 +173,6 @@
                             @input="autoResize"
                         ></textarea>
 
-                        <div class="context-toggle-container">
-                            <label class="context-toggle-label">
-                                <input
-                                    type="checkbox"
-                                    v-model="isCached"
-                                    class="context-toggle-input"
-                                    :disabled="store.waitingForResponse"
-                                />
-                                <span class="context-toggle-slider"></span>
-                                <span class="context-toggle-text">대화 컨텍스트 기억</span>
-                            </label>
-                        </div>
-
                         <div class="model-selector-container">
                             <div
                                 class="model-selector"
@@ -301,7 +288,6 @@
     import { useChatHistoryStore } from '@/stores/chatHistoryStore';
     import type { BotResponse } from '@/types/chat';
     import { useModelsStore } from '@/stores/models';
-    import { useSettingsStore } from '@/stores/settings.ts';
 
     export default defineComponent({
         name: 'EnhancedChatbotPage',
@@ -315,7 +301,6 @@
         setup() {
             const router = useRouter();
             const store = useChatHistoryStore();
-            const settingsStore = useSettingsStore();
             const messagesContainer = ref<HTMLElement | null>(null);
             const initialSetupDone = ref(false);
             const pendingQuestionProcessed = ref(false);
@@ -333,10 +318,6 @@
 
             const modelsStore = useModelsStore();
 
-            const isCached = computed({
-                get: () => settingsStore.isCached,
-                set: (value: boolean) => settingsStore.setIsCached(value),
-            });
 
             const toggleSidebar = () => {
                 isSidebarOpen.value = !isSidebarOpen.value;
@@ -428,7 +409,6 @@
 
             onMounted(async () => {
                 try {
-                    settingsStore.loadFromStorage();
                     const pendingQuestion = sessionStorage.getItem('pendingQuestion');
                     const shouldCreateNewSession =
                         sessionStorage.getItem('createNewSession') === 'true';
@@ -550,7 +530,7 @@
                         isSidebarOpen.value = false;
                     }
 
-                    await store.sendMessage(messageToSend, settingsStore.isCached);
+                    await store.sendMessage(messageToSend);
 
                     await nextTick();
                     scrollToBottom();
@@ -624,7 +604,7 @@
                         {
                             text: userMessage,
                             sessionId: store.currentSession?.sessionId,
-                            isCached: isCached.value,
+                            isCached: true, // 대화 컨텍스트는 항상 기억한다 (stores/chatHistoryStore.ts 참고)
                             modelId: modelsStore.selectedModel.id,
                         },
                         {
@@ -797,8 +777,6 @@
                 handleClickOutside,
                 modelsStore,
                 isModelDropdownOpen,
-                settingsStore,
-                isCached,
                 handleLogout,
             };
         },
@@ -1205,75 +1183,6 @@
         color: #999;
     }
 
-    .context-toggle-container {
-        display: flex;
-        align-items: center;
-        margin: 0 8px;
-        min-width: fit-content;
-    }
-
-    .context-toggle-label {
-        display: flex;
-        align-items: center;
-        cursor: pointer;
-        font-size: 0.85rem;
-        color: #666;
-        gap: 8px;
-        padding: 4px 8px;
-        border-radius: 12px;
-        transition: background-color 0.2s;
-        user-select: none;
-        white-space: nowrap;
-    }
-
-    .context-toggle-label:hover {
-        background-color: rgba(0, 123, 255, 0.05);
-    }
-
-    .context-toggle-input {
-        display: none;
-    }
-
-    .context-toggle-slider {
-        position: relative;
-        width: 34px;
-        height: 18px;
-        background-color: #ccc;
-        border-radius: 34px;
-        transition: background-color 0.3s;
-        flex-shrink: 0;
-    }
-
-    .context-toggle-slider::before {
-        content: '';
-        position: absolute;
-        height: 14px;
-        width: 14px;
-        left: 2px;
-        bottom: 2px;
-        background-color: white;
-        border-radius: 50%;
-        transition: transform 0.3s;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-    }
-
-    .context-toggle-input:checked + .context-toggle-slider {
-        background-color: #007bff;
-    }
-
-    .context-toggle-input:checked + .context-toggle-slider::before {
-        transform: translateX(16px);
-    }
-
-    .context-toggle-input:disabled + .context-toggle-slider {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-
-    .context-toggle-text {
-        font-weight: 500;
-    }
-
     .send-button {
         display: flex;
         align-items: center;
@@ -1361,14 +1270,6 @@
     }
 
     @media (max-width: 768px) {
-        .context-toggle-text {
-            display: none;
-        }
-
-        .context-toggle-container {
-            margin: 0 4px;
-        }
-
         .chat-input-wrapper {
             gap: 8px;
             padding: 8px;
