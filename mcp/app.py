@@ -19,7 +19,10 @@
    - CloudWatch 대시보드 목록·요약 (공식 CloudWatch 서버에 대시보드 도구가 없다)
    - 아키텍처 다이어그램 (공식 diagram 서버는 PyPI에서 폐기되었다. 폐기 전 공식 서버를 옮겨 온 코드)
    - 차트 (AntV 차트 서비스, AWS와 무관)
-   - 변경 도구 2개: 로그 보존 기간, 알람 알림 켜기·끄기 (이 환경의 WGA 리소스만, 사람이 승인해야 실행된다)
+   - 변경 도구 4개 (사람이 승인해야 실행된다)
+     로그 보존 기간, 알람 알림 켜기·끄기: 이 환경의 WGA 리소스만
+     EC2 인스턴스 중지·시작: wga-managed=true 태그가 붙은 인스턴스만 (태그 기반 접근 제어, IAM 조건도 같다)
+     S3 퍼블릭 액세스 차단 켜기: 보안을 강화하는 방향만 (끄는 도구는 없다)
 
 변경 도구의 통제 (lambda_mcp/risk.py, lambda_mcp/approval.py)
 - tools/list가 도구마다 위험도를 붙인다. LLM Lambda는 변경 도구를 바로 실행하지 않고 승인 요청을 만든다.
@@ -670,6 +673,111 @@ def preview_alarm_actions(alarm_name: str, enabled: bool) -> Dict[str, Any]:
     return {"target": alarm_name, "before": _actions_text(before), "after": _actions_text(enabled),
             "summary": f"{alarm_name} {_actions_text(before)} → {_actions_text(enabled)}"
                        + (" (알람이 울려도 알림이 가지 않습니다)" if not enabled else "")}
+
+
+MANAGED_TAG = "wga-managed"  # 이 태그가 "true"인 인스턴스만 AI가 중지·시작을 요청할 수 있다 (IAM 조건도 같은 태그)
+EC2_ACTIONS = {"stop": ("running", "stopped"), "start": ("stopped", "running")}  # 동작 → (필요한 지금 상태, 바뀔 상태)
+
+
+def _managed_instance(instance_id: str) -> Dict[str, Any]:
+    reservations = ec2_client.describe_instances(InstanceIds=[instance_id]).get('Reservations', [])
+    instances = [i for r in reservations for i in r.get('Instances', [])]
+    if not instances:
+        raise ValueError(f"인스턴스가 없습니다: {instance_id}")
+    instance = instances[0]
+    tags = {t['Key']: t['Value'] for t in instance.get('Tags', [])}
+    if tags.get(MANAGED_TAG) != "true":
+        raise ValueError(f"{MANAGED_TAG}=true 태그가 붙은 인스턴스만 중지·시작할 수 있습니다: {instance_id} "
+                         "(태그는 사람이 콘솔·IaC로 붙인다. 이 서비스는 태그를 바꿀 수 없다)")
+    return instance
+
+
+@mcp_server.tool()
+def set_ec2_instance_state(instance_id: str, action: str) -> Dict[str, Any]:
+    """
+    Stops or starts an EC2 instance that is tagged wga-managed=true. This modifies AWS resources, so it runs only after
+    the user approves it; calling it creates an approval request instead of running immediately. Instances without
+    the tag cannot be changed (the IAM policy has the same condition).
+
+    Args:
+        instance_id: The instance ID, e.g. i-0123456789abcdef0.
+        action: "stop" or "start".
+
+    Returns:
+        The instance with the state before and after the request.
+    """
+    preview = preview_ec2_instance_state(instance_id, action)
+    if action == "stop":
+        response = ec2_client.stop_instances(InstanceIds=[instance_id])
+        event_name = "StopInstances"
+    else:
+        response = ec2_client.start_instances(InstanceIds=[instance_id])
+        event_name = "StartInstances"
+    return {"status": "success", **preview, "cloudtrail": _trail("ec2.amazonaws.com", event_name, response)}
+
+
+@mcp_server.preview("setEc2InstanceState")
+def preview_ec2_instance_state(instance_id: str, action: str) -> Dict[str, Any]:
+    if action not in EC2_ACTIONS:
+        raise ValueError(f'action은 "stop" 또는 "start"여야 합니다: {action}')
+    instance = _managed_instance(instance_id)
+    current = instance.get('State', {}).get('Name')
+    needed, target = EC2_ACTIONS[action]
+    if current != needed:
+        raise ValueError(f"{instance_id}는 지금 {current} 상태라 {action}할 수 없습니다 ({needed} 상태여야 함)")
+    name = _name_of(instance.get('Tags'))
+    label = f"{instance_id}" + (f" ({name})" if name else "")
+    warning = " (중지하면 이 인스턴스의 서비스가 멈춥니다. 인스턴스 저장소의 데이터는 사라집니다)" if action == "stop" else ""
+    return {"target": label, "before": current, "after": target,
+            "summary": f"EC2 {label} {current} → {target}{warning}"}
+
+
+PUBLIC_ACCESS_BLOCK_ALL = {"BlockPublicAcls": True, "IgnorePublicAcls": True, "BlockPublicPolicy": True,
+                           "RestrictPublicBuckets": True}
+
+
+def _public_access_block(bucket_name: str) -> Dict[str, bool]:
+    try:
+        block = _s3(_bucket_region(bucket_name)).get_public_access_block(
+            Bucket=bucket_name)['PublicAccessBlockConfiguration']
+    except ClientError as error:
+        if _error_code(error) != 'NoSuchPublicAccessBlockConfiguration':
+            raise
+        block = {}
+    return {key: bool(block.get(key)) for key in PUBLIC_ACCESS_BLOCK_ALL}
+
+
+@mcp_server.tool()
+def enable_s3_public_access_block(bucket_name: str) -> Dict[str, Any]:
+    """
+    Turns on all four S3 Block Public Access settings for a bucket (BlockPublicAcls, IgnorePublicAcls,
+    BlockPublicPolicy, RestrictPublicBuckets). This only makes a bucket more private; there is no tool to turn it off.
+    It modifies AWS resources, so it runs only after the user approves it; calling it creates an approval request.
+
+    Args:
+        bucket_name: The bucket name.
+
+    Returns:
+        The bucket with the settings before and after the change.
+    """
+    preview = preview_s3_public_access_block(bucket_name)
+    response = _s3(_bucket_region(bucket_name)).put_public_access_block(
+        Bucket=bucket_name, PublicAccessBlockConfiguration=PUBLIC_ACCESS_BLOCK_ALL)
+    return {"status": "success", **preview,
+            "cloudtrail": _trail("s3.amazonaws.com", "PutBucketPublicAccessBlock", response)}
+
+
+@mcp_server.preview("enableS3PublicAccessBlock")
+def preview_s3_public_access_block(bucket_name: str) -> Dict[str, Any]:
+    before = _public_access_block(bucket_name)
+    off = [key for key, on in before.items() if not on]
+    if not off:
+        raise ValueError(f"{bucket_name}은 퍼블릭 액세스 차단이 이미 모두 켜져 있습니다")
+    security = _security_of(bucket_name)
+    warning = (" (버킷 정책이 공개입니다. 차단을 켜면 정적 웹사이트 등 공개 접근이 끊깁니다)"
+               if security.get('policy_is_public') else "")
+    return {"target": bucket_name, "before": f"꺼진 항목 {len(off)}개 ({', '.join(off)})", "after": "4개 모두 켜짐",
+            "summary": f"S3 {bucket_name} 퍼블릭 액세스 차단 {len(off)}개 항목 켜기{warning}"}
 
 
 @mcp_server.tool()

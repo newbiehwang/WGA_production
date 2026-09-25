@@ -226,6 +226,28 @@ Resources:
                   - cloudwatch:EnableAlarmActions
                   - cloudwatch:DisableAlarmActions
                 Resource: !Sub 'arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:wga-${Environment}-governance-*'
+              # 변경 도구: EC2 인스턴스 중지·시작 (app.py의 set_ec2_instance_state). 태그 기반 접근 제어(ABAC):
+              # wga-managed=true 태그가 붙은 인스턴스만. 도구 안에서도 같은 태그를 확인한다
+              - Effect: Allow
+                Action:
+                  - ec2:StopInstances
+                  - ec2:StartInstances
+                Resource: !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+                Condition:
+                  StringEquals:
+                    'aws:ResourceTag/wga-managed': 'true'
+              # ABAC는 태그를 바꿀 수 없어야 의미가 있다: 이 역할은 태그를 붙이거나 지울 수 없다 (명시적 거부)
+              - Effect: Deny
+                Action:
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                Resource: '*'
+              # 변경 도구: S3 퍼블릭 액세스 차단 켜기 (app.py의 enable_s3_public_access_block). 보안을 강화하는 방향만:
+              # 끄는 권한(DeleteBucketPublicAccessBlock)은 주지 않는다. 켜기 전 상태는 위의 GetBucketPublicAccessBlock으로 본다
+              - Effect: Allow
+                Action:
+                  - s3:PutBucketPublicAccessBlock
+                Resource: 'arn:aws:s3:::*'
               # 승인 재확인: 승인 상태 확인 + 실행 표시(조건부 쓰기)와 결과 기록 (lambda_mcp/approval.py)
               - Effect: Allow
                 Action:
