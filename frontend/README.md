@@ -13,7 +13,7 @@ npm run build      # tsc 타입 검사 + vite 빌드 → dist/ (deploy.sh가 Amp
 
 | 경로 | 내용 |
 |---|---|
-| `src/App.tsx` | 로그인 여부에 따라 로그인 화면 / 위쪽 내비게이션 + 화면(홈 `/`, 대화 `/chat`) |
+| `src/App.tsx` | 로그인 여부에 따라 로그인 화면 / 위쪽 내비게이션 + 화면(홈 `/`, 대화 `/chat`, 감사 로그 `/audit`) |
 | `src/auth/` | Cognito 로그인(로그인 버튼 → Cognito 로그인 페이지 → `/redirect`로 돌아옴, Amplify Auth)과 로그인 상태 |
 | `src/api/http.ts` | axios 공통 설정: API 주소, ID 토큰 붙이기, 401이면 로그인 화면으로 |
 | `src/stores/` | 대화 목록·메시지(`chatStore`), 모델 목록(`modelsStore`) — Zustand |
@@ -21,9 +21,10 @@ npm run build      # tsc 타입 검사 + vite 빌드 → dist/ (deploy.sh가 Amp
 | `src/components/panel.css` | 패널·목록 행·버튼·확인창 (AXPI) |
 | `src/features/home/` | 홈: 큰 제목·설명·큰 입력칸 (FinGate-X 첫 화면 구성, 누르면 예시 질문이 펼쳐짐) |
 | `src/features/chat/` | 대화: 메시지, 질문 입력칸, 대화 목록 팝업창, 답변을 만드는 과정(`ProgressTrace`: 사고 요약·도구 호출·'생각하는 중… (12초)') |
+| `src/features/audit/` | 감사 로그: 기간·결과·종류·도구로 거르기, 관리자는 모든 사용자, 행을 누르면 입력값·오류·질문 ID 등 상세 (`GET /audit`) |
 | `src/utils/markdown.ts` | 답변 마크다운 → HTML (표·코드 블록·목록) |
 | `src/utils/toolTrace.ts` | 답변을 만드는 과정(사고 요약·MCP 도구 호출)을 화면에 그릴 목록으로 바꾸기 |
-| `src/mock/api.ts` | mock 모드의 가짜 API (배포용 빌드에는 들어가지 않는다). 질문마다 몇 초짜리 진행 상황(사고 → 도구 → 사고)도 흉내 낸다 |
+| `src/mock/api.ts` | mock 모드의 가짜 API (배포용 빌드에는 들어가지 않는다). 질문마다 몇 초짜리 진행 상황(사고 → 도구 → 사고)도 흉내 낸다. 감사 로그는 관리자 시점으로 세 사람의 30일치 예시를 두고, 질문을 보내면 기록이 추가된다 |
 
 ## 환경 값 (저장소 루트의 `.env`, deploy.sh가 배포할 때 채운다)
 

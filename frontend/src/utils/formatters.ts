@@ -17,6 +17,14 @@ export function formatKoreanDateTime(isoString: string): string {
     return `${year}. ${month}. ${day}. ${ampm} ${hour12}:${mm}`;
 }
 
+// 2026. 9. 25. 오후 3:12:05 (한국 시간, 초까지). 감사 로그처럼 같은 분에 여러 건이 있는 목록에 쓴다
+export function formatKoreanDateTimeSeconds(isoString: string): string {
+    const date = new Date(isoString);
+    if (!isoString || isNaN(date.getTime())) return formatKoreanDateTime(isoString);
+    const seconds = String(new Date(date.getTime() + 9 * 60 * 60 * 1000).getUTCSeconds()).padStart(2, '0');
+    return `${formatKoreanDateTime(isoString)}:${seconds}`;
+}
+
 // 프로필 동그라미에 넣을 두 글자 (이름이 없으면 ME)
 export function makeAvatarLabel(displayName: string) {
     const compact = displayName.replace(/\s+/g, '');
