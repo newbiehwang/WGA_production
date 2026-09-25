@@ -1,17 +1,13 @@
-mcpengine[cli,lambda]
-langchain-aws
-langchain-mcp-adapters
-langgraph
-mcp
-zmq
-pandas
-numpy
+# AWS 공식 MCP 서버 (lambda_mcp/official.py가 이 Lambda MCP 서버에 붙인다)
+awslabs.cloudwatch-mcp-server==0.3.1
+awslabs.aws-documentation-mcp-server==1.2.1
+awslabs.billing-cost-management-mcp-server==0.0.38
+# 공식 서버를 같은 프로세스 안에서 부르는 in-memory 클라이언트, 공식 서버가 쓰는 MCP SDK
+fastmcp==4.0.9
+mcp==2.2.0
+# 직접 둔 도구 (다이어그램·차트)와 Lambda MCP 서버
+boto3
 pydantic
-pydantic-core
-tabulate
-markdownify
-httpx
-diagrams
-pillow
 requests
+diagrams
 matplotlib

@@ -57,6 +57,10 @@ Resources:
           ENV: !Ref Environment
           MCP_SESSION_TABLE: !Sub 'wga-mcp-sessions-${Environment}'
           DIAGRAM_BUCKET: !Sub 'wga-diagrambucket-${AWS::AccountId}-${Environment}'
+          # AWS 공식 MCP 서버(awslabs)의 로그(loguru)는 오류만 남긴다
+          FASTMCP_LOG_LEVEL: ERROR
+          # Lambda에서 쓸 수 있는 곳은 /tmp뿐이다. 라이브러리(fastmcp 등)가 홈 폴더에 설정·캐시를 만들 때 쓰인다
+          HOME: /tmp
 
   # IAM 인증 Function URL: SigV4로 서명된 요청만 허용한다.
   # 같은 계정의 LLM Lambda Role이 identity 정책으로 호출 권한을 가지므로 resource 정책(AWS::Lambda::Permission)은 두지 않는다.
@@ -86,27 +90,40 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              # CloudWatch Logs 조회 도구 (describe/filter/get, Logs Insights)
+              # AWS 공식 CloudWatch MCP 서버 (awslabs.cloudwatch-mcp-server의 README "Required IAM Permissions")
+              # 로그 그룹 조회, Logs Insights 쿼리(시작·결과·중지·목록), 저장된 쿼리, 로그 이상 탐지
               - Effect: Allow
                 Action:
                   - logs:DescribeLogGroups
-                  - logs:DescribeLogStreams
-                  - logs:GetLogEvents
-                  - logs:FilterLogEvents
+                  - logs:DescribeQueryDefinitions
+                  - logs:DescribeQueries
+                  - logs:ListLogAnomalyDetectors
+                  - logs:ListAnomalies
                   - logs:StartQuery
                   - logs:GetQueryResults
+                  - logs:StopQuery
                 Resource: '*'
-              # CloudWatch 대시보드·알람 조회 도구 (리소스 수준 권한 미지원 액션 포함)
+              # 공식 CloudWatch MCP 서버의 메트릭·알람 도구 + 직접 둔 대시보드 도구 (app.py)
               - Effect: Allow
                 Action:
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:ListMetrics
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:DescribeAlarmHistory
                   - cloudwatch:ListDashboards
                   - cloudwatch:GetDashboard
-                  - cloudwatch:DescribeAlarms
                 Resource: '*'
-              # Cost Explorer 비용 조회 도구 (리소스 수준 권한 미지원)
+              # AWS 공식 Billing and Cost Management MCP 서버의 Cost Explorer 도구 (조회만, 리소스 수준 권한 미지원)
               - Effect: Allow
                 Action:
                   - ce:GetCostAndUsage
+                  - ce:GetCostAndUsageWithResources
+                  - ce:GetDimensionValues
+                  - ce:GetCostForecast
+                  - ce:GetUsageForecast
+                  - ce:GetTags
+                  - ce:GetCostCategories
+                  - ce:GetSavingsPlansUtilization
                 Resource: '*'
               # MCP 세션 테이블 (lambda_mcp/session.py)
               - Effect: Allow

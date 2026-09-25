@@ -102,3 +102,31 @@ def test_tool_call_is_one_step_not_two(llm_service):
          "error": "도구 호출 오류: AccessDenied"},
         {"tool_name": "get_dashboard_summary", "input": {"dashboard_name": "d"}, "status": "error"},
     ]
+
+
+def test_anthropic_tools_keep_the_full_input_schema(aws):
+    # AWS 공식 MCP 도구는 배열 안의 객체(items), 선택 인자(anyOf), 선택지(enum)를 쓴다.
+    # 예전처럼 속성마다 type·description만 남기면 모델이 인자를 엉뚱한 모양으로 보낸다
+    load_service_module("services/llm", "llm_service")
+    from mcp_anthropic_client import AnthropicMCPClient
+
+    client = AnthropicMCPClient(mcp_url="https://example.invalid", api_key="k", model_id="claude-sonnet-5")
+    schema = {
+        "type": "object",
+        "properties": {
+            "dimensions": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}}}},
+            "statistic": {"anyOf": [{"enum": ["Sum", "Average"]}, {"type": "null"}], "default": None},
+        },
+        "required": ["dimensions"],
+    }
+    client.tools = [{"name": "get_metric_data", "description": "메트릭 조회", "inputSchema": schema},
+                    {"name": "listCloudwatchDashboards", "description": "대시보드 목록", "inputSchema": {}}]
+
+    converted = {tool["name"]: tool for tool in client._convert_tools_format()}
+
+    assert converted["get_metric_data"]["input_schema"] == schema
+    # 인자가 없는 도구도 Anthropic이 받는 모양(object + properties)이 된다
+    assert converted["listCloudwatchDashboards"]["input_schema"] == {"type": "object", "properties": {}}
+    # 도구 목록은 프롬프트 캐시에 올린다 (마지막 도구에만 표시)
+    assert converted["listCloudwatchDashboards"]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in converted["get_metric_data"]

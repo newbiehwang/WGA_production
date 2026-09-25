@@ -5,13 +5,13 @@ boto3
 requests
 python-jose[cryptography]
 slack_sdk
-# MCP 서버(mcp/app.py) import에 필요한 패키지
-pandas
-tabulate
+# MCP 서버(mcp/app.py) import에 필요한 패키지 (mcp/requirements.txt와 같은 버전)
+awslabs.cloudwatch-mcp-server==0.3.1
+awslabs.aws-documentation-mcp-server==1.2.1
+awslabs.billing-cost-management-mcp-server==0.0.38
+fastmcp==4.0.9
+mcp==2.2.0
 pydantic
-httpx
-markdownify
-beautifulsoup4
 diagrams
 matplotlib
 # 정적 분석

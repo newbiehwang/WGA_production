@@ -31,7 +31,8 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 - **AI/ML**: Anthropic Claude (AWS Bedrock / Anthropic API), MCP (Model Context Protocol)
 - **Database**: DynamoDB, Athena
 - **Storage**: S3 (정적 파일, 로그, 다이어그램 이미지 저장)
-- **Monitoring 대상**: CloudWatch Logs, CloudWatch Dashboard, Cost Explorer
+- **Monitoring 대상**: CloudWatch Logs(Logs Insights), CloudWatch 메트릭·알람·대시보드, Cost Explorer
+- **MCP 도구**: AWS 공식 MCP 서버(awslabs) — CloudWatch, AWS Documentation, Billing and Cost Management(Cost Explorer)
 - **Authentication**: AWS Cognito (User Pool, Identity Pool)
 - **Infrastructure**: CloudFormation (Nested Stack 포함)
 - **배포**: `deploy.sh` 배포 스크립트, CodeBuild(MCP 이미지 빌드), ECR, Amplify Hosting
@@ -70,7 +71,8 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 - **AWS 문서 검색**: "GuardDuty 심각도는 어떤 의미인가요?"
 
 ### 2. 실시간 모니터링 및 분석
-- **CloudWatch 로그 분석**: 서비스별 로그 조회 및 분석
+- **CloudWatch 로그 분석**: 로그 그룹 조회, Logs Insights 쿼리, 로그 이상 탐지
+- **CloudWatch 메트릭·알람**: 메트릭 조회·분석, 현재 울리는 알람과 알람 기록
 - **CloudWatch 대시보드 모니터링**: 주요 서비스를 실시간으로 모니터링
 - **CloudTrail 이벤트**: AWS API 호출 이력 및 사용자 활동 추적
 - **GuardDuty 보안 이벤트**: 보안 위협 분석
@@ -284,7 +286,20 @@ React 18과 TypeScript로 채팅 화면을 만들었습니다. 화면 디자인�
 로그인 화면의 로그인 버튼을 누르면 Cognito 로그인 페이지(Hosted UI)로 이동해 로그인하고 앱으로 돌아옵니다(OAuth 2.0 Authorization Code + PKCE). 회원가입, 이메일 인증, 비밀번호 찾기도 Cognito 페이지에서 처리하므로 앱은 비밀번호를 다루지 않습니다. 돌아온 뒤 code를 토큰으로 바꾸고 저장·갱신하는 일은 Amplify Auth(`signInWithRedirect`)가 맡고, API 요청에는 ID 토큰을 붙여 API Gateway의 Cognito Authorizer가 확인합니다. API가 401을 돌려주면 로그인 화면으로 돌아갑니다.
 
 ### Lambda 기반 MCP 서버 및 클라이언트 구현
-기존 MCP 프로토콜의 HTTP+SSE(Server-Sent Events) 방식은 AWS Lambda의 제약사항과 호환되지 않아, Streamable HTTP 방식으로 재설계했습니다. Lambda의 서버리스 환경에서 지속적인 연결을 유지할 수 없는 특성을 고려하여, 요청-응답 기반의 HTTP 프로토콜로 MCP 스펙을 구현했습니다. 이를 위해 전용 MCP 서버와 클라이언트를 직접 설계하고 개발했으며, 기존에 존재하는 MCP 서버들을 우리의 Streamable HTTP 방식과 호환되도록 리팩토링했습니다. 추가로, analyze_log_groups_insights 등 필요한 MCP 도구를 직접 설계하고 구현하였고, 기존의 MCP 도구 중 fetch_cloudwatch_logs_for_service()의 치명적인 결함을 발견 후 수정하였으며, 원작자의 Github Repo에 해당 내용을 반영한 Pull Request를 생성했습니다.
+MCP의 HTTP+SSE(Server-Sent Events) 방식은 연결을 오래 유지해야 해서 Lambda와 맞지 않아, 요청-응답 방식(Streamable HTTP)으로 MCP 서버와 클라이언트를 직접 만들었습니다. MCP 서버는 Lambda Function URL(IAM 인증)로 열고, 세션은 DynamoDB에 둡니다(`mcp/lambda_mcp/`).
+
+도구는 AWS 공식 MCP 서버(awslabs)를 이 Lambda MCP 서버에 붙여 씁니다(`mcp/lambda_mcp/official.py`). 공식 서버는 로컬 프로세스(stdio)로 띄우도록 만들어졌지만, Lambda에서는 서버 객체를 import해 fastmcp의 in-memory 클라이언트로 같은 프로세스 안에서 부릅니다. LLM Lambda에는 직접 둔 도구와 공식 도구가 한 목록으로 보입니다.
+
+| 도구 | 출처 |
+|---|---|
+| 로그 그룹 조회, Logs Insights 쿼리, 로그 이상 탐지, 메트릭 조회·분석, 알람·알람 기록 | `awslabs.cloudwatch-mcp-server` |
+| AWS 문서 검색·읽기·추천 | `awslabs.aws-documentation-mcp-server` |
+| 비용·사용량 조회, 예측 | `awslabs.billing-cost-management-mcp-server`의 Cost Explorer 부분 |
+| CloudWatch 대시보드 목록·요약 | 직접 둠 (공식 CloudWatch 서버에 대시보드 도구가 없음) |
+| 아키텍처 다이어그램 | 직접 둠 (공식 diagram 서버는 PyPI에서 폐기됨. 폐기 전 공식 서버를 옮겨 온 코드) |
+| 차트 15종 | 직접 둠 (AntV 차트 서비스) |
+
+공식 도구 중 PromQL, 로그 인덱스 추천, 일괄 Insights 쿼리는 뺐습니다(권한이 문서에 없거나 쓰임이 겹침). 공식 도구는 설명과 스키마가 길어서 도구 목록이 커지므로, Anthropic 요청에서는 도구 목록을 프롬프트 캐시에 올립니다. 이전 버전에서는 공개 MCP 서버의 로그 조회 도구를 옮겨 와 쓰면서 결함을 고쳐 원작자 저장소에 Pull Request를 보냈고, 이후 AWS 공식 서버로 바꿨습니다.
 
 ### Lambda 기반 서버리스 백엔드 아키텍처
 전체 백엔드 시스템을 AWS Lambda 함수 기반으로 구현하여 서버리스 아키텍처의 장점을 극대화했습니다. 각 마이크로서비스를 독립적인 Lambda 함수로 분리하여 개발, 배포, 확장이 용이하도록 설계했습니다. LLM Service, Database Service, Chat History Service, Slackbot Service를 각각 별도의 Lambda 함수로 구현하고, API Gateway를 통해 통합된 RESTful API로 제공합니다. Lambda의 이벤트 기반 실행 모델을 활용하여 요청이 있을 때만 실행되므로 비용 효율성을 확보했으며, AWS의 관리형 서비스와의 네이티브 통합을 통해 운영 부담을 최소화했습니다. Lambda Layer로 공통 라이브러리와 종속성을 관리하며, 함수별 메모리와 타임아웃은 역할에 따라 다르게 설정했습니다(예: MCP 서버 2048MB/180초, Slack 봇 256MB/15초).
@@ -318,7 +333,7 @@ pytest
 `dev:mock`은 `frontend/src/mock/api.ts`가 axios 요청을 가로채 백엔드와 같은 모양으로 응답합니다. 처음에는 예시 대화가 하나 있고, 질문을 보낼 때마다 도구 목록·표·목록·코드·실패한 도구가 담긴 예시 답변이 차례로 나옵니다. 대화 기록은 메모리에만 있어 새로 고치면 처음으로 돌아갑니다. 배포용 빌드에는 들어가지 않습니다.
 
 ### 테스트
-`tests/`의 단위 테스트는 [moto](https://github.com/getmoto/moto)로 DynamoDB, CloudWatch Logs, CloudWatch를 모킹해 AWS 계정 없이 실행됩니다.
+`tests/`의 단위 테스트는 [moto](https://github.com/getmoto/moto)로 DynamoDB, CloudWatch Logs, CloudWatch, Cost Explorer를 모킹해 AWS 계정 없이 실행됩니다.
 
 | 파일 | 검증 내용 |
 |---|---|
@@ -326,7 +341,7 @@ pytest
 | `test_llm_service.py` | 웹 요청의 Slack 전용 필드 제거, 세션 히스토리 소유자 확인, CORS 허용 목록 |
 | `test_mcp_client.py` | MCP Function URL 호출 시 SigV4 서명 |
 | `test_slack_security.py` | Slack 요청 서명(위조·변조·재전송), Cognito ID 토큰(aud·iss·만료·서명) 검증 |
-| `test_mcp_tools.py` | MCP 도구(로그 조회, 대시보드 조회)와 세션 저장소 동작 |
+| `test_mcp_tools.py` | MCP 도구: 공식 서버 도구가 목록에 합쳐지는지(`$ref` 없이), 공식 CloudWatch·Cost Explorer·문서 검색 호출, 도구 오류를 `isError` 결과로 돌려주는지, 대시보드 도구와 세션 저장소 |
 | `test_model_selection.py` | 기본 모델 선택(지금 제공되는 최신 Sonnet), 퇴역한 모델 요청의 대체, 모델 목록 페이지 넘김·캐시 |
 
 ### CI (`.github/workflows/ci.yml`)
