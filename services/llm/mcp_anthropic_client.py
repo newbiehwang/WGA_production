@@ -57,12 +57,18 @@ class AnthropicMCPClient:
         self.progress = None
         # 요청마다 llm_service가 새로 넣어 주는 민감정보 가리기 (redaction.Redactor). 가명 표가 요청마다 따로여야 한다
         self.redactor = Redactor()
+        # 요청마다 llm_service가 넣어 주는 감사 로그 (audit.AuditLog). 진행 상황과 같은 지점에서 기록한다
+        self.audit = None
 
     def _report(self, event: str, *args) -> None:
-        """진행 상황에 한 단계를 알린다 (기록할 곳이 없으면 아무것도 하지 않는다).
-        진행 상황은 화면과 대화 기록에 남으므로 도구 오류 메시지 등을 가린 뒤에 넘긴다."""
+        """한 단계를 진행 상황과 감사 로그에 알린다 (기록할 곳이 없으면 아무것도 하지 않는다).
+        - 진행 상황은 화면과 대화 기록에 남으므로 도구 오류 메시지 등을 가린 뒤에 넘긴다.
+        - 감사 로그는 원래 값을 받아 스스로 가린다 (비밀 값만 가리고 계정 ID 등은 남긴다).
+          감사 로그에 없는 단계(사고 요약 등)는 넘기지 않는다."""
         if self.progress is not None:
             getattr(self.progress, event)(*self.redactor.redact(list(args)))
+        if self.audit is not None and hasattr(self.audit, event):
+            getattr(self.audit, event)(*args)
 
     def _redact_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """이전 대화의 메시지 하나를 가린 사본. 사고 블록은 서명과 함께 받은 그대로 보내야 하므로 건드리지 않는다
@@ -823,7 +829,8 @@ class AnthropicMCPClient:
                         # MCP 도구는 실패를 예외 대신 결과의 isError로 알리기도 한다
                         failed = isinstance(result, dict) and result.get("isError") is True
                         self._report("tool_finished", tool_use_id, not failed,
-                                     self._tool_error_text(result) if failed else None)
+                                     self._tool_error_text(result) if failed else None,
+                                     len(json.dumps(result, ensure_ascii=False, default=str)))
 
                         # 디버그 로그에 도구 결과 기록
                         self.debug_log.append({

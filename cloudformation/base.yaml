@@ -423,6 +423,15 @@ Resources:
       UserPoolTags:
         Environment: !Ref Environment
 
+  # 관리자 그룹: 이 그룹의 사용자는 모든 사람의 감사 로그를 본다 (GET /audit).
+  # 그룹 추가는 콘솔 또는 aws cognito-idp admin-add-user-to-group으로 운영자가 한다 (가입만으로는 들어갈 수 없다)
+  AdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: admins
+      Description: WGA 관리자 (모든 사용자의 감사 로그 조회)
+      UserPoolId: !Ref UserPool
+
   # User Pool Client
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient

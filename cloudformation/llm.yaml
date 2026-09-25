@@ -214,6 +214,19 @@ Resources:
                   - dynamodb:PutItem
                   - dynamodb:GetItem
                 Resource: !GetAtt LlmProgressTable.Arn
+              # 감사 로그 (audit.py): 추가와 조회만. 수정·삭제(UpdateItem·DeleteItem)는 주지 않는다
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt AuditTable.Arn
+                  - !Sub '${AuditTable.Arn}/index/by-day'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt AuditLogGroup.Arn
 
   # 답변을 만드는 동안의 진행 상황 (생각 중·도구 실행 중·사고 요약). 화면이 답을 기다리며 1초마다 읽는다.
   # 답을 기다리는 동안만 쓰는 임시 기록이라 한 시간 뒤 TTL로 지워지고, 백업(PITR)·고객 관리 KMS 키를 두지 않는다
@@ -238,6 +251,65 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: 'expiresAt'
         Enabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # 감사 로그: 누가 언제 어떤 도구를 어떤 입력으로 불렀나 (audit.py). 화면(GET /audit)에서 조회한다.
+  # 기본 키 userId + at(시각#도구 호출 ID)으로 한 사람의 기간을, 날짜 인덱스(by-day)로 모든 사람의 기간을 읽는다.
+  # 90일 뒤 TTL로 지워지고, 더 오래 볼 기록은 CloudWatch Logs(AuditLogGroup, 1년)에 있다
+  AuditTable:
+    Type: AWS::DynamoDB::Table
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: AWS 소유 키 암호화(기본값)를 쓴다. 고객 관리 KMS 키는 월 비용이 들어 토이 프로젝트에서는 두지 않는다
+    Properties:
+      TableName: !Sub 'wga-audit-${Environment}'
+      AttributeDefinitions:
+        - AttributeName: 'userId'
+          AttributeType: S
+        - AttributeName: 'at'
+          AttributeType: S
+        - AttributeName: 'day'
+          AttributeType: S
+      KeySchema:
+        - AttributeName: 'userId'
+          KeyType: HASH
+        - AttributeName: 'at'
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: 'by-day'
+          KeySchema:
+            - AttributeName: 'day'
+              KeyType: HASH
+            - AttributeName: 'at'
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+      # 감사 기록은 실수로 지우거나 덮어써도 되돌릴 수 있어야 한다 (35일 이내 시점 복구)
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: 'expiresAt'
+        Enabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # 감사 로그의 장기 보관본 (JSON 한 줄씩, Logs Insights로 분석). Lambda 로그 그룹과 따로 두어 보관 기간을 다르게 한다
+  AuditLogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: CloudWatch Logs 기본 암호화를 쓴다. 고객 관리 KMS 키는 월 비용이 들어 두지 않는다
+    Properties:
+      LogGroupName: !Sub '/wga/${Environment}/audit'
+      RetentionInDays: 365
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -279,6 +351,9 @@ Resources:
           LLM_PROGRESS_TABLE: !Ref LlmProgressTable
           # 민감정보 가리기: 이 계정의 ID는 도구 결과 어디에 있든 Claude로 보내기 전에 가린다 (redaction.py)
           ACCOUNT_ID: !Ref AWS::AccountId
+          # 감사 로그 (audit.py)
+          AUDIT_TABLE: !Ref AuditTable
+          AUDIT_LOG_GROUP: !Ref AuditLogGroup
       Layers:
         - !Ref LlmLambdaLayer
       Tags:
@@ -383,6 +458,47 @@ Resources:
       FunctionName: !Ref LlmLambdaFunction
       Principal: 'apigateway.amazonaws.com'
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayId}/*/*/llm1/progress/*'
+
+  # GET /audit: 감사 로그 (llm_service.handle_audit). 일반 사용자는 자기 기록만, admins 그룹은 모든 사람의 기록
+  AuditApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ParentId: !Ref ApiGatewayRootResourceId
+      PathPart: 'audit'
+
+  AuditMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref AuditApiResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LlmLambdaFunction.Arn}/invocations'
+
+  AuditOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref AuditApiResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LlmLambdaFunction.Arn}/invocations'
+
+  LlmLambdaPermissionForAudit:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref LlmLambdaFunction
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayId}/*/*/audit'
 
   Llm2ApiResource:
     Type: AWS::ApiGateway::Resource
