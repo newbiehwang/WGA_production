@@ -573,9 +573,19 @@
   justify-self: end;
 }
 
-/* 로그인 버튼 아래 안내 (Cognito 로그인 페이지로 이동한다는 것) */
-.login-hint--center {
-  text-align: center;
+/* 'AWS에서 로그인' 버튼: 글자 왼쪽에 AWS 로고를 두고 둘을 한가운데에 모은다 */
+.login-submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+/* 로고 폭은 글자 높이에 맞춘다 (AWS 로고 비율 640:512) */
+.login-submit-logo {
+  width: 30px;
+  height: 24px;
+  flex-shrink: 0;
 }
 
 /* 앱을 여는 중 (로그인 상태 확인) */
