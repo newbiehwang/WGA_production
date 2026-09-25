@@ -20,7 +20,7 @@ export default function App() {
     const refresh = useAuthStore((s) => s.refresh);
     const navigate = useNavigate();
     const [loginError, setLoginError] = useState('');
-    // useNavigate가 돌려주는 함수는 주소가 바뀔 때마다 새로 만들어진다 (React Router v6).
+    // useNavigate가 돌려주는 함수는 주소가 바뀔 때마다 새로 만들어진다 (React Router 선언형 모드).
     // 아래 로그인 처리가 navigate에 따라 다시 실행되면 탭을 옮길 때마다 구독을 새로 하므로, 최신 함수를 ref로 들고 쓴다
     const navigateRef = useRef(navigate);
     navigateRef.current = navigate;

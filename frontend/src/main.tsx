@@ -19,8 +19,7 @@ const start = async () => {
     }
     ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
         <React.StrictMode>
-            {/* React Router v7 동작을 미리 켠다 (켜지 않으면 콘솔에 경고가 나온다) */}
-            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+            <BrowserRouter>
                 <App />
             </BrowserRouter>
         </React.StrictMode>,
