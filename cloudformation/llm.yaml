@@ -141,6 +141,28 @@ Resources:
                   - pricing:GetAttributeValues
                   - pricing:GetProducts
                 Resource: '*'
+              # AWS 공식 IAM MCP 서버의 조회 도구 12개가 부르는 API만 (읽기 전용).
+              # 변경 도구는 빼서(official.py) Create*·Delete*·Attach*·Put*·CreateAccessKey 등 쓰기 권한은 주지 않는다
+              - Effect: Allow
+                Action:
+                  - iam:ListUsers
+                  - iam:GetUser
+                  - iam:ListAccessKeys
+                  - iam:ListAttachedUserPolicies
+                  - iam:ListGroupsForUser
+                  - iam:ListUserPolicies
+                  - iam:GetUserPolicy
+                  - iam:ListRoles
+                  - iam:ListRolePolicies
+                  - iam:GetRolePolicy
+                  - iam:ListPolicies
+                  - iam:GetPolicyVersion
+                  - iam:ListGroups
+                  - iam:GetGroup
+                  - iam:ListAttachedGroupPolicies
+                  - iam:ListGroupPolicies
+                  - iam:SimulatePrincipalPolicy
+                Resource: '*'
               # MCP 세션 테이블 (lambda_mcp/session.py)
               - Effect: Allow
                 Action:

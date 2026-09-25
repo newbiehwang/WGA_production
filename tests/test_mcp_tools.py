@@ -231,6 +231,7 @@ def test_official_servers_start_when_package_dir_is_read_only(tmp_path):
     assert "cost-explorer" in result["names"] and "describe_log_groups" in result["names"]
     assert "lookup_events" in result["names"]  # CloudTrail 서버도 읽기 전용 폴더에서 뜬다
     assert "get_pricing" in result["names"]  # Pricing 서버도
+    assert "simulate_principal_policy" in result["names"]  # IAM 서버도
     assert result["is_error"] is False
 
 

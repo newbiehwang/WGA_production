@@ -48,6 +48,19 @@ TOOL_RISK: Dict[str, str] = {
     "get_pricing_service_attributes": READ,
     "get_pricing_attribute_values": READ,
     "get_pricing": READ,
+    # AWS 공식 IAM MCP 서버 (조회만. 변경 도구 17개는 official.py에서 뺐다)
+    "list_users": READ,
+    "get_user": READ,
+    "list_roles": READ,
+    "list_policies": READ,
+    "get_managed_policy_document": READ,
+    "simulate_principal_policy": READ,  # 정책 평가만 하고 권한을 바꾸지 않는다
+    "list_groups": READ,
+    "get_group": READ,
+    "get_user_policy": READ,
+    "get_role_policy": READ,
+    "list_user_policies": READ,
+    "list_role_policies": READ,
     # 직접 둔 도구 (app.py, 이름은 camelCase로 등록된다)
     "listCloudwatchDashboards": READ,
     "getDashboardSummary": READ,
