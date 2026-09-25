@@ -216,3 +216,120 @@ def test_deploy_warms_up_mcp_after_last_stack_update():
     # MCP 이미지를 바꾸는 메인 스택과 마지막 base 스택 업데이트가 끝난 뒤에 깨워야 새 이미지가 깨어난다
     call = DEPLOY_SH.index('warm_up_mcp "wga-mcp-$ENV"')
     assert DEPLOY_SH.rindex("cfn_update $BASE_STACK_NAME") < call < DEPLOY_SH.index("# 7. 배포 완료 요약")
+
+
+# ---------------------------------------------------------------- 루트 .env (환경 값과 Anthropic API 키)
+
+def run_function(name, body, env, cwd=None):
+    script = "set -e\n" + extract_function(name) + body + '\necho "계속 진행"\n'
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env, cwd=cwd)
+
+
+def test_dotenv_set_keeps_other_lines(tmp_path):
+    # deploy.sh는 프론트엔드 값만 바꾸고, 직접 적은 ANTHROPIC_API_KEY와 주석은 그대로 둔다
+    env_file = tmp_path / ".env"
+    env_file.write_text("# 직접 적는 값\nANTHROPIC_API_KEY=sk-ant-KEEP\nVITE_API_DEST=https://old\n")
+    result = run_function("dotenv_set",
+                          f'dotenv_set "{env_file}" VITE_API_DEST "https://new"\n'
+                          f'dotenv_set "{env_file}" USER_POOL_ID "pool-1"',
+                          {"PATH": "/usr/bin:/bin"})
+    assert result.returncode == 0, result.stderr
+    assert env_file.read_text() == ("# 직접 적는 값\nANTHROPIC_API_KEY=sk-ant-KEEP\n"
+                                    "VITE_API_DEST=https://new\nUSER_POOL_ID=pool-1\n")
+
+
+FAKE_SSM = r'''#!/usr/bin/env python3
+# 가짜 aws CLI: SSM get-parameter / put-parameter만 흉내 낸다. 부른 인자는 calls.log, 올린 요청은 put.json에 남긴다
+import json, os, sys
+args = sys.argv[1:]
+work = os.environ["WORK"]
+with open(os.path.join(work, "calls.log"), "a") as log:
+    log.write(json.dumps(args) + "\n")
+if args[:2] == ["ssm", "get-parameter"]:
+    current = os.environ.get("CURRENT")
+    if not current:
+        print("ParameterNotFound", file=sys.stderr)
+        sys.exit(254)
+    print(json.dumps({"Parameter": {"Name": args[args.index("--name") + 1], "Value": current,
+                                    "Type": "SecureString"}}))
+elif args[:2] == ["ssm", "put-parameter"]:
+    path = args[args.index("--cli-input-json") + 1].removeprefix("file://")
+    with open(path) as src, open(os.path.join(work, "put.json"), "w") as dst:
+        dst.write(src.read())
+    print(json.dumps({"Version": 2}))
+'''
+
+KEY = "sk-ant-api03-FROM-DOTENV"
+
+
+def run_sync(tmp_path, env_text=None, current=None):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "aws").write_text(FAKE_SSM)
+    (bin_dir / "aws").chmod(0o755)
+    env_file = tmp_path / ".env"
+    if env_text is not None:
+        env_file.write_text(env_text)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "WORK": str(tmp_path)}
+    if current:
+        env["CURRENT"] = current
+    body = f'ROOT_ENV_FILE="{env_file}"\nSSM_PATH_PREFIX=/wga/dev\nsync_anthropic_key'
+    result = run_function("sync_anthropic_key", body, env)
+    log = tmp_path / "calls.log"
+    calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+    put = tmp_path / "put.json"
+    return result, calls, (json.loads(put.read_text()) if put.exists() else None)
+
+
+def test_anthropic_key_from_dotenv_is_put_to_ssm_without_command_args(tmp_path):
+    result, calls, put = run_sync(tmp_path, f'# 주석\nANTHROPIC_API_KEY="{KEY}"\nVITE_API_DEST=https://x\n')
+    assert result.returncode == 0 and "계속 진행" in result.stdout, result.stderr
+    assert put == {"Name": "/wga/dev/ANTHROPIC_API_KEY", "Value": KEY, "Type": "SecureString", "Overwrite": True}
+    # 키 값은 명령 인자(ps로 보인다)에도, 화면 출력에도 나오지 않는다
+    assert all(KEY not in arg for call in calls for arg in call)
+    assert KEY not in result.stdout + result.stderr
+    # 요청을 담았던 임시 파일은 지운다
+    request = [c for c in calls if c[:2] == ["ssm", "put-parameter"]][0]
+    assert not Path(request[request.index("--cli-input-json") + 1].removeprefix("file://")).exists()
+
+
+def test_same_key_is_not_put_again(tmp_path):
+    result, calls, put = run_sync(tmp_path, f"ANTHROPIC_API_KEY={KEY}\n", current=KEY)
+    assert result.returncode == 0 and put is None
+    assert "SSM 값과 같아" in result.stdout
+
+
+@pytest.mark.parametrize("env_text", [None, "ANTHROPIC_API_KEY=\nVITE_API_DEST=https://x\n"])
+def test_missing_key_keeps_ssm_value(tmp_path, env_text):
+    # GitHub Actions처럼 .env가 없거나 키를 비워 두면 SSM에 있는 값을 그대로 쓴다
+    result, _, put = run_sync(tmp_path, env_text)
+    assert result.returncode == 0 and "계속 진행" in result.stdout and put is None
+
+
+def test_deploy_syncs_key_before_stacks_and_fills_root_env():
+    assert DEPLOY_SH.index("\nsync_anthropic_key\n") < DEPLOY_SH.index("# 1. CloudFormation 버킷 확인")
+    # 프론트엔드 값은 루트 .env에만 쓰고, 예전 frontend/.env.local과 쓰지 않는 값은 만들지 않는다
+    assert "frontend/.env.local" not in DEPLOY_SH
+    for unused in ("API_DEST=", "VITE_API_URL", "COGNITO_REDIRECT_URI", "COGNITO_IDENTITY_POOL_ID"):
+        assert f"dotenv_set \"$ROOT_ENV_FILE\" {unused}" not in DEPLOY_SH
+    written = set(re.findall(r'dotenv_set "\$ROOT_ENV_FILE" (\w+)', DEPLOY_SH))
+    example = set(re.findall(r"^(\w+)=", (ROOT / ".env.example").read_text(), re.M))
+    assert written == {"VITE_API_DEST", "AWS_REGION", "USER_POOL_ID", "COGNITO_CLIENT_ID", "COGNITO_DOMAIN"}
+    assert example == written | {"ANTHROPIC_API_KEY"}
+
+
+def test_root_env_is_ignored_but_example_is_committed():
+    def ignored(path):
+        return subprocess.run(["git", "check-ignore", "-q", path], cwd=ROOT).returncode == 0
+    assert ignored(".env")
+    assert not ignored(".env.example")
+
+
+def test_frontend_bundle_takes_only_chosen_env_values():
+    # 루트 .env에 ANTHROPIC_API_KEY가 함께 있으므로, 번들에 넣는 값을 정해 둔 것만 넣어야 한다.
+    # envPrefix를 바꾸면 그 접두사로 시작하는 값이 모두 번들에 들어간다
+    config = (ROOT / "frontend" / "vite.config.ts").read_text()
+    assert "envPrefix:" not in config  # 설정으로 쓰지 않는다 (주석의 설명은 괜찮다)
+    assert "env.ANTHROPIC" not in config  # 비밀 값을 읽어 쓰지 않는다
+    assert set(re.findall(r"'import\.meta\.env\.(\w+)'", config)) == {
+        "AWS_REGION", "USER_POOL_ID", "COGNITO_CLIENT_ID", "COGNITO_DOMAIN"}

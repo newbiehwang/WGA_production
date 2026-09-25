@@ -25,7 +25,7 @@ let mockSignedIn = true; // mock 모드는 로그인된 상태로 시작한다 (
 
 const USER_POOL_ID = import.meta.env.USER_POOL_ID;
 const CLIENT_ID = import.meta.env.COGNITO_CLIENT_ID;
-const COGNITO_DOMAIN = import.meta.env.COGNITO_DOMAIN; // 도메인 앞부분 (deploy.sh가 .env.local에 적는다)
+const COGNITO_DOMAIN = import.meta.env.COGNITO_DOMAIN; // 도메인 앞부분 (deploy.sh가 루트 .env에 적는다)
 const REGION = import.meta.env.AWS_REGION;
 const REDIRECT_PATH = '/redirect';
 const configured = !!(USER_POOL_ID && CLIENT_ID && COGNITO_DOMAIN && REGION);
@@ -137,7 +137,7 @@ export async function login(): Promise<void> {
     }
     if (!configured) {
         throw new Error(
-            'Cognito 설정(USER_POOL_ID, COGNITO_CLIENT_ID, COGNITO_DOMAIN, AWS_REGION)이 없습니다. deploy.sh가 만든 frontend/.env.local이 있는지 확인하세요.',
+            'Cognito 설정(USER_POOL_ID, COGNITO_CLIENT_ID, COGNITO_DOMAIN, AWS_REGION)이 없습니다. 저장소 루트의 .env에 값이 있는지 확인하세요 (deploy.sh가 배포할 때 채웁니다).',
         );
     }
     try {

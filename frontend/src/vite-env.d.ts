@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-// vite.config.ts의 define이 넣어 주는 값 (deploy.sh가 만든 frontend/.env.local에서 읽는다)
+// vite.config.ts가 넣어 주는 값 (저장소 루트의 .env에서 읽는다. deploy.sh가 배포할 때 채운다)
 interface ImportMetaEnv {
     readonly AWS_REGION?: string;
     readonly USER_POOL_ID?: string;

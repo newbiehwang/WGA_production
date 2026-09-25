@@ -4,7 +4,7 @@ React 18 + TypeScript + Vite. 디자인은 AXPI(LG Entrue) 화면의 CSS를 가�
 
 ```bash
 npm install
-npm run dev        # 배포된 환경의 로그인·API 사용 (deploy.sh가 만든 .env.local 필요)
+npm run dev        # 배포된 환경의 로그인·API 사용 (deploy.sh가 값을 채운 저장소 루트의 .env 필요)
 npm run dev:mock   # AWS 없이 화면만: 로그인된 상태로 시작하고 가짜 API로 응답
 npm run build      # tsc 타입 검사 + vite 빌드 → dist/ (deploy.sh가 Amplify에 올린다)
 ```
@@ -25,7 +25,9 @@ npm run build      # tsc 타입 검사 + vite 빌드 → dist/ (deploy.sh가 Amp
 | `src/utils/toolTrace.ts` | 답변을 만드는 과정(사고 요약·MCP 도구 호출)을 화면에 그릴 목록으로 바꾸기 |
 | `src/mock/api.ts` | mock 모드의 가짜 API (배포용 빌드에는 들어가지 않는다). 질문마다 몇 초짜리 진행 상황(사고 → 도구 → 사고)도 흉내 낸다 |
 
-## 환경 값 (`.env.local`, deploy.sh가 만든다)
+## 환경 값 (저장소 루트의 `.env`, deploy.sh가 배포할 때 채운다)
+
+`vite.config.ts`가 저장소 루트의 `.env`를 읽는다(`envDir`). 같은 파일에 `ANTHROPIC_API_KEY`도 있으므로, 브라우저 번들에는 아래 값만 골라 넣는다.
 
 | 이름 | 쓰는 곳 |
 |---|---|
@@ -34,4 +36,4 @@ npm run build      # tsc 타입 검사 + vite 빌드 → dist/ (deploy.sh가 Amp
 | `USER_POOL_ID`, `COGNITO_CLIENT_ID` | Cognito 로그인 |
 | `COGNITO_DOMAIN` | Cognito 로그인 페이지 주소의 앞부분 (`<값>.auth.<리전>.amazoncognito.com`) |
 
-로그인 뒤 돌아올 주소는 지금 열린 앱 주소 + `/redirect`로 정한다. Cognito에는 배포 주소와 `http://localhost:5173/redirect`가 등록되어 있어, 로컬에서는 포트 5173으로 띄워야 한다 (`.env.local`의 `COGNITO_REDIRECT_URI`는 쓰지 않는다).
+로그인 뒤 돌아올 주소는 지금 열린 앱 주소 + `/redirect`로 정한다. Cognito에는 배포 주소와 `http://localhost:5173/redirect`가 등록되어 있어, 로컬에서는 포트 5173으로 띄워야 한다.
