@@ -191,6 +191,7 @@ def test_governance_alarms_and_dashboard():
 def test_iam_denies_changing_governance_alarms():
     statements = template("llm.yaml")["Resources"]["McpLambdaExecutionRole"]["Properties"]["Policies"][0][
         "PolicyDocument"]["Statement"]
-    deny = [s for s in statements if s["Effect"] == "Deny"]
+    # Deny 문장이 여럿이라(S3 객체 읽기, EC2 사용자 데이터 등) 순서가 아니라 동작으로 찾는다
+    deny = [s for s in statements if s["Effect"] == "Deny" and "cloudwatch:DisableAlarmActions" in s["Action"]]
     assert deny and set(deny[0]["Action"]) == {"cloudwatch:EnableAlarmActions", "cloudwatch:DisableAlarmActions"}
     assert deny[0]["Resource"].endswith(":alarm:wga-${Environment}-governance-*")
