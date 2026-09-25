@@ -1059,6 +1059,13 @@
   overflow-wrap: anywhere;
 }
 
+.approval-trail {
+  margin: 0;
+  font-size: 12px;
+  color: #5f6670;
+  overflow-wrap: anywhere;
+}
+
 /* 도구 결과에 지시문처럼 보이는 문구가 있었다는 표시 (ProgressTrace, services/llm/injection.py) */
 .trace-suspicious {
   display: inline-flex;

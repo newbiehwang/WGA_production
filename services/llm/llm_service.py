@@ -396,6 +396,10 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
         3. Dashboards: listCloudwatchDashboards → getDashboardSummary
         4. Documentation Search (AWS official documentation MCP tools): search_documentation → read_documentation (recommend for related pages)
         5. Cost Analysis (AWS official Cost Explorer MCP tool): cost-explorer (operation "getCostAndUsage" etc.)
+        5-1. Audit trail (AWS official CloudTrail MCP tool): lookup_events - who called which AWS API and when
+             (last 90 days of management events, filter by EventName, Username, ResourceName, EventSource, ...).
+             Omit region to use this deployment's region. To verify a change executed after approval, look up its
+             EventName and match the event's requestID with the request ID from the change result.
         6. Visualization: Generate charts/AWS diagrams (only if the user explicitly requests visualization)
         7. Changes (only when the user asks to change something): setLogRetention (WGA Lambda log group retention),
            setAlarmActions (turn WGA alarm notifications on/off). Calling them does NOT change anything yet: it creates

@@ -5,7 +5,7 @@
 
     LLM Lambda ──HTTP(JSON-RPC)──▶ LambdaMCPServer (lambda_mcp.py, 세션·전송은 그대로)
                                       ├─ 직접 만든 도구 (app.py의 @mcp_server.tool)
-                                      └─ OfficialTools ──in-memory──▶ 공식 서버 객체 (CloudWatch, 문서, Cost Explorer)
+                                      └─ OfficialTools ──in-memory──▶ 공식 서버 객체 (CloudWatch, 문서, Cost Explorer, CloudTrail)
 
 in-memory 클라이언트로 부르는 이유
 - Cost Explorer 서버(fastmcp)는 MCP 세션이 있어야 도구가 돈다 (ctx.info가 세션을 쓴다). 서버 객체의
@@ -45,7 +45,17 @@ EXCLUDED_TOOLS = {
     "recommend_indexes_account": "로그 인덱스 추천",
     # 여러 쿼리 일괄 실행: execute_log_insights_query와 쓰임이 겹친다
     "execute_cwl_insights_batch": "execute_log_insights_query와 중복",
+    # CloudTrail Lake: 스캔한 데이터만큼 쿼리 비용이 들고 이벤트 데이터 저장소(유료)가 있어야 한다.
+    # 최근 90일 관리 이벤트 조회(lookup_events, 무료)만 쓴다
+    "lake_query": "CloudTrail Lake (유료)",
+    "get_query_status": "CloudTrail Lake (유료)",
+    "get_query_results": "CloudTrail Lake (유료)",
+    "list_event_data_stores": "CloudTrail Lake (유료)",
 }
+
+# region 인자의 기본값이 버지니아 북부 리전으로 박혀 있는 도구. 모델이 region을 생략하면 이 Lambda의 리전을 쓰게 한다.
+# (CloudWatch 도구들은 이미 AWS_REGION을 기본으로 쓴다. CloudTrail 조회는 리전별이라 다른 리전을 보면 '기록 없음'이 된다)
+REGION_FROM_ENV_TOOLS = {"lookup_events"}
 
 
 def _inline_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -74,7 +84,7 @@ def _inline_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def load_default_servers() -> List[Any]:
-    """이 서비스가 쓰는 공식 서버: CloudWatch, AWS 문서, Cost Explorer. 부를 때 import한다 (무겁다)."""
+    """이 서비스가 쓰는 공식 서버: CloudWatch, AWS 문서, Cost Explorer, CloudTrail. 부를 때 import한다 (무겁다)."""
     # 공식 서버는 import할 때 loguru로 로그를 남긴다. Lambda 로그가 넘치지 않게 경고 이상만 남긴다
     os.environ.setdefault("FASTMCP_LOG_LEVEL", "ERROR")
     # Lambda에서는 /tmp만 쓸 수 있고 패키지가 설치된 곳(site-packages)은 읽기 전용이다.
@@ -87,17 +97,20 @@ def load_default_servers() -> List[Any]:
     os.environ.setdefault("MCP_SQL_THRESHOLD", str(5 * 1024 * 1024))
     from awslabs.aws_documentation_mcp_server.server_aws import mcp as documentation
     from awslabs.billing_cost_management_mcp_server.tools.cost_explorer_tools import cost_explorer_server
+    from awslabs.cloudtrail_mcp_server.server import mcp as cloudtrail
     from awslabs.cloudwatch_mcp_server.server import mcp as cloudwatch
 
-    return [cloudwatch, documentation, cost_explorer_server]
+    return [cloudwatch, documentation, cost_explorer_server, cloudtrail]
 
 
 class OfficialTools:
     """공식 서버 여러 개의 도구를 하나로 모아 목록을 주고, 이름으로 해당 서버에 호출을 넘긴다."""
 
-    def __init__(self, load_servers: Callable[[], List[Any]], excluded: Optional[Dict[str, str]] = None):
+    def __init__(self, load_servers: Callable[[], List[Any]], excluded: Optional[Dict[str, str]] = None,
+                 region_from_env: Optional[set] = None):
         self._load_servers = load_servers  # 서버 목록을 돌려주는 함수. 도구 목록이 처음 필요할 때 부른다
         self._excluded = excluded or {}
+        self._region_from_env = region_from_env or set()
         self._loop = asyncio.new_event_loop()
         self._schemas: Optional[Dict[str, Dict[str, Any]]] = None  # 도구 이름 → MCP 도구 정의
         self._routes: Dict[str, Any] = {}  # 도구 이름 → 서버 객체
@@ -105,7 +118,21 @@ class OfficialTools:
     @classmethod
     def default(cls) -> "OfficialTools":
         """이 서비스가 쓰는 공식 서버를 붙인다. 여기서는 불러오지 않는다 (위 모듈 설명)."""
-        return cls(load_default_servers, EXCLUDED_TOOLS)
+        return cls(load_default_servers, EXCLUDED_TOOLS, REGION_FROM_ENV_TOOLS)
+
+    def _region(self) -> Optional[str]:
+        return os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+
+    def _with_env_region(self, name: str, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """region 기본값을 이 Lambda의 리전으로 바꾼 스키마 (모델이 읽는 설명도 함께)."""
+        region = self._region()
+        props = schema.get("properties", {})
+        if name not in self._region_from_env or "region" not in props or not region:
+            return schema
+        schema = copy.deepcopy(schema)
+        schema["properties"]["region"].update(
+            default=region, description=f"AWS region to query. Defaults to {region} (this deployment's region).")
+        return schema
 
     def _run(self, coro):
         return self._loop.run_until_complete(coro)
@@ -125,7 +152,8 @@ class OfficialTools:
                     schemas[tool.name] = {
                         "name": tool.name,
                         "description": definition.get("description", ""),
-                        "inputSchema": _inline_refs(definition.get("inputSchema", {"type": "object"})),
+                        "inputSchema": self._with_env_region(
+                            tool.name, _inline_refs(definition.get("inputSchema", {"type": "object"}))),
                     }
                     self._routes[tool.name] = server
         self._schemas = schemas
@@ -145,6 +173,9 @@ class OfficialTools:
         from fastmcp import Client
 
         server = self._routes[name]
+        # region을 생략하면 서버 기본값(버지니아 북부) 대신 이 Lambda의 리전을 넘긴다
+        if name in self._region_from_env and not (arguments or {}).get("region") and self._region():
+            arguments = {**(arguments or {}), "region": self._region()}
 
         async def call_once():
             async with Client(server) as client:

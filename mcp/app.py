@@ -5,6 +5,7 @@
    - CloudWatch: 로그 그룹 조회, Logs Insights 쿼리, 로그 이상 탐지, 메트릭 조회·분석, 알람·알람 기록
    - AWS 문서: 문서 검색·읽기·추천
    - 비용: Cost Explorer (billing-cost-management 서버의 Cost Explorer 부분만)
+   - CloudTrail: 최근 90일 관리 이벤트 조회 (누가 언제 어떤 API를 불렀나. 유료인 CloudTrail Lake 도구는 뺐다)
 2. 이 파일에 직접 둔 도구 (공식 서버가 없거나 폐기된 것)
    - CloudWatch 대시보드 목록·요약 (공식 CloudWatch 서버에 대시보드 도구가 없다)
    - 아키텍처 다이어그램 (공식 diagram 서버는 PyPI에서 폐기되었다. 폐기 전 공식 서버를 옮겨 온 코드)
@@ -128,6 +129,13 @@ RETENTION_DAYS = [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731,
                   3288, 3653]
 
 
+def _trail(event_source: str, event_name: str, response: Dict[str, Any]) -> Dict[str, Any]:
+    """이 변경이 CloudTrail에 남긴 이벤트를 찾을 단서. CloudTrail 이벤트의 requestID가 AWS API 응답의 요청 ID와 같다.
+    감사 로그(앱에서 누가 승인했나)와 CloudTrail(AWS에서 무엇이 바뀌었나)을 이 요청 ID로 잇는다."""
+    return {"event_source": event_source, "event_name": event_name,
+            "request_id": (response or {}).get("ResponseMetadata", {}).get("RequestId")}
+
+
 def _check_log_group(log_group_name: str) -> None:
     if not (log_group_name.startswith("/aws/lambda/wga-") and log_group_name.endswith(f"-{environment}")):
         raise ValueError(f"이 환경의 WGA Lambda 로그 그룹(/aws/lambda/wga-*-{environment})만 바꿀 수 있습니다: "
@@ -160,8 +168,8 @@ def set_log_retention(log_group_name: str, retention_days: int) -> Dict[str, Any
         The log group with the retention before and after the change.
     """
     preview = preview_log_retention(log_group_name, retention_days)
-    logs_client.put_retention_policy(logGroupName=log_group_name, retentionInDays=retention_days)
-    return {"status": "success", **preview}
+    response = logs_client.put_retention_policy(logGroupName=log_group_name, retentionInDays=retention_days)
+    return {"status": "success", **preview, "cloudtrail": _trail("logs.amazonaws.com", "PutRetentionPolicy", response)}
 
 
 @mcp_server.preview("setLogRetention")
@@ -211,10 +219,11 @@ def set_alarm_actions(alarm_name: str, enabled: bool) -> Dict[str, Any]:
     """
     preview = preview_alarm_actions(alarm_name, enabled)
     if enabled:
-        cloudwatch_client.enable_alarm_actions(AlarmNames=[alarm_name])
+        response = cloudwatch_client.enable_alarm_actions(AlarmNames=[alarm_name])
     else:
-        cloudwatch_client.disable_alarm_actions(AlarmNames=[alarm_name])
-    return {"status": "success", **preview}
+        response = cloudwatch_client.disable_alarm_actions(AlarmNames=[alarm_name])
+    event_name = "EnableAlarmActions" if enabled else "DisableAlarmActions"
+    return {"status": "success", **preview, "cloudtrail": _trail("monitoring.amazonaws.com", event_name, response)}
 
 
 @mcp_server.preview("setAlarmActions")

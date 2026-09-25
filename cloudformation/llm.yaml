@@ -127,6 +127,12 @@ Resources:
                   - ce:GetCostCategories
                   - ce:GetSavingsPlansUtilization
                 Resource: '*'
+              # AWS 공식 CloudTrail MCP 서버의 이벤트 조회 (최근 90일 관리 이벤트, 무료).
+              # 유료인 CloudTrail Lake 도구는 빼서(official.py) cloudtrail:StartQuery 등은 주지 않는다. LookupEvents는 리소스 수준 권한 미지원
+              - Effect: Allow
+                Action:
+                  - cloudtrail:LookupEvents
+                Resource: '*'
               # MCP 세션 테이블 (lambda_mcp/session.py)
               - Effect: Allow
                 Action:

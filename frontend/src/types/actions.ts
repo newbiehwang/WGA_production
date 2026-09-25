@@ -17,4 +17,6 @@ export interface PendingAction {
     decidedBy?: string;
     decidedAt?: number;
     result?: string; // 실행 결과 (MCP 도구가 돌려준 글)
+    // 이 변경이 CloudTrail에 남긴 이벤트를 찾을 단서. CloudTrail 이벤트의 requestID가 request_id와 같다
+    cloudtrail?: { event_source: string; event_name: string; request_id: string };
 }

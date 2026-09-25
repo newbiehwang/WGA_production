@@ -32,7 +32,7 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 - **Database**: DynamoDB, Athena
 - **Storage**: S3 (정적 파일, 로그, 다이어그램 이미지 저장)
 - **Monitoring 대상**: CloudWatch Logs(Logs Insights), CloudWatch 메트릭·알람·대시보드, Cost Explorer
-- **MCP 도구**: AWS 공식 MCP 서버(awslabs) — CloudWatch, AWS Documentation, Billing and Cost Management(Cost Explorer)
+- **MCP 도구**: AWS 공식 MCP 서버(awslabs) — CloudWatch, AWS Documentation, Billing and Cost Management(Cost Explorer), CloudTrail
 - **Authentication**: AWS Cognito (User Pool, Identity Pool)
 - **Infrastructure**: CloudFormation (Nested Stack 포함)
 - **배포**: `deploy.sh` 배포 스크립트, CodeBuild(MCP 이미지 빌드), ECR, Amplify Hosting
@@ -129,6 +129,7 @@ AI가 스스로 AWS를 바꾸지 못하게, 사람이 승인한 변경만 실행
   3. 사용자가 승인하면(`POST /actions/{id}/approve`) 결정을 감사 로그에 먼저 남깁니다. 남기지 못하면 실행하지 않습니다.
   4. 작업 ID를 붙여 MCP를 부릅니다. MCP Lambda는 승인 테이블을 직접 다시 확인하고(상태·도구·인자 해시·만료) 조건부 쓰기로 한 번만 실행합니다.
   5. 화면이 `actionId`로 `/llm1`을 부르면, 서버가 저장된 실행 결과로 질문을 만들어 모델이 결과를 설명합니다.
+- **CloudTrail과 잇기**: 변경 도구는 AWS API 응답의 요청 ID를 돌려주고, 감사 로그의 실행 기록(`awsRequestId`)과 승인 카드에 남깁니다. CloudTrail 이벤트의 `requestID`와 같으므로 "앱에서 누가 승인했나 → AWS에서 무엇이 바뀌었나"를 한 번에 추적합니다(CloudTrail 조회에는 보통 몇 분 걸립니다).
 - **화면**: 답변 아래 승인 카드에 바뀔 내용(예: 30일 → 14일), 실제로 실행될 값, 남은 시간이 보이고 '승인하고 실행'·'거절' 버튼이 있습니다. 승인하면 '승인: …' 메시지와 함께 모델의 결과 설명이 이어집니다. 감사 로그 탭의 '변경 작업'에서 요청·승인·거절·실행 기록을 봅니다.
 - **승인자**: dev·test는 요청한 본인 또는 `approvers` 그룹, prod는 `approvers` 그룹의 다른 사람만 승인합니다(요청한 본인은 불가). 거절(`POST /actions/{id}/deny`)은 본인도 할 수 있습니다.
 - **Slack 봇**: 승인 화면이 없어 변경 작업을 요청할 수 없습니다(조회는 그대로).
@@ -358,11 +359,12 @@ MCP의 HTTP+SSE(Server-Sent Events) 방식은 연결을 오래 유지해야 해�
 | 로그 그룹 조회, Logs Insights 쿼리, 로그 이상 탐지, 메트릭 조회·분석, 알람·알람 기록 | `awslabs.cloudwatch-mcp-server` |
 | AWS 문서 검색·읽기·추천 | `awslabs.aws-documentation-mcp-server` |
 | 비용·사용량 조회, 예측 | `awslabs.billing-cost-management-mcp-server`의 Cost Explorer 부분 |
+| 누가 언제 어떤 AWS API를 불렀나 (최근 90일 관리 이벤트) | `awslabs.cloudtrail-mcp-server`의 `lookup_events` |
 | CloudWatch 대시보드 목록·요약 | 직접 둠 (공식 CloudWatch 서버에 대시보드 도구가 없음) |
 | 아키텍처 다이어그램 | 직접 둠 (공식 diagram 서버는 PyPI에서 폐기됨. 폐기 전 공식 서버를 옮겨 온 코드) |
 | 차트 15종 | 직접 둠 (AntV 차트 서비스) |
 
-공식 도구 중 PromQL, 로그 인덱스 추천, 일괄 Insights 쿼리는 뺐습니다(권한이 문서에 없거나 쓰임이 겹침). 공식 도구는 설명과 스키마가 길어서 도구 목록이 커지므로, Anthropic 요청에서는 도구 목록을 프롬프트 캐시에 올립니다. 이전 버전에서는 공개 MCP 서버의 로그 조회 도구를 옮겨 와 쓰면서 결함을 고쳐 원작자 저장소에 Pull Request를 보냈고, 이후 AWS 공식 서버로 바꿨습니다.
+공식 도구 중 PromQL, 로그 인덱스 추천, 일괄 Insights 쿼리는 뺐습니다(권한이 문서에 없거나 쓰임이 겹침). CloudTrail Lake 도구 4개(`lake_query` 등)도 뺐습니다(쿼리한 데이터만큼 비용이 들고 유료 이벤트 데이터 저장소가 필요). CloudTrail 조회 도구는 region 기본값이 버지니아 북부 리전으로 박혀 있어, 생략하면 이 배포의 리전을 쓰도록 바꿔 붙입니다. 공식 도구는 설명과 스키마가 길어서 도구 목록이 커지므로, Anthropic 요청에서는 도구 목록을 프롬프트 캐시에 올립니다. 이전 버전에서는 공개 MCP 서버의 로그 조회 도구를 옮겨 와 쓰면서 결함을 고쳐 원작자 저장소에 Pull Request를 보냈고, 이후 AWS 공식 서버로 바꿨습니다.
 
 ### 답변 진행 상황과 사고 과정
 답변을 만드는 동안 지금 무엇을 하는지(생각 중, 어떤 도구를 실행 중인지)와 모델의 사고 요약을 화면에 보여 줍니다. `/llm1`은 API Gateway REST의 동기 요청이라 답이 다 만들어진 뒤에 한 번만 응답하므로, 진행 상황은 따로 기록하고 화면이 따로 읽어 갑니다.

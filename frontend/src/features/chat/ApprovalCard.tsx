@@ -148,6 +148,12 @@ export function ApprovalCard({ action: initial }: { action: PendingAction }) {
             )}
 
             {status === 'failed' && action.result ? <p className="approval-result">{action.result}</p> : null}
+            {status === 'executed' && action.cloudtrail ? (
+                // 앱의 승인 기록과 AWS의 변경 기록(CloudTrail)을 잇는 열쇠. 보통 몇 분 뒤 CloudTrail에서 조회된다
+                <p className="approval-trail">
+                    CloudTrail: {action.cloudtrail.event_name} · 요청 ID <code>{action.cloudtrail.request_id}</code>
+                </p>
+            ) : null}
             {error ? (
                 <p className="approval-error" role="alert">
                     {error}
