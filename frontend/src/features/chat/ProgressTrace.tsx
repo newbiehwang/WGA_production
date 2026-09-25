@@ -86,6 +86,16 @@ function ToolStepView({ step }: { step: Extract<TraceStep, { kind: 'tool' }> }) 
                 </span>
                 <span className="trace-tool-label">{step.label}</span>
                 {step.detail ? <span className="trace-tool-detail">{step.detail}</span> : null}
+                {step.suspicious ? (
+                    // 도구 결과(로그·문서 등 제3자가 쓴 글)에 모델에게 하는 지시처럼 보이는 문구가 있었다.
+                    // 모델에는 데이터로만 다루라는 경고와 함께 넘겼고, 변경은 사람이 승인해야 실행된다
+                    <span
+                        className="trace-suspicious"
+                        title="도구 결과에 지시문처럼 보이는 문구가 있어 데이터로만 다뤘습니다"
+                    >
+                        의심 문구
+                    </span>
+                ) : null}
                 {step.status === 'running' ? <span className="sr-only">실행 중</span> : null}
             </span>
             {result ? (

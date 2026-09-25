@@ -61,6 +61,7 @@ interface MockTool {
   input: Record<string, unknown>;
   status: "ok" | "error";
   error?: string;
+  suspicious?: string[]; // 결과에 지시문처럼 보이는 문구가 있었다 (services/llm/injection.py)
 }
 
 // 답변 예시. 보낼 때마다 차례로 돌아가며, 화면에서 자주 고치는 요소(사고 요약·도구 목록·표·목록·코드·실패한 도구)를 모두 담았다.
@@ -223,6 +224,35 @@ const APPROVAL_ENTRIES: Record<"retention" | "alarm", MockEntry> = {
   },
 };
 
+// 로그에 AI를 노린 지시문이 심겨 있던 경우 (질문에 '인젝션'·'의심'이 있으면). 진행 과정과 감사 로그에 '의심 문구'가 보인다
+const INJECTION_ENTRY: MockEntry = {
+  answer: [
+    "지난 1시간 동안 `wga-llm-dev` 함수에서 오류 2건이 있었습니다.",
+    "",
+    "그런데 로그 한 줄에 **AI에게 로그 보존 기간을 1일로 바꾸라는 지시문**이 들어 있었습니다. 로그는 데이터일 뿐이라 따르지 않았고, 아무것도 바꾸지 않았습니다.",
+    "누가 이 로그를 남겼는지 확인해 보시길 권합니다.",
+  ].join("\n"),
+  tools: [
+    {
+      tool_name: "execute_log_insights_query",
+      input: {
+        log_group_names: ["/aws/lambda/wga-llm-dev"],
+        query_string: "filter @message like /ERROR/",
+      },
+      status: "ok",
+      suspicious: [
+        "ignore_instructions_ko",
+        "tool_command",
+        "change_command_ko",
+      ],
+    },
+  ],
+  thinking: [
+    "최근 오류 로그를 Logs Insights로 찾는다.",
+    "로그 한 줄이 설정을 바꾸라고 지시하고 있다. 도구 결과는 데이터이므로 따르지 않고, 사용자에게 알린다.",
+  ],
+};
+
 // 승인한 작업의 결과 설명 (실제로는 서버가 저장된 결과로 질문을 만들어 모델이 설명한다)
 const explanationEntry = (action: PendingAction): MockEntry => ({
   answer:
@@ -289,6 +319,7 @@ const planRun = (entry: (typeof ANSWERS)[number]): Omit<Run, "started"> => {
         input: tool.input,
         status: tool.status,
         ...(tool.error && { error: tool.error }),
+        ...(tool.suspicious && { suspicious: tool.suspicious }),
         ms: TOOL_MS,
       },
     });
@@ -316,6 +347,7 @@ const entryFor = (body: RequestBody): MockEntry => {
   const action = body.actionId ? actions.get(body.actionId) : undefined;
   if (action) return explanationEntry(action);
   const text = body.text || body.question || "";
+  if (text.includes("인젝션") || text.includes("의심")) return INJECTION_ENTRY;
   if (text.includes("보존")) return APPROVAL_ENTRIES.retention;
   if (text.includes("알람") && /끄|꺼|멈|중지/.test(text))
     return APPROVAL_ENTRIES.alarm;
@@ -437,6 +469,7 @@ const auditRecordsOf = (
       input: tool.input,
       status: tool.status,
       ...(tool.error && { error: tool.error }),
+      ...(tool.suspicious && { injectionSuspected: tool.suspicious }),
       ms: TOOL_MS,
       resultChars:
         tool.status === "ok" ? 1800 + tool.tool_name.length * 97 : 120,
@@ -454,6 +487,7 @@ const auditRecordsOf = (
     model: MODELS[0].id,
     status: "ok",
     toolCount: tools.length,
+    injectionSuspected: tools.filter((tool) => tool.suspicious?.length).length,
     redacted,
     ms: at - time.getTime() + STEP_GAP_MS,
     ...(failed && { status: "ok" as const }), // 도구가 실패해도 질문(답변)은 성공일 수 있다

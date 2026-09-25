@@ -21,6 +21,8 @@ export interface AuditRecord {
     toolUseId?: string;
     input?: Record<string, unknown> | string; // 길어서 잘린 입력은 글자로 온다
     resultChars?: number;
+    // 지시문처럼 보이는 문구 (services/llm/injection.py). 도구 호출은 종류 목록, 질문은 그런 도구 결과의 수
+    injectionSuspected?: string[] | number;
     // 질문 (kind: 'request')
     question?: string;
     model?: string;

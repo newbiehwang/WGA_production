@@ -75,6 +75,8 @@ const rangeOf = (days: number) => {
 const timeOf = (record: AuditRecord) => record.at.split('#')[0];
 const keyOf = (record: AuditRecord) => `${record.userId}|${record.at}`;
 const secondsOf = (ms?: number) => (typeof ms === 'number' ? `${(ms / 1000).toFixed(1)}초` : '');
+const suspiciousOf = (record: AuditRecord) =>
+    Array.isArray(record.injectionSuspected) ? record.injectionSuspected.length > 0 : !!record.injectionSuspected;
 const redactedTotal = (record: AuditRecord) =>
     Object.values(record.redacted ?? {}).reduce((sum, count) => sum + count, 0);
 
@@ -143,6 +145,8 @@ function Details({ record }: { record: AuditRecord }) {
             </pre>,
         ]);
         if (record.resultChars !== undefined) rows.push(['결과 크기', `${record.resultChars.toLocaleString()}자`]);
+        if (Array.isArray(record.injectionSuspected) && record.injectionSuspected.length)
+            rows.push(['의심 문구', `지시문처럼 보이는 문구 (${record.injectionSuspected.join(', ')}). 데이터로만 다뤘습니다`]);
     } else if (record.kind === 'action') {
         rows.push(['사건', ACTION_EVENTS[record.event ?? '']?.label ?? record.event ?? '']);
         rows.push(['변경 내용', record.summary ?? '']);
@@ -160,6 +164,7 @@ function Details({ record }: { record: AuditRecord }) {
         rows.push(['질문', record.question ?? '']);
         if (record.model) rows.push(['모델', <code key="model">{record.model}</code>]);
         rows.push(['도구 호출', `${record.toolCount ?? 0}번`]);
+        if (record.injectionSuspected) rows.push(['의심 문구가 든 도구 결과', `${record.injectionSuspected}건`]);
         const redacted = Object.entries(record.redacted ?? {});
         rows.push([
             'Claude로 보내기 전에 가린 값',
@@ -234,6 +239,11 @@ function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boole
                 </span>
                 <span className="audit-col-flags">
                     {record.source === 'slack' ? <span className="audit-flag">Slack</span> : null}
+                    {suspiciousOf(record) ? (
+                        <span className="audit-flag is-suspicious" title="도구 결과에 지시문처럼 보이는 문구가 있었습니다">
+                            의심 문구
+                        </span>
+                    ) : null}
                     {redacted ? (
                         <span className="audit-flag is-redacted" title="Claude로 보내기 전에 가린 값의 수">
                             가림 {redacted}

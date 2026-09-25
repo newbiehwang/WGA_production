@@ -1058,3 +1058,18 @@
   color: #b02a37;
   overflow-wrap: anywhere;
 }
+
+/* 도구 결과에 지시문처럼 보이는 문구가 있었다는 표시 (ProgressTrace, services/llm/injection.py) */
+.trace-suspicious {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(220, 53, 69, 0.12);
+  color: #b02a37;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}

@@ -149,6 +149,12 @@ Resources:
                   - cloudwatch:EnableAlarmActions
                   - cloudwatch:DisableAlarmActions
                 Resource: !Sub 'arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:wga-${Environment}-*'
+              # 거버넌스 알람(인젝션 의심, 승인 거절 반복)은 AI가 요청한 변경으로 끌 수 없다 (명시적 Deny가 Allow보다 우선)
+              - Effect: Deny
+                Action:
+                  - cloudwatch:EnableAlarmActions
+                  - cloudwatch:DisableAlarmActions
+                Resource: !Sub 'arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:wga-${Environment}-governance-*'
               # 승인 재확인: 승인 상태 확인 + 실행 표시(조건부 쓰기)와 결과 기록 (lambda_mcp/approval.py)
               - Effect: Allow
                 Action:
