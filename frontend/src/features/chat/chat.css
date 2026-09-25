@@ -279,79 +279,188 @@
 }
 
 /* 도구 호출 목록: 왼쪽 세로줄, 본문보다 작고 옅게 */
-.tool-trace {
-  list-style: none;
-  margin: 4px 0 12px;
-  padding: 2px 0 2px 12px;
-  border-left: 2px solid #dfe6ee;
+/* 답변을 만든 과정 (ProgressTrace.tsx): 사고 요약 · 도구 호출 · 기다리는 동안의 상태 줄.
+   Claude Code가 작업 과정을 보여 주는 모양을 따랐고, 색은 WGA 색(파랑)을 쓴다 */
+.trace {
+  margin: 2px 0 12px;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: #6b7785;
 }
 
-.tool-step + .tool-step {
+.trace-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.trace-step + .trace-step {
   margin-top: 6px;
 }
 
-.tool-step-title {
-  display: block;
+/* 사고 요약: 첫 줄만 흐리게 보이고, 누르면 전체가 펼쳐진다 */
+.trace-thinking-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.trace-caret {
+  display: inline-block;
+  width: 10px;
+  font-size: 10px;
+  color: #9aa4ae;
+  transition: transform 160ms ease;
+}
+
+.trace-thinking.is-open .trace-caret {
+  transform: rotate(90deg);
+}
+
+.trace-thinking-mark {
+  color: var(--color-primary);
+}
+
+.trace-thinking-title {
+  font-style: italic;
   color: #3c4650;
 }
 
+.trace-thinking-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: italic;
+  color: #9aa4ae;
+}
+
+.trace-thinking-text {
+  margin: 4px 0 0 16px;
+  padding-left: 10px;
+  border-left: 2px solid #dfe6ee;
+  font-style: italic;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #6b7785;
+}
+
+/* 도구 호출: ● 이름 입력값 / ⎿ 결과 */
+.trace-tool-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #3c4650;
+}
+
+.trace-bullet {
+  display: inline-block;
+  width: 10px;
+  font-size: 9px;
+  color: #2e9d6a;
+}
+
+.trace-tool.is-running .trace-bullet {
+  color: var(--color-primary);
+  animation: trace-blink 1s ease-in-out infinite;
+}
+
+.trace-tool.is-error .trace-bullet {
+  color: #dc3545;
+}
+
+.trace-tool.is-error .trace-tool-label {
+  font-weight: 700;
+}
+
 /* 입력값만 고정폭 글꼴 (고정폭 글꼴에는 한글이 없어 이름까지 쓰면 글자 간격이 벌어진다) */
-.tool-step-detail {
-  display: block;
-  padding-left: 1.2em;
+.trace-tool-detail {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   color: #8a94a0;
   overflow-wrap: anywhere;
 }
 
-.tool-step-error {
-  font-family: inherit;
+.trace-tool-result {
+  display: block;
+  padding-left: 16px;
   font-size: 12.5px;
+  color: #8a94a0;
 }
 
-.tool-step.failed .tool-step-title {
-  font-weight: 700;
+.trace-tool.is-error .trace-tool-result {
+  color: #b02a37;
 }
 
-.typing-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 32px;
+/* 기다리는 동안: 도는 별표 · 지금 하는 일 · 지난 시간 */
+.trace-status {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--color-primary);
 }
 
-.typing-indicator .dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  opacity: 0.5;
-  animation: dot-pulse 1.4s infinite ease-in-out;
+.trace-steps + .trace-status {
+  margin-top: 10px;
 }
 
-.typing-indicator .dot:nth-child(2) {
-  animation-delay: 0.2s;
+.trace-spinner {
+  display: inline-block;
+  width: 14px;
+  font-size: 14px;
+  text-align: center;
 }
 
-.typing-indicator .dot:nth-child(3) {
-  animation-delay: 0.4s;
+.trace-verb {
+  font-weight: 600;
 }
 
-@keyframes dot-pulse {
+.trace-time {
+  color: #8a94a0;
+}
+
+@keyframes trace-blink {
   0%,
-  60%,
   100% {
-    transform: scale(0.8);
-    opacity: 0.4;
-  }
-  30% {
-    transform: scale(1.2);
     opacity: 1;
   }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trace-tool.is-running .trace-bullet {
+    animation: none;
+  }
+
+  .trace-caret {
+    transition: none;
+  }
+}
+
+/* 화면에는 보이지 않고 화면 읽기 프로그램만 읽는 글 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* 마크다운 (utils/markdown.ts) */

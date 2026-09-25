@@ -11,6 +11,13 @@ export interface ChatMessageType {
     query_result?: any[];
     elapsed_time?: string | number;
     inference?: any;
+    progress?: LiveProgress; // 답을 기다리는 동안의 진행 상황 (기다리는 메시지에만 있다)
+}
+
+// GET /llm1/progress/{requestId}의 응답 (services/llm/llm_progress.py)
+export interface LiveProgress {
+    phase: 'thinking' | 'tool' | 'done' | 'error';
+    steps: unknown[]; // 화면에 그릴 때 utils/toolTrace.ts의 fromProgressSteps로 바꾼다
 }
 
 export interface ChatSession {

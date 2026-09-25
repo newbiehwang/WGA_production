@@ -1,10 +1,13 @@
 // 메시지 하나 (예전 components/ChatMessage.vue).
-// 내 질문은 오른쪽에 글씨만, 답변은 말풍선 없이 본문으로. 답변 위에는 답을 만들며 부른 도구를 세로줄 목록으로 보여 준다.
+// 내 질문은 오른쪽에 글씨만, 답변은 말풍선 없이 본문으로.
+// 답변 위에는 답을 만든 과정(사고 요약·도구 호출)을 순서대로 보여 준다 (ProgressTrace).
+// 답을 기다리는 동안에는 같은 자리에 진행 상황과 '생각하는 중… (12초)'이 보인다.
 import { memo, useMemo, useState } from 'react';
 import agentLogo from '@/assets/agent-logo.png';
 import type { ChatMessageType } from '@/types/chat';
 import { parseMarkdown } from '@/utils/markdown';
-import { toolSteps } from '@/utils/toolTrace';
+import { fromProgressSteps, traceSteps } from '@/utils/toolTrace';
+import { ProgressTrace } from './ProgressTrace';
 
 // 마크다운 파서(utils/markdown.ts)는 HTML 특수 문자를 이미 escape한 글을 받는다.
 // 답변에 들어 있는 <script> 같은 글자가 HTML로 실행되지 않게 먼저 바꾼다
@@ -43,7 +46,12 @@ const rowsOf = (value: unknown): Record<string, unknown>[] => {
 function ChatMessageView({ message }: { message: ChatMessageType }) {
     const [showDetails, setShowDetails] = useState(false);
     const isUser = message.sender === 'user';
-    const steps = useMemo(() => (isUser ? [] : toolSteps(message.inference)), [isUser, message.inference]);
+    // 기다리는 중이면 진행 상황의 단계, 답이 왔으면 답변에 저장된 단계
+    const steps = useMemo(
+        () =>
+            isUser ? [] : message.isTyping ? fromProgressSteps(message.progress?.steps) : traceSteps(message.inference),
+        [isUser, message.isTyping, message.progress, message.inference],
+    );
     // 타이핑 중이면 지금까지 보여 준 만큼만 (빈 글자일 때 전체가 잠깐 보이지 않게)
     const shownText = message.animationState === 'typing' ? (message.displayText ?? '') : message.text;
     const html = useMemo(() => parseMarkdown(escapeHtml(shownText || '')), [shownText]);
@@ -63,29 +71,16 @@ function ChatMessageView({ message }: { message: ChatMessageType }) {
             ) : null}
 
             <div className="message-body">
-                {steps.length > 0 ? (
-                    // 실패는 색이 아니라 모양(— 와 굵기)으로 구분한다
-                    <ol className="tool-trace" aria-label="사용한 도구">
-                        {steps.map((step, index) => (
-                            <li key={index} className={`tool-step${step.failed ? ' failed' : ''}`} title={step.name}>
-                                <span className="tool-step-title">
-                                    {step.failed ? '—' : '✓'} {step.label}
-                                    {step.failed ? ' — 실패' : ''}
-                                </span>
-                                {step.detail ? <span className="tool-step-detail">{step.detail}</span> : null}
-                                {step.error ? <span className="tool-step-detail tool-step-error">{step.error}</span> : null}
-                            </li>
-                        ))}
-                    </ol>
-                ) : null}
+                <ProgressTrace
+                    steps={steps}
+                    live={
+                        message.isTyping
+                            ? { phase: message.progress?.phase ?? 'thinking', since: message.timestamp }
+                            : undefined
+                    }
+                />
 
-                {message.isTyping ? (
-                    <div className="typing-indicator" role="status" aria-label="답변을 만드는 중">
-                        <span className="dot" />
-                        <span className="dot" />
-                        <span className="dot" />
-                    </div>
-                ) : (
+                {message.isTyping ? null : (
                     <div className="message-content markdown-content" dangerouslySetInnerHTML={{ __html: html }} />
                 )}
 

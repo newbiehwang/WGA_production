@@ -1,5 +1,9 @@
-// 답변을 만들며 부른 MCP 도구를 대화 화면의 세로줄 목록으로 보여 주기 위한 변환.
-// 데이터는 LLM 응답의 inference.tools_used다: [{ tool_name, input, status?, error? }]
+// 답변을 만드는 과정(사고 요약·MCP 도구 호출)을 대화 화면의 목록으로 보여 주기 위한 변환.
+// 데이터는 두 가지다.
+// - 단계(steps): 사고 요약과 도구 호출이 일어난 순서대로 들어 있다. 답을 기다리는 동안의 진행 상황
+//   (GET /llm1/progress/{requestId})과 답변의 inference.steps가 같은 모양이다 (services/llm/llm_progress.py)
+//     { type: 'thinking', text } | { type: 'tool', id, name, input, status: 'running'|'ok'|'error', error?, ms? }
+// - 예전 답변: inference.tools_used만 있다 [{ tool_name, input, status?, error? }] (사고 요약 없음)
 // (대화 기록에서 다시 불러온 메시지는 inference가 JSON 문자열로 저장되어 있다)
 
 export interface ToolStep {
@@ -117,4 +121,77 @@ export function toolSteps(inference: unknown): ToolStep[] {
                 error: step.error ? clip(String(step.error), 160) : undefined,
             };
         });
+}
+
+// ---------------------------------------------------------------- 사고 요약과 도구 호출을 순서대로
+
+export type TraceStep =
+    | { kind: 'thinking'; text: string; preview: string }
+    | {
+          kind: 'tool';
+          label: string;
+          name: string;
+          detail: string;
+          status: 'running' | 'ok' | 'error';
+          error?: string;
+          seconds?: string; // 걸린 시간 ("1.2초")
+      };
+
+interface RawProgressStep {
+    type?: string;
+    text?: string;
+    name?: string;
+    input?: unknown;
+    status?: string;
+    error?: string;
+    ms?: number;
+}
+
+const PREVIEW = 60; // 접힌 사고 요약에서 보여 줄 첫 줄 길이
+
+const secondsOf = (ms?: number) => (typeof ms === 'number' ? `${(ms / 1000).toFixed(1)}초` : undefined);
+
+// 진행 상황·inference.steps의 단계 → 화면에 그릴 단계
+export function fromProgressSteps(raw: unknown): TraceStep[] {
+    if (!Array.isArray(raw)) return [];
+    const steps: TraceStep[] = [];
+    for (const step of raw as RawProgressStep[]) {
+        if (step?.type === 'thinking' && step.text) {
+            const firstLine = step.text.trim().split('\n')[0];
+            steps.push({ kind: 'thinking', text: step.text.trim(), preview: clip(firstLine, PREVIEW) });
+        } else if (step?.type === 'tool' && step.name) {
+            steps.push({
+                kind: 'tool',
+                label: labelOf(step.name),
+                name: step.name,
+                detail: summarize(step.input),
+                status: step.status === 'error' ? 'error' : step.status === 'running' ? 'running' : 'ok',
+                error: step.error ? clip(String(step.error), 160) : undefined,
+                seconds: secondsOf(step.ms),
+            });
+        }
+    }
+    return steps;
+}
+
+// 답변 하나의 과정. 단계(steps)가 있으면 그것을, 없으면(예전 답변) 도구 목록만 쓴다
+export function traceSteps(inference: unknown): TraceStep[] {
+    let data = inference;
+    if (typeof data === 'string') {
+        try {
+            data = JSON.parse(data);
+        } catch {
+            return [];
+        }
+    }
+    const steps = (data as { steps?: unknown } | null)?.steps;
+    if (Array.isArray(steps)) return fromProgressSteps(steps);
+    return toolSteps(data).map((step) => ({
+        kind: 'tool' as const,
+        label: step.label,
+        name: step.name,
+        detail: step.detail,
+        status: step.failed ? ('error' as const) : ('ok' as const),
+        error: step.error,
+    }));
 }

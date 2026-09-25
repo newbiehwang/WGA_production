@@ -5,9 +5,11 @@
 //   GET/PUT/DELETE  /sessions/{id}             대화 하나 / 제목 변경 / 삭제
 //   GET/POST        /sessions/{id}/messages    메시지 목록 / 메시지 저장
 //   POST            /llm1                      답변 만들기 (MCP 도구 호출 포함, 수십 초 걸릴 수 있다)
+//   GET             /llm1/progress/{requestId} 답변을 만드는 동안의 진행 상황 (사고 요약·도구 호출)
 // 사용자는 백엔드가 ID 토큰의 sub로 구분한다 (예전처럼 userId를 보내지 않는다).
 //
-// 질문 하나를 보내는 순서: 내 메시지 저장 → 화면에 "..." → /llm1 → 답변 저장 → 타이핑하듯 보여 주기
+// 질문 하나를 보내는 순서: 내 메시지 저장 → 화면에 '생각하는 중' → /llm1 → 답변 저장 → 타이핑하듯 보여 주기.
+// /llm1은 답이 다 만들어진 뒤에 한 번만 응답하므로, 기다리는 동안 진행 상황을 1초마다 따로 가져와 보여 준다
 import axios, { type CancelTokenSource } from 'axios';
 import { create } from 'zustand';
 import type { BotResponse, ChatMessageType, ChatSession } from '@/types/chat';
@@ -22,6 +24,8 @@ const ERROR_ANSWER = '죄송합니다. 응답을 처리하는 중에 오류가 �
 const CANCEL_ANSWER = '요청이 취소되었습니다.';
 const TYPING_MS_PER_CHAR = 10; // 답변을 타이핑하듯 보여 주는 속도
 const TYPING_MAX_MS = 2000; // 긴 답변도 이 시간 안에 다 보여 준다
+const PROGRESS_POLL_MS = 1000; // 답을 기다리는 동안 진행 상황을 가져오는 간격
+const PROGRESS_MAX_FAILURES = 10; // 연달아 이만큼 실패하면 그만 묻는다 (진행 상황 API가 없는 예전 백엔드 등)
 
 interface ChatState {
     sessions: ChatSession[]; // 목록에는 메시지 없이 요약만 둔다
@@ -93,6 +97,37 @@ export const useChatStore = create<ChatState>((set, get) => {
     const saveMessage = async (sessionId: string, message: Record<string, unknown>, cancel?: CancelTokenSource) =>
         (await axios.post(`/sessions/${sessionId}/messages`, message, { cancelToken: cancel?.token }))
             .data as ChatMessageType;
+
+    // 답을 기다리는 동안 진행 상황을 1초마다 가져와 기다리는 메시지에 넣는다. 멈출 때 쓸 타이머 번호를 돌려준다.
+    // - 아직 첫 기록 전(404)이거나 잠깐 실패하면 다음 차례에 다시 묻는다 (진행 상황은 보조 정보다).
+    //   연달아 PROGRESS_MAX_FAILURES번 실패하면 그만 묻고 '생각하는 중'만 보여 준다
+    // - 앞 요청이 끝나지 않았으면 이번 차례는 건너뛴다 (느린 응답이 쌓이지 않게)
+    // - 답이 먼저 와서 기다리는 메시지가 없어졌으면 늦게 온 진행 상황은 버린다 (updateMessages가 id로 찾는다)
+    const watchProgress = (sessionId: string, loadingId: string, requestId: string, cancel: CancelTokenSource) => {
+        let busy = false;
+        let failures = 0;
+        const timer = window.setInterval(async () => {
+            if (busy) return;
+            busy = true;
+            try {
+                const { data } = await axios.get(`/llm1/progress/${requestId}`, { cancelToken: cancel.token });
+                updateMessages(sessionId, (messages) =>
+                    messages.map((m) =>
+                        m.id === loadingId && m.isTyping
+                            ? { ...m, progress: { phase: data.phase ?? 'thinking', steps: data.steps ?? [] } }
+                            : m,
+                    ),
+                );
+                failures = 0;
+            } catch {
+                failures += 1;
+                if (failures >= PROGRESS_MAX_FAILURES) window.clearInterval(timer);
+            } finally {
+                busy = false;
+            }
+        }, PROGRESS_POLL_MS);
+        return timer;
+    };
 
     // 답변을 한 글자씩 늘려 가며 보여 준다. 글자마다 그리지 않고 시간에 맞춰 여러 글자씩 늘린다
     const typeOut = (sessionId: string, messageId: string, fullText: string) => {
@@ -182,6 +217,9 @@ export const useChatStore = create<ChatState>((set, get) => {
 
             let sessionId = '';
             const loadingId = newId();
+            // 이 질문의 진행 상황을 찾을 열쇠. /llm1과 진행 상황 조회에 같은 값을 보낸다
+            const requestId = crypto.randomUUID();
+            let progressTimer: number | undefined;
             try {
                 // 새 대화면 첫 질문을 제목으로 만든다
                 let session = get().currentSession;
@@ -199,8 +237,16 @@ export const useChatStore = create<ChatState>((set, get) => {
                 updateMessages(sessionId, (messages) => [
                     ...messages,
                     { ...userMessage, animationState: 'appear' },
-                    { id: loadingId, sender: 'assistant', text: '...', timestamp: new Date().toISOString(), isTyping: true },
+                    {
+                        id: loadingId,
+                        sender: 'assistant',
+                        text: '...',
+                        timestamp: new Date().toISOString(), // 화면의 '(12초)'는 이 시각부터 센다
+                        isTyping: true,
+                        progress: { phase: 'thinking', steps: [] },
+                    },
                 ]);
+                progressTimer = watchProgress(sessionId, loadingId, requestId, cancelSource);
                 // 예전에 만든 빈 대화('새 대화')에 처음 질문하면 제목을 질문으로 바꾼다
                 if (isFirstMessage && session.title !== shortTitle(question)) {
                     await axios.put(`/sessions/${sessionId}`, { title: shortTitle(question) });
@@ -216,6 +262,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                         // 대화 컨텍스트는 항상 기억한다: 백엔드가 이 세션의 이전 대화를 함께 모델에 보낸다.
                         // 백엔드는 값이 없으면 false로 보므로 반드시 true를 보낸다
                         isCached: true,
+                        requestId,
                     },
                     { cancelToken: cancelSource.token },
                 );
@@ -255,6 +302,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                 }
                 if (!cancelled) set({ error: '메시지를 전송하는 중 오류가 발생했습니다.' });
             } finally {
+                window.clearInterval(progressTimer);
                 set({ waitingForResponse: false, cancelSource: null });
             }
         },
