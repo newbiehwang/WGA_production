@@ -17,6 +17,7 @@
 import re
 from datetime import datetime, timedelta, timezone
 
+from .. import dotenv
 from ..aws import (REQUIRED_TIMEOUT_MS, SECRET_PARAMS, error_text, existing_parameters, find_timeout_quota,
                    main_stacks, stack_failures)
 from ..context import Context
@@ -151,9 +152,16 @@ def _preflight(ctx: Context, runner: Runner, emitter: Emitter) -> bool:
         ok = False
     else:
         missing = [name for name in required if name not in existing]
+        # SSM에 없어도 저장소 루트 .env에 있으면 괜찮다: deploy.sh가 스택을 배포하기 전에 SSM으로 올린다
+        for param in SECRET_PARAMS:
+            name = f"{ctx.ssm_prefix}/{param.key}"
+            if name in missing and dotenv.read_value(ctx.repo_root, param.key):
+                missing.remove(name)
+                emitter.log(f"{name}이(가) SSM에 없지만 저장소 루트 .env에 있어 deploy.sh가 배포 전에 등록합니다",
+                            stream="info")
         if missing:
             emitter.error(STEP, f"필수 SSM 파라미터가 없습니다: {', '.join(missing)}",
-                          hint="setup 명령으로 먼저 등록하세요")
+                          hint="setup 명령으로 먼저 등록하거나, 저장소 루트 .env에 적으세요 (.env.example 참고)")
             ok = False
 
     quota, error = find_timeout_quota(runner)

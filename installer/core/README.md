@@ -20,13 +20,14 @@ installer/core/wga-installer teardown --env dev            # 정리 (되돌릴 �
 |---|---|---|
 | `check` | 도구·저장소·자격 증명·**권한**·리전 점검 | 없음 |
 | `setup` | ① API Gateway 통합 타임아웃 할당량을 120000ms로 요청(자동 승인되는 최댓값) ② `/wga/<env>/ANTHROPIC_API_KEY`·`SlackbotToken`·`SlackSigningSecret`을 SecureString으로 등록 | 할당량 요청, SSM 파라미터 |
-| `deploy` | 사전 확인(필수 SSM 값, 할당량) 후 `./deploy.sh <env>` 실행, 진행 표시, 실패 원인 요약 | AWS 리소스 전체 |
+| `deploy` | 사전 확인(필수 SSM 값 또는 루트 `.env`의 키, 할당량) 후 `./deploy.sh <env>` 실행, 진행 표시, 실패 원인 요약 | AWS 리소스 전체 |
 | `verify` | 스택 상태, 인증 없는 API 호출 차단, `/health`, AccessDenied 로그, 프론트엔드, 대시보드 | 없음 |
 | `oidc` | 배포 Role 스택(`wga-github-oidc-<env>`), GitHub Environment(main 브랜치로 제한, prod는 본인 승인), 저장소 변수 등록. 선택: `--test-run`(시험 배포), `--block-test`(다른 브랜치 차단 확인) | IAM Role, GitHub 설정 |
 | `teardown` | 한 환경의 스택·ECR·버킷(모든 버전)·로그 그룹·SSM 값·GitHub 변수와 Environment 삭제 | 전부 삭제 |
 
 ### 알아 둘 동작
 - **권한도 점검합니다.** `sts get-caller-identity`는 정책이 하나도 없어도 성공하므로, 자격 증명만 보면 "통과"인데 다음 단계에서 모든 호출이 거부될 수 있습니다. `check`는 이후 단계가 읽는 API(CloudFormation·SSM·Service Quotas·S3)를 한 번씩 호출해 보고, 배포가 바꾸는 작업(스택·Lambda·IAM Role 생성 등 24개)은 IAM 정책 시뮬레이터(`simulate-principal-policy`)로 허용 여부만 묻습니다. 아무것도 만들지 않습니다. IAM Role은 템플릿이 쓰는 `wga-*` 이름으로 물어서, `wga-*`로 좁힌 정책도 통과합니다.
+- **저장소 루트 `.env`의 Anthropic API 키를 씁니다.** `.env`에 `ANTHROPIC_API_KEY`를 적어 두면(`.env.example` 참고) `setup`은 키를 묻지 않고 그 값으로 등록합니다. SSM에 이미 있으면 덮어쓸지 묻지 않고 그대로 둡니다. 배포할 때 `deploy.sh`가 SSM 값과 `.env` 값을 비교해 다르면 `.env` 값으로 맞추기 때문입니다. `deploy`는 SSM에 키가 없어도 `.env`에 있으면 멈추지 않습니다(`deploy.sh`가 스택을 배포하기 전에 올립니다). 키 값은 출력에 나오지 않고 앞뒤 몇 글자와 길이만 보입니다. `.env`는 셸로 실행하지 않고 글자로만 읽으며, 읽는 규칙은 `deploy.sh`와 같습니다(`wga_installer/dotenv.py`).
 - **할당량이 먼저입니다.** `cloudformation/llm.yaml`이 통합 타임아웃을 120000ms로 설정하므로 할당량이 오르기 전에는 스택 생성이 실패합니다. `deploy`는 할당량이 부족하면 배포를 시작하지 않고 멈춥니다.
 - **Slack 값은 비워 둘 수 있습니다.** 비워 두면 등록하지 않고 건너뜁니다. Signing Secret이 없으면 Slack 요청은 모두 거부됩니다.
 - **이미 있는 SSM 값은 읽지 않습니다.** 이름과 형식만 확인하고(`describe-parameters`), 유지할지 덮어쓸지 묻습니다. 기본은 유지입니다.

@@ -275,3 +275,53 @@ def test_hidden_secret_is_confirmed_with_a_masked_preview(fake):
 ])
 def test_mask_secret(value, shown):
     assert mask_secret(value) == shown
+
+
+# ---------------------------------------------------------------- 저장소 루트 .env의 Anthropic API 키
+
+DOTENV_KEY = "sk-ant-api03-FROM-DOTENV-abcdefghijklmnop"
+
+
+def with_dotenv(repo, text):
+    (repo / ".env").write_text(text)
+    return ("--repo", str(repo))
+
+
+def prompts(stdout):
+    return [e["id"] for e in events(stdout) if e["type"] in ("input_required", "choice_required")]
+
+
+def test_key_in_dotenv_is_stored_without_asking(fake, repo):
+    # .env에 키가 있으면 묻지 않고 그 값으로 등록한다. 등록 전 승인은 그대로 받는다
+    account(fake, quota=120000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
+    extra = with_dotenv(repo, f'# 직접 적는 값\nANTHROPIC_API_KEY="{DOTENV_KEY}"\nVITE_API_DEST=https://x\n')
+    result = setup_json(fake, confirm("put_ANTHROPIC_API_KEY"), extra=extra)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "secret_ANTHROPIC_API_KEY" not in prompts(result.stdout)
+    assert json.loads(fake.captures()[0][1]) == {"Name": f"{PREFIX}/ANTHROPIC_API_KEY", "Value": DOTENV_KEY,
+                                                 "Type": "SecureString", "Overwrite": False}
+    # 키는 출력에 나오지 않는다 (앞뒤 몇 글자와 길이만)
+    assert DOTENV_KEY not in result.stdout + result.stderr
+    assert any("저장소 루트 .env" in e.get("line", "") and mask_secret(DOTENV_KEY) in e["line"]
+               for e in events(result.stdout))
+    assert finished(result.stdout)["ssm_parameters"]["status"] == "ok"
+
+
+def test_key_in_dotenv_keeps_existing_parameter_without_asking(fake, repo):
+    # SSM에 이미 있으면 덮어쓸지 묻지 않고 그대로 둔다 (배포할 때 deploy.sh가 .env 값으로 맞춘다)
+    account(fake, quota=120000, existing={"ANTHROPIC_API_KEY": "SecureString", "SlackbotToken": "SecureString",
+                                          "SlackSigningSecret": "SecureString"})
+    result = setup_json(fake, extra=with_dotenv(repo, f"ANTHROPIC_API_KEY={DOTENV_KEY}\n"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "existing_ANTHROPIC_API_KEY" not in prompts(result.stdout)
+    assert not any("put-parameter" in " ".join(call) for call in mutating_calls(fake))
+    assert any("deploy.sh가" in e.get("line", "") for e in events(result.stdout))
+
+
+def test_empty_key_in_dotenv_still_asks(fake, repo):
+    account(fake, quota=120000, existing={"SlackbotToken": "SecureString", "SlackSigningSecret": "SecureString"})
+    result = setup_json(fake, secret("ANTHROPIC_API_KEY", "sk-ant-TYPED"), confirm("put_ANTHROPIC_API_KEY"),
+                        extra=with_dotenv(repo, "ANTHROPIC_API_KEY=\n"))
+    assert "secret_ANTHROPIC_API_KEY" in prompts(result.stdout)
+    assert json.loads(fake.captures()[0][1])["Value"] == "sk-ant-TYPED"
