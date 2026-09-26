@@ -1110,8 +1110,9 @@
 .audit-cycle-seg {
   cursor: pointer;
   outline: none;
-  animation: audit-cycle-in 360ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
-  transition: transform 200ms ease;
+  /* backwards: 나타난 뒤에는 opacity를 붙잡지 않는다 (다른 계층을 고르면 나머지를 옅게 해야 한다) */
+  animation: audit-cycle-in 360ms cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+  transition: transform 200ms ease, opacity 200ms ease;
 }
 
 .audit-cycle-shape {
@@ -1137,17 +1138,35 @@
   pointer-events: none;
 }
 
-/* 고른 조각 (누름·키보드): 조금 짙게, 살짝 바깥으로. 마우스를 올리면 조금 짙게만 */
+/* 마우스를 올리면 조금 짙게 (누를 수 있다는 표시) */
 .audit-cycle-seg:hover:not(.is-here):not(.is-marked) .audit-cycle-shape {
-  fill: #e6ecf3;
+  fill: #e3e9f1;
 }
 
-.audit-cycle-seg.is-focus:not(.is-here) {
-  transform: translate(calc(var(--dx) * 0.5), calc(var(--dy) * 0.5));
+/* 고른 조각: 바깥으로 밀어내고 짙은 테두리. 색(성격)과 따로 보이게 */
+.audit-cycle-seg.is-selected {
+  transform: translate(var(--dx), var(--dy));
 }
 
-.audit-cycle-seg.is-focus:not(.is-here):not(.is-marked) .audit-cycle-shape {
-  fill: #e1e8f1;
+/* 점선(판단·매개)·흔적의 테두리보다 앞서게 한 단계 더 구체적으로 */
+.audit-cycle-svg .audit-cycle-seg.is-selected .audit-cycle-shape {
+  stroke: #1f2933;
+  stroke-width: 2.5;
+  stroke-dasharray: none;
+  stroke-linejoin: round;
+}
+
+/* 다른 계층을 고르면 나머지 조각은 옅게 (고른 조각이 눈에 띄게). 이 기록의 계층은 덜 옅게 */
+.audit-cycle-svg.has-pick .audit-cycle-seg:not(.is-selected) {
+  opacity: 0.45;
+}
+
+.audit-cycle-svg.has-pick .audit-cycle-seg.is-here:not(.is-selected) {
+  opacity: 0.7;
+}
+
+.audit-cycle-svg.has-pick .audit-cycle-seg:not(.is-selected):hover {
+  opacity: 0.85;
 }
 
 .audit-cycle-seg:focus-visible .audit-cycle-shape {
@@ -1155,13 +1174,12 @@
   stroke-width: 2;
 }
 
-/* 이 기록의 층: 파랑으로 채우고 바깥으로 밀어낸다 */
-.audit-cycle-seg.is-here {
-  transform: translate(var(--dx), var(--dy));
-}
-
+/* 이 기록의 계층: 파랑으로 채운다 */
 .audit-cycle-seg.is-here .audit-cycle-shape {
   fill: var(--color-primary);
+}
+
+.audit-cycle-seg.is-here.is-selected .audit-cycle-shape {
   filter: drop-shadow(0 3px 6px rgba(0, 123, 255, 0.28));
 }
 
@@ -1198,7 +1216,7 @@
   fill: #8a939e;
 }
 
-.audit-cycle-seg.is-off-record.is-marked .audit-cycle-shape {
+.audit-cycle-seg.is-off-record.is-marked:not(.is-selected) .audit-cycle-shape {
   stroke: #e0a040;
 }
 
@@ -1207,13 +1225,23 @@
   font-family: var(--font-label);
   font-size: 22px;
   font-weight: 800;
+  fill: #1f2933;
+  animation: audit-cycle-in 200ms ease both;
+}
+
+.audit-cycle-name.is-here {
   fill: var(--color-primary);
+}
+
+.audit-cycle-name.is-marked {
+  fill: #9a5b00;
 }
 
 /* 설명 칸 */
 .audit-cycle-panel {
   display: grid;
   gap: 8px;
+  animation: audit-cycle-in 200ms ease both;
   min-width: 0;
   min-height: 150px;
   align-content: center;
@@ -1262,41 +1290,36 @@
   color: #9aa4ae;
 }
 
-.audit-cycle-tag {
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: rgba(0, 123, 255, 0.12);
-  color: var(--color-primary);
-  font-family: var(--font-label);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.audit-cycle-tag.is-marked {
-  background: rgba(255, 153, 0, 0.16);
-  color: #9a5b00;
-}
-
 .audit-cycle-panel-text {
   margin: 0;
-  font-size: 14px;
-  line-height: 1.55;
-  color: #1f2933;
-  overflow-wrap: anywhere;
-}
-
-.audit-cycle-panel-mark {
-  margin: 0;
   font-size: 13px;
-  line-height: 1.5;
-  color: #9a5b00;
+  line-height: 1.55;
+  color: #5f6670;
   overflow-wrap: anywhere;
 }
 
-.audit-cycle-panel-note {
+/* 이 기록이 그 계층에서 한 일(파랑)과 그 계층의 흔적(주황) */
+.audit-cycle-callout {
   margin: 0;
-  font-size: 12px;
-  color: #6c757d;
+  padding: 8px 12px;
+  border-left: 3px solid;
+  border-radius: 0 8px 8px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.audit-cycle-callout.is-here {
+  border-color: var(--color-primary);
+  background: #f1f6fd;
+  color: #1f2933;
+}
+
+.audit-cycle-callout.is-marked {
+  border-color: #ff9900;
+  background: #fff8ec;
+  color: #8a5200;
+  font-size: 13px;
 }
 
 .audit-cycle-traces {

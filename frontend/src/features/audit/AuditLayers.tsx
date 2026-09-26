@@ -10,10 +10,14 @@
 //
 // - 고리는 조각 7개다. 조각 끝이 뾰족해(셰브런) 따로 화살표 없이 도는 방향이 보인다.
 //   차례는 역추적('층별로 따져 보기', services/llm/audit_trace.py)이 묻는 차례다 (맨 위 1 효과부터 시계 방향)
-// - 이 기록의 층(행의 locus): 파랑으로 채우고 바깥으로 조금 밀어낸다. 흔적이 있는 층: 옅은 주황.
-//   기록으로 남지 않는 층(판단: 모델 안, 매개: 앱 밖): 점선 테두리
-// - 오른쪽 설명 칸: 평소에는 이 기록이 한 일과 흔적. 조각을 누르면(키보드는 Enter·Space) 그 층의 설명으로 바뀌고,
-//   이 기록의 조각을 누르거나 누른 조각을 다시 누르면 돌아온다. 제목 옆에는 영어 이름을 회색으로 (고리 안은 한글만)
+// - 색은 계층의 성격: 이 기록의 계층(행의 locus)은 파랑, 흔적이 있는 계층은 옅은 주황,
+//   기록으로 남지 않는 계층(판단: 모델 안, 매개: 앱 밖)은 점선 테두리. 색은 고르는 것과 상관없이 그대로다
+// - 고른 계층(처음에는 이 기록의 계층): 바깥으로 밀어내고 짙은 테두리를 두르며, 나머지 조각은 옅게 한다.
+//   고리 가운데와 오른쪽 설명 칸도 고른 계층을 보인다. 색(파랑)과 고름(테두리·밀어냄)을 나눠야
+//   다른 계층을 골랐을 때 이 기록의 계층과 헷갈리지 않는다
+// - 조각을 누르면(키보드는 Enter·Space) 그 계층을 고르고, 고른 조각을 다시 누르면 이 기록의 계층으로 돌아온다
+// - 설명 칸: 계층의 설명 → 이 기록이 그 계층에서 한 일(파란 상자) → 그 계층의 흔적(주황 상자).
+//   이 기록의 계층을 고르고 있으면 다른 계층에 남긴 흔적도 모아 보인다. 제목 옆에는 영어 이름을 회색으로 (고리 안은 한글만)
 // - 이 기록의 층: 도구 반복이 정한다 (등록부에 없으면 경계, 변경 도구면 유출, 나머지는 유입. 변경 작업은 요청이 유출, 결정·실행이 효과)
 // - 흔적: 체류(승인 요청 행의 taintedBy), 유입(도구 행의 의심 문구), 매개(실행한 AWS API의 요청 ID)
 import { useState, type CSSProperties } from 'react';
@@ -55,14 +59,6 @@ function marksOf(record: AuditRecord): Partial<Record<TraceLayer, string>> {
     return marks;
 }
 
-// 기록 방식 (설명 칸의 작은 글)
-const RECORDED_TEXT = {
-    row: '기록: 행으로 남는다',
-    flag: '기록: 행이 따로 없고, 승인 요청 행의 표시(의심 뒤 요청)로 남는다',
-    none: '기록: 남지 않는다 (모델 안)',
-    outside: '기록: 앱 밖 (AWS CloudTrail)',
-} as const;
-
 // ---------------------------------------------------------------- 고리의 모양
 const SIZE = 240;
 const C = SIZE / 2; // 가운데
@@ -101,15 +97,18 @@ const labelAt = (index: number) => {
 };
 
 export function AuditLayers({ record }: { record: AuditRecord }) {
-    const [focus, setFocus] = useState<TraceLayer | null>(null);
-    const marks = marksOf(record);
     const hereIndex = LAYERS.findIndex((layer) => layer.id === record.locus);
     const here = LAYERS[hereIndex];
-    // 설명 칸에 보일 층: 마우스·키보드로 짚은 층, 없으면 이 기록의 층
-    const shownIndex = focus ? LAYERS.findIndex((layer) => layer.id === focus) : hereIndex;
-    const shown = LAYERS[shownIndex];
-    const showingHere = shown?.id === here?.id;
+    // 고른 계층: 누른 조각, 누르기 전에는 이 기록의 계층
+    const [picked, setPicked] = useState<TraceLayer | null>(null);
+    const marks = marksOf(record);
+    const selectedIndex = picked ? LAYERS.findIndex((layer) => layer.id === picked) : hereIndex;
+    const selected = LAYERS[selectedIndex];
+    const selectedIsHere = selectedIndex === hereIndex;
     const otherMarks = LAYERS.filter((layer) => marks[layer.id] && layer.id !== here?.id);
+    // 계층의 성격 (색): 이 기록 · 흔적 · 기록으로 남지 않음
+    const toneOf = (index: number) =>
+        index === hereIndex ? 'is-here' : marks[LAYERS[index].id] ? 'is-marked' : '';
 
     return (
         <section className="audit-layers" aria-labelledby="audit-layers-title">
@@ -119,28 +118,28 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
 
             <div className="audit-cycle">
                 <svg
-                    className="audit-cycle-svg"
+                    className={`audit-cycle-svg${picked ? ' has-pick' : ''}`}
                     viewBox={`${-POP} ${-POP} ${SIZE + POP * 2} ${SIZE + POP * 2}`}
                     role="group"
                     aria-label="7계층 순환 다이어그램. 계층을 누르면 설명이 나옵니다"
                 >
                     {LAYERS.map((layer, index) => {
-                        const isHere = index === hereIndex;
-                        const isMarked = !isHere && Boolean(marks[layer.id]);
+                        const tone = toneOf(index);
                         const offRecord = layer.recorded === 'none' || layer.recorded === 'outside';
+                        const isSelected = index === selectedIndex;
                         const mid = rad(midOf(index));
                         const label = labelAt(index);
-                        const state = isHere ? '이 기록의 계층' : isMarked ? '흔적' : offRecord ? '기록으로 남지 않음' : '';
-                        const selected = focus === layer.id;
-                        // 누르면 그 계층의 설명으로, 이 기록의 조각이나 이미 고른 조각을 누르면 이 기록으로 돌아온다
-                        const choose = () => setFocus(isHere || selected ? null : layer.id);
+                        const state =
+                            tone === 'is-here' ? '이 기록의 계층' : tone === 'is-marked' ? '흔적' : offRecord ? '기록으로 남지 않음' : '';
+                        // 누르면 그 계층을 고르고, 고른 조각을 다시 누르면 이 기록의 계층으로 돌아온다
+                        const choose = () => setPicked(isSelected || index === hereIndex ? null : layer.id);
                         return (
                             <g
                                 key={layer.id}
-                                className={`audit-cycle-seg${isHere ? ' is-here' : isMarked ? ' is-marked' : ''}${
-                                    offRecord ? ' is-off-record' : ''
-                                }${focus === layer.id ? ' is-focus' : ''}`}
-                                // 이 기록의 조각은 가운데에서 바깥으로 밀어낸다 (--dx·--dy: CSS가 transform으로)
+                                className={`audit-cycle-seg ${tone}${offRecord ? ' is-off-record' : ''}${
+                                    isSelected ? ' is-selected' : ''
+                                }`}
+                                // 고른 조각은 가운데에서 바깥으로 밀어낸다 (--dx·--dy: CSS가 transform으로)
                                 style={
                                     {
                                         '--dx': `${(POP * Math.cos(mid)).toFixed(2)}px`,
@@ -150,7 +149,7 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                                 }
                                 tabIndex={0}
                                 role="button"
-                                aria-pressed={selected}
+                                aria-pressed={isSelected}
                                 aria-label={`${index + 1} ${layer.label} (${layer.en})${state ? `, ${state}` : ''}`}
                                 onClick={choose}
                                 onKeyDown={(event) => {
@@ -169,46 +168,47 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                             </g>
                         );
                     })}
-                    {/* 가운데: 이 기록의 계층 이름 */}
-                    {here ? (
-                        <text x={C} y={C + 8} textAnchor="middle" className="audit-cycle-name" aria-hidden="true">
-                            {here.label}
+                    {/* 가운데: 고른 계층의 이름 (색은 그 계층의 성격) */}
+                    {selected ? (
+                        <text
+                            key={selected.id}
+                            x={C}
+                            y={C + 8}
+                            textAnchor="middle"
+                            className={`audit-cycle-name ${toneOf(selectedIndex)}`}
+                            aria-hidden="true"
+                        >
+                            {selected.label}
                         </text>
                     ) : null}
                 </svg>
 
-                {/* 설명 칸 (aria-live: 층을 옮겨 짚으면 화면 읽기 프로그램이 새 설명을 읽는다) */}
-                {shown ? (
-                    <div className="audit-cycle-panel" aria-live="polite">
+                {/* 설명 칸 (aria-live: 다른 계층을 고르면 화면 읽기 프로그램이 새 설명을 읽는다) */}
+                {selected ? (
+                    <div className="audit-cycle-panel" aria-live="polite" key={selected.id}>
                         <div className="audit-cycle-panel-head">
-                            <span className={`audit-cycle-panel-no${showingHere ? ' is-here' : marks[shown.id] ? ' is-marked' : ''}`}>
-                                {shownIndex + 1}
-                            </span>
-                            <strong>{shown.label}</strong>
-                            <span className="audit-cycle-en">{shown.en}</span>
-                            {!showingHere && marks[shown.id] ? <span className="audit-cycle-tag is-marked">흔적</span> : null}
+                            <span className={`audit-cycle-panel-no ${toneOf(selectedIndex)}`}>{selectedIndex + 1}</span>
+                            <strong>{selected.label}</strong>
+                            <span className="audit-cycle-en">{selected.en}</span>
                         </div>
-                        <p className="audit-cycle-panel-text">{showingHere ? hereText(record) : shown.description}</p>
-                        {marks[shown.id] ? <p className="audit-cycle-panel-mark">{marks[shown.id]}</p> : null}
-                        {showingHere ? (
-                            otherMarks.length ? (
-                                <div className="audit-cycle-traces">
-                                    <span className="audit-cycle-traces-title">다른 계층에 남긴 흔적</span>
-                                    <ul>
-                                        {otherMarks.map((layer) => (
-                                            <li key={layer.id}>
-                                                <strong>
-                                                    {LAYERS.indexOf(layer) + 1} {layer.label}
-                                                </strong>
-                                                <span>{marks[layer.id]}</span>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            ) : null
-                        ) : (
-                            <p className="audit-cycle-panel-note">{RECORDED_TEXT[shown.recorded]}</p>
-                        )}
+                        <p className="audit-cycle-panel-text">{selected.description}</p>
+                        {selectedIsHere ? <p className="audit-cycle-callout is-here">{hereText(record)}</p> : null}
+                        {marks[selected.id] ? <p className="audit-cycle-callout is-marked">{marks[selected.id]}</p> : null}
+                        {selectedIsHere && otherMarks.length ? (
+                            <div className="audit-cycle-traces">
+                                <span className="audit-cycle-traces-title">다른 계층에 남긴 흔적</span>
+                                <ul>
+                                    {otherMarks.map((layer) => (
+                                        <li key={layer.id}>
+                                            <strong>
+                                                {LAYERS.indexOf(layer) + 1} {layer.label}
+                                            </strong>
+                                            <span>{marks[layer.id]}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        ) : null}
                     </div>
                 ) : null}
             </div>
