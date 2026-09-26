@@ -6,7 +6,7 @@ LLM Lambda 코드가 실제 MCP 서버 코드(mcp/app.py의 lambda_handler)를 �
 - 위험도: tools/list의 모든 도구에 위험도가 있고, 목록에 없는 도구는 변경 도구로 본다
 - 승인 없이 실행되지 않는다: 모델이 변경 도구를 부르면 미리 보기만 하고 승인 요청을 만든다
 - MCP 재확인: 작업 ID가 없거나, 승인 전이거나, 인자가 다르거나, 만료됐거나, 이미 실행했으면 거절한다
-- 승인 규칙: dev는 본인 승인 가능, prod는 approvers 그룹의 다른 사람만. 거절은 본인도 된다
+- 승인 규칙: 어느 환경이든 approvers 그룹만. dev는 그룹이면 본인 요청도, prod는 다른 사람만. 거절은 본인도 된다
 - 감사 로그를 남기지 못하면 승인·실행하지 않는다. Slack 경로는 변경 작업을 요청할 수 없다
 """
 import copy
@@ -343,9 +343,9 @@ def decide(env, action_id, operation, sub, groups=None, email=None):
     return response["statusCode"], json.loads(response["body"])
 
 
-def test_requester_can_approve_in_dev_and_it_runs(env):
+def test_approver_can_approve_own_request_in_dev_and_it_runs(env):
     action = make_action(env)
-    status, body = decide(env, action["actionId"], "approve", "alice")
+    status, body = decide(env, action["actionId"], "approve", "alice", groups="approvers")
     assert status == 200 and body["status"] == "executed" and body["decidedBy"] == "alice"
     assert retention() == 14
     assert audit_events("alice") == ["approved", "executed"]
@@ -365,6 +365,16 @@ def test_prod_requires_another_approver(env, monkeypatch):
     assert status == 200 and body["status"] == "executed" and retention() == 14
 
 
+def test_dev_requester_without_the_group_cannot_approve(env):
+    # 예전에는 dev에서 로그인만 하면 본인 요청을 승인할 수 있었다 (docs/threat-model.md R2)
+    action = make_action(env)
+    status, body = decide(env, action["actionId"], "approve", "alice")
+    assert status == 403 and "approvers" in body["error"]
+    assert retention() == 30 and audit_events("alice") == []
+    # 거절은 본인이 할 수 있다
+    assert decide(env, action["actionId"], "deny", "alice")[0] == 200
+
+
 def test_dev_non_approver_cannot_approve_someone_elses_request(env):
     action = make_action(env)
     assert decide(env, action["actionId"], "approve", "mallory")[0] == 404
@@ -375,19 +385,19 @@ def test_deny_does_not_run_and_cannot_be_approved_later(env):
     action = make_action(env)
     status, body = decide(env, action["actionId"], "deny", "alice")
     assert status == 200 and body["status"] == "denied"
-    assert decide(env, action["actionId"], "approve", "alice")[0] == 409
+    assert decide(env, action["actionId"], "approve", "alice", groups="approvers")[0] == 409
     assert retention() == 30 and audit_events("alice") == ["denied"]
     assert not any(meta for _, _, meta in env["mcp"].calls)
 
 
 def test_expired_and_repeated_approvals_are_rejected(env):
     expired = make_action(env, expires_in=-1)
-    status, body = decide(env, expired["actionId"], "approve", "alice")
+    status, body = decide(env, expired["actionId"], "approve", "alice", groups="approvers")
     assert status == 409 and "10분" in body["error"]
 
     action = make_action(env)
-    assert decide(env, action["actionId"], "approve", "alice")[0] == 200
-    assert decide(env, action["actionId"], "approve", "alice")[0] == 409
+    assert decide(env, action["actionId"], "approve", "alice", groups="approvers")[0] == 200
+    assert decide(env, action["actionId"], "approve", "alice", groups="approvers")[0] == 409
     assert retention() == 14
 
 
@@ -396,14 +406,14 @@ def test_tampered_request_is_not_run(env):
     env["pending"].update_item(Key={"actionId": action["actionId"]}, UpdateExpression="SET args = :a",
                                ExpressionAttributeValues={":a": json.dumps({"log_group_name": LOG_GROUP,
                                                                              "retention_days": 1})})
-    status, body = decide(env, action["actionId"], "approve", "alice")
+    status, body = decide(env, action["actionId"], "approve", "alice", groups="approvers")
     assert status == 409 and retention() == 30
 
 
 def test_nothing_runs_when_the_decision_cannot_be_audited(env, monkeypatch):
     monkeypatch.setattr(env["llm"], "audit_table", boto3.resource("dynamodb").Table("missing-table"))
     action = make_action(env)
-    status, _ = decide(env, action["actionId"], "approve", "alice")
+    status, _ = decide(env, action["actionId"], "approve", "alice", groups="approvers")
     assert status == 503 and retention() == 30
     assert env["pending"].get_item(Key={"actionId": action["actionId"]})["Item"]["status"] == "pending"
 
@@ -412,7 +422,7 @@ def test_action_marked_failed_when_mcp_does_not_run_it(env, monkeypatch):
     monkeypatch.setattr(env["llm"], "call_mcp_tool", lambda tool, args, meta=None: (_ for _ in ()).throw(
         RuntimeError("연결 실패")))
     action = make_action(env)
-    status, body = decide(env, action["actionId"], "approve", "alice")
+    status, body = decide(env, action["actionId"], "approve", "alice", groups="approvers")
     assert status == 200 and body["status"] == "failed" and retention() == 30
     assert audit_events("alice") == ["approved", "failed"]
 
@@ -433,7 +443,7 @@ def test_action_routes(env):
 
     def event(path, method):
         return {"path": path, "httpMethod": method, "headers": {"origin": ORIGIN},
-                "requestContext": {"authorizer": {"claims": {"sub": "alice"}}}}
+                "requestContext": {"authorizer": {"claims": {"sub": "alice", "cognito:groups": "approvers"}}}}
 
     assert lambda_function.lambda_handler(event(f"/actions/{action['actionId']}", "GET"), None)["statusCode"] == 200
     assert lambda_function.lambda_handler(event(f"/actions/{action['actionId']}/cancel", "POST"),
@@ -468,7 +478,7 @@ def test_follow_up_explains_the_stored_result(env, monkeypatch):
         return response["statusCode"]
 
     assert ask("alice") == 409  # 아직 결정 전
-    decide(env, action["actionId"], "approve", "alice")
+    decide(env, action["actionId"], "approve", "alice", groups="approvers")
     assert ask("mallory") == 404  # 남의 작업
     assert ask("alice") == 200
     prompt = FakeClient.prompts[-1]
@@ -534,6 +544,12 @@ def test_only_the_mcp_role_can_change_resources_and_only_wga_ones():
 def test_approvers_group_and_pending_table_exist():
     base = yaml.load((ROOT / "cloudformation" / "base.yaml").read_text(encoding="utf-8"), Loader=CfnLoader)
     assert base["Resources"]["ApproversGroup"]["Properties"]["GroupName"] == "approvers"
+    # 자체 가입을 막는다: 로그인한 사용자는 계정 정보를 조회할 수 있어 운영자만 사용자를 만든다 (R2)
+    admin_only = base["Resources"]["UserPool"]["Properties"]["AdminCreateUserConfig"]
+    assert admin_only["AllowAdminCreateUserOnly"] is True
+    # Cognito는 초대 메일에 아이디와 임시 비밀번호 자리가 모두 있어야 받는다
+    message = admin_only["InviteMessageTemplate"]["EmailMessage"]
+    assert "{username}" in message and "{####}" in message
     llm = yaml.load((ROOT / "cloudformation" / "llm.yaml").read_text(encoding="utf-8"), Loader=CfnLoader)
     table = llm["Resources"]["PendingActionsTable"]["Properties"]
     assert table["TimeToLiveSpecification"] == {"AttributeName": "ttl", "Enabled": True}

@@ -39,7 +39,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | 행위자 | 할 수 있는 것 |
 |:--|:--|
 | A1 인증하지 않은 외부인 | API 주소로 요청 보내기 |
-| A2 가입한 사용자 | 웹에서 질문하고, 자기 변경 요청을 승인·거절 (dev) |
+| A2 로그인한 사용자 (운영자가 만든 계정) | 웹에서 질문하고 계정 정보를 조회한다. 자기 변경 요청은 거절할 수 있고, `approvers` 그룹이면 승인도 한다 (prod는 남의 요청만) |
 | A3 로그·리소스에 글을 남길 수 있는 사람 | 애플리케이션 로그, 알람 설명, 태그에 모델을 노린 지시문 심기 (간접 인젝션) |
 | A4 모델 자체 | 지시를 잘못 이해하거나, 인젝션에 넘어가 엉뚱한 도구·값을 고름 |
 | A5 Slack 워크스페이스 구성원 | Slack 봇에 질문 |
@@ -51,7 +51,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 
 | # | 위협 | 방어 | 테스트 |
 |:--|:--|:--|:--|
-| T1 | 인증 없이 챗봇·대화 기록을 쓴다 (A1) | API Gateway Cognito 인가자. 요청자는 토큰의 `sub`로만 정한다 | `tests/test_chat_history.py::test_missing_claims_is_unauthorized`, `tests/test_chat_history.py::test_create_uses_token_sub_not_client_user_id` |
+| T1 | 인증 없이, 또는 스스로 가입해 챗봇·대화 기록을 쓴다 (A1). 로그인하면 IAM 정책·버킷 목록·비용을 조회할 수 있다 | API Gateway Cognito 인가자. 요청자는 토큰의 `sub`로만 정한다. 자체 가입을 막고 운영자만 사용자를 만든다 (`AllowAdminCreateUserOnly`) | `tests/test_chat_history.py::test_missing_claims_is_unauthorized`, `tests/test_chat_history.py::test_create_uses_token_sub_not_client_user_id`, `tests/test_approvals.py::test_approvers_group_and_pending_table_exist` |
 | T2 | 남의 대화·진행 상황·감사 기록을 읽거나 고친다 (A2) | 소유자 확인. 남의 것은 '없음(404)'으로 답해 있는지도 알리지 않는다 | `tests/test_chat_history.py::test_other_user_gets_404_and_cannot_modify`, `tests/test_llm_service.py::test_session_history_hidden_from_others`, `tests/test_llm_progress.py::test_other_user_cannot_overwrite_progress`, `tests/test_audit.py::test_users_cannot_read_other_peoples_records`, `tests/test_audit.py::test_cursor_for_another_user_is_rejected` |
 | T3 | 웹 요청이 Slack 사용자 행세를 한다 (A2) | 웹 요청에서는 Slack 전용 필드를 버린다 | `tests/test_llm_service.py::test_web_request_cannot_use_slack_fields` |
 | T4 | Slack 요청 위조·재전송 (A1) | Slack 서명 확인, 5분 넘은 요청 거절, 비밀이 없으면 닫힌 채 실패 | `tests/test_slack_security.py::test_tampered_requests_are_rejected`, `tests/test_slack_security.py::test_replayed_request_older_than_5_minutes_is_rejected`, `tests/test_slack_security.py::test_missing_secret_fails_closed` |
@@ -69,7 +69,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | T11 | 승인한 것과 다른 값이 실행된다 | 저장한 인자의 해시를 LLM·MCP 양쪽에서 같은 방식으로 계산해 비교한다 | `tests/test_approvals.py::test_args_hash_is_the_same_on_both_sides`, `tests/test_approvals.py::test_tampered_request_is_not_run` |
 | T12 | 승인 카드가 사용자를 속인다 (모델이 요약을 꾸밈) | 카드의 요약·전후 값은 모델 글이 아니라 MCP 미리 보기에서 온다. 실행될 인자를 그대로 보여 준다 | `tests/test_approvals.py::test_preview_shows_the_change_without_running_it`, `tests/test_ec2_s3_write_tools.py::test_preview_checks_state_and_action` |
 | T13 | 승인 결과 설명을 위조한다 (화면이 보낸 글을 믿음) | 설명 질문은 서버가 저장된 기록으로 만든다 | `tests/test_approvals.py::test_follow_up_explains_the_stored_result` |
-| T14 | 한 사람이 요청하고 스스로 승인한다 (A2, prod) | prod는 `approvers` 그룹의 다른 사람만 승인 (직무 분리) | `tests/test_approvals.py::test_prod_requires_another_approver`, `tests/test_approvals.py::test_dev_non_approver_cannot_approve_someone_elses_request` |
+| T14 | 승인 권한이 없는 사용자가 승인하거나, 한 사람이 요청하고 스스로 승인한다 (A2) | 어느 환경이든 `approvers` 그룹만 승인한다. prod는 그 그룹의 다른 사람만 (직무 분리) | `tests/test_approvals.py::test_dev_requester_without_the_group_cannot_approve`, `tests/test_approvals.py::test_prod_requires_another_approver`, `tests/test_approvals.py::test_dev_non_approver_cannot_approve_someone_elses_request` |
 | T15 | 오래된 승인·거절된 요청이 나중에 실행된다 | 10분 만료, 거절은 되돌릴 수 없고, 두 번 승인되지 않는다 | `tests/test_approvals.py::test_expired_and_repeated_approvals_are_rejected`, `tests/test_approvals.py::test_deny_does_not_run_and_cannot_be_approved_later` |
 | T16 | 승인 화면이 없는 경로(Slack)로 변경을 요청한다 (A5) | Slack 경로에는 승인 요청 기능을 주지 않는다 | `tests/test_approvals.py::test_slack_path_cannot_request_changes` |
 | T17 | 변경 도구가 이 환경 밖의 리소스를 바꾼다 | 로그 보존·알람 도구는 코드와 IAM 모두 `wga-*`로 한정. S3는 차단을 켜기만 한다. IAM 변경 도구는 붙이지 않았다 | `tests/test_approvals.py::test_tool_rejects_resources_outside_this_environment`, `tests/test_approvals.py::test_only_the_mcp_role_can_change_resources_and_only_wga_ones`, `tests/test_ec2_s3_write_tools.py::test_iam_allows_stop_start_and_only_turning_the_block_on`, `tests/test_iam_server.py::test_mcp_role_has_no_iam_write_permissions` |
@@ -113,7 +113,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | # | 위험 | 심각도 | 지금 상태 | 다음에 할 수 있는 것 |
 |:--|:--|:--|:--|:--|
 | R1 | ~~차트 데이터가 계정 밖의 제3자 서버로 나간다~~ | **해결** | 차트 도구 15개가 데이터를 외부 차트 서버(`antv-studio.alipay.com`)로 보내 이미지를 만들었다. 가명도 원래 값으로 되돌려 보냈다. 이제 Lambda 안에서 그리고, 결과물 도구에는 가명 그대로 넘긴다 (T30) | - |
-| R2 | **누구나 가입할 수 있고, dev에서는 본인이 승인한다** | 높음 (dev 공개 시) | Cognito 자체 가입이 켜져 있다(`AllowAdminCreateUserOnly: false`). 가입한 사람은 IAM 정책·버킷 목록·비용을 읽을 수 있고, dev·test에서는 자기 변경 요청을 스스로 승인할 수 있다 (EC2 중지 포함). prod는 `approvers` 그룹만 승인한다 | 자체 가입 끄기 또는 이메일 도메인 제한(가입 전 트리거), 모든 환경에서 `approvers` 그룹만 승인 |
+| R2 | ~~누구나 가입할 수 있고, dev에서는 본인이 승인한다~~ | **해결** | Cognito 자체 가입이 켜져 있어 가입한 누구나 계정 정보를 읽고, dev·test에서는 그룹 없이 자기 변경 요청(EC2 중지 포함)을 승인할 수 있었다. 이제 운영자만 사용자를 만들고, 어느 환경이든 `approvers` 그룹만 승인한다 (T1, T14) | - |
 | R3 | EC2 중지·시작은 IAM이 대상을 좁히지 않는다 | 중간 | PR #58에서 태그 조건(ABAC)을 없앴다. 이 리전의 모든 인스턴스가 대상이고, 사람의 승인과 MCP 재확인만으로 통제한다 | 필요해지면 태그 조건 또는 인스턴스 ID 허용 목록을 IAM에 다시 두기 |
 | R4 | 공식 MCP 서버가 MCP 역할의 권한으로 같은 프로세스에서 돈다 | 중간 | 승인 재확인은 우리 코드에 있다. 패키지가 오염되면 우리 코드를 거치지 않고 MCP 역할로 AWS를 부를 수 있다. 버전은 고정했지만 해시 고정은 아니다 | 해시 고정(`--require-hashes`), 변경 권한을 가진 도구만 다른 Lambda·역할로 분리 |
 | R5 | 인젝션 탐지는 패턴이다 | 중간 | 다른 말로 바꾸면 빠져나간다. 변경은 승인으로 막고 계정 밖으로 나가는 통로는 Claude API뿐이지만, 답변을 왜곡해 사용자를 속이는 것(무결성)은 막지 못한다 | 답변에 근거 도구 결과 표시 |

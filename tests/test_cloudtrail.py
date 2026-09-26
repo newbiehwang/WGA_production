@@ -58,7 +58,7 @@ def test_lookup_uses_this_deployments_region_when_omitted(ct_env, monkeypatch):
 def test_executed_change_carries_its_cloudtrail_request_id(ct_env, monkeypatch):
     llm = ct_env["llm"]
     action = make_action(ct_env)
-    response = llm.handle_action(action["actionId"], "approve", {"sub": "alice"}, ORIGIN)
+    response = llm.handle_action(action["actionId"], "approve", {"sub": "alice", "cognito:groups": "approvers"}, ORIGIN)
     view = json.loads(response["body"])
     assert view["status"] == "executed"
     trail = view["cloudtrail"]
@@ -82,7 +82,7 @@ def test_executed_change_carries_its_cloudtrail_request_id(ct_env, monkeypatch):
 def test_alarm_change_names_its_cloudtrail_event(ct_env):
     from test_approvals import ALARM
     action = make_action(ct_env, tool="setAlarmActions", args={"alarm_name": ALARM, "enabled": False})
-    view = json.loads(ct_env["llm"].handle_action(action["actionId"], "approve", {"sub": "alice"}, ORIGIN)["body"])
+    view = json.loads(ct_env["llm"].handle_action(action["actionId"], "approve", {"sub": "alice", "cognito:groups": "approvers"}, ORIGIN)["body"])
     assert view["cloudtrail"]["event_source"] == "monitoring.amazonaws.com"
     assert view["cloudtrail"]["event_name"] == "DisableAlarmActions"
 

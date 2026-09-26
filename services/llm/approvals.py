@@ -9,10 +9,12 @@
     ③ MCP에 작업 ID를 붙여 실행 ──▶ MCP Lambda가 승인 테이블을 직접 다시 확인하고 한 번만 실행 (mcp/lambda_mcp/approval.py)
     ④ 화면이 actionId로 /llm1을 부르면, 저장된 실행 결과를 모델에 넘겨 설명하게 한다 (llm_service)
 
-누가 승인하나 (APPROVAL_MODE)
-- self (dev·test): 요청한 본인 또는 approvers 그룹
-- strict (prod): approvers 그룹만, 요청한 본인은 안 된다 (직무 분리)
+누가 승인하나 (APPROVAL_MODE). 어느 환경이든 approvers 그룹만 승인한다 (운영자가 그룹에 넣는다)
+- self (dev·test): approvers 그룹이면 자기가 요청한 작업도 승인할 수 있다 (혼자 개발·시험할 때)
+- strict (prod): approvers 그룹의 다른 사람만, 요청한 본인은 안 된다 (직무 분리)
 거절은 요청한 본인도 할 수 있다.
+예전에는 dev·test에서 그룹 없이도 본인 요청을 승인할 수 있었다. 로그인만 하면 누구나 EC2를 멈출 수 있어
+승인이 사람의 확인이 아니라 버튼 한 번이 되었다 (docs/threat-model.md R2).
 
 Slack 봇·요청자를 모르는 경로는 승인 화면이 없어 변경 작업을 요청할 수 없다 (llm_service가 ApprovalRequester를 주지 않는다).
 """
@@ -174,10 +176,10 @@ def check_decision(item: Optional[Dict[str, Any]], caller_id: Optional[str], gro
     is_requester = caller_id == item.get("requesterId")
     is_approver = APPROVER_GROUP in groups
     if approve:
+        if not is_approver:
+            raise ApprovalError(403, "승인 권한이 없습니다 (approvers 그룹만 승인할 수 있습니다. 운영자에게 요청하세요)")
         if mode == "strict" and is_requester:
             raise ApprovalError(403, "운영 환경에서는 요청한 본인이 승인할 수 없습니다 (다른 승인자가 승인해야 합니다)")
-        if not (is_approver or (mode == "self" and is_requester)):
-            raise ApprovalError(403, "승인 권한이 없습니다 (approvers 그룹만 승인할 수 있습니다)")
         # 저장된 인자가 요청 때와 같은지 (테이블이 바뀌었으면 실행하지 않는다)
         if args_hash(item["tool"], json.loads(item["args"])) != item.get("argsHash"):
             raise ApprovalError(409, "승인 요청의 내용이 바뀌었습니다. 실행하지 않습니다")

@@ -1,5 +1,6 @@
 // 로그인 화면 (AXPI LoginPage.tsx의 카드 모양). '(AWS 로고)에서 로그인' 버튼 하나만 있다.
-// 누르면 AWS(Cognito) 로그인 페이지로 간다. 가입·이메일 인증·비밀번호 찾기도 그 페이지에서 한다 (auth/authClient.ts).
+// 누르면 AWS(Cognito) 로그인 페이지로 간다. 첫 로그인의 새 비밀번호 정하기·비밀번호 찾기도 그 페이지에서 한다 (auth/authClient.ts).
+// 가입은 없다: 운영자가 계정을 만들면 임시 비밀번호가 든 초대 메일이 간다 (cloudformation/base.yaml, docs/threat-model.md R2).
 import { useState } from 'react';
 import { login } from '@/auth/authClient';
 import { getErrorText } from '@/utils/formatters';
@@ -66,6 +67,7 @@ export function LoginPage({
                         <AwsLogo className="login-submit-logo" />
                         <span>{isRedirecting ? '로그인 페이지로 이동 중...' : '에서 로그인'}</span>
                     </button>
+                    <p className="login-hint">계정은 운영자가 만들어 초대 메일로 보냅니다. 처음 로그인할 때 새 비밀번호를 정하세요.</p>
                 </div>
             </section>
         </main>

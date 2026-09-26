@@ -1,6 +1,6 @@
 // Cognito 로그인: 로그인 버튼을 누르면 Cognito 로그인 페이지(Hosted UI)로 가서 로그인하고 앱으로 돌아온다.
 //
-//   [로그인] → https://<도메인>.auth.<리전>.amazoncognito.com/login (아이디·비밀번호, 가입, 비밀번호 찾기)
+//   [로그인] → https://<도메인>.auth.<리전>.amazoncognito.com/login (아이디·비밀번호, 비밀번호 찾기. 가입은 없다: 운영자가 만든다)
 //          → <앱 주소>/redirect?code=... → Amplify가 code를 토큰으로 바꾸고 저장 → Hub 'signInWithRedirect'
 //
 // 비밀번호는 Cognito 페이지만 받는다. 앱은 토큰만 다룬다 (OAuth 2.0 Authorization Code + PKCE).
