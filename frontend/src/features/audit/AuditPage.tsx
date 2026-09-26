@@ -1,12 +1,13 @@
 // 감사 로그 화면: 누가 언제 어떤 질문으로 어떤 도구를 불렀고 결과가 어땠는지 (GET /audit, services/llm/audit.py).
 // AXPI 패널·목록 행을 그대로 쓴다.
-//   머리: 제목 · 새로 고침
+//   머리: 제목 · 새로 고침(아이콘)
 //   거르기: 기간 · 대상 · 결과 · 종류 · 층 · 도구 (관리자만 여는 화면이다)
 //   목록: 시각 · 요청자 · 도구 · 요약 · 결과 · 표시. 행을 누르면 입력값·오류·질문 ID 등이 펼쳐진다
 //         변경 작업 행은 '층별로 따져 보기'로 역추적을 연다 (AuditTrace)
 //   아래: 더 보기 (cursor로 이어 읽는다)
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { fetchAudit } from '@/api/audit';
+import { RefreshButton } from '@/components/RefreshButton';
 import type { AuditKind, AuditLocus, AuditRecord, AuditStatus } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
 import { AuditTrace } from './AuditTrace';
@@ -436,21 +437,8 @@ export function AuditPage() {
     return (
         <section className="plan-panel audit-panel" aria-label="감사 로그">
             <div className="plan-panel-header">
-                <div>
-                    <h1 className="plan-panel-eyebrow">감사 로그</h1>
-                    <p className="plan-panel-subtitle">
-                        누가 언제 어떤 도구를 어떤 입력으로 불렀는지 남긴 기록입니다. 시각은 한국 시간이며,
-                        <strong> 90일</strong> 동안 보관합니다.
-                    </p>
-                </div>
-                <button
-                    type="button"
-                    className="plan-reload-button"
-                    onClick={() => load()}
-                    disabled={loading !== null}
-                >
-                    새로 고침
-                </button>
+                <h1 className="plan-panel-eyebrow">감사 로그</h1>
+                <RefreshButton onClick={() => load()} loading={loading !== null} />
             </div>
 
             <div className="audit-filters">

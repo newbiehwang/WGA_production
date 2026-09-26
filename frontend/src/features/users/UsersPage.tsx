@@ -1,5 +1,5 @@
 // 사용자 관리 화면 (관리자만): 누가 승인자·관리자인지 정하고, 계정을 정지하거나 초대한다 (services/llm/user_admin.py).
-//   머리: 제목 · 새로 고침
+//   머리: 제목 · 새로 고침(아이콘)
 //   도구 줄: 이메일 검색 · 초대(이메일 → 임시 비밀번호 메일)
 //   목록: 이메일 · 상태 · 승인자 · 관리자 · 가입일 · 계정(정지/정지 해제)
 //
@@ -9,6 +9,7 @@
 // - 그룹을 바꿔도 그 사람의 화면·권한은 다시 로그인하거나 토큰이 갱신된 뒤(최대 1시간) 바뀐다
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { inviteUser, listUsers, setEnabled, setGroup, userErrorText } from '@/api/users';
+import { RefreshButton } from '@/components/RefreshButton';
 import type { ManagedGroup, ManagedUser } from '@/types/users';
 import { formatKoreanDateTime } from '@/utils/formatters';
 import './users.css';
@@ -196,16 +197,8 @@ export function UsersPage() {
     return (
         <section className="plan-panel users-panel" aria-label="사용자 관리">
             <div className="plan-panel-header">
-                <div>
-                    <h1 className="plan-panel-eyebrow">사용자 관리</h1>
-                    <p className="plan-panel-subtitle">
-                        승인자는 AI가 요청한 변경 작업을 승인하고, 관리자는 감사 로그와 이 화면을 씁니다. 바꾼 내용은
-                        감사 로그에 남고, 그 사람이 다시 로그인하면(늦어도 <strong>1시간</strong> 뒤) 반영됩니다.
-                    </p>
-                </div>
-                <button type="button" className="plan-reload-button" onClick={() => load()} disabled={loading !== null}>
-                    새로 고침
-                </button>
+                <h1 className="plan-panel-eyebrow">사용자 관리</h1>
+                <RefreshButton onClick={() => load()} loading={loading !== null} />
             </div>
 
             <div className="users-toolbar">
