@@ -2,10 +2,11 @@
 // AXPI 패널·목록 행을 그대로 쓴다.
 //   머리: 제목 · 새로 고침(아이콘)
 //   거르기: 기간 · 대상 · 결과 · 종류 · 층 · 도구 (관리자만 여는 화면이다)
-//   목록: 시각 · 요청자 · 도구 · 요약 · 결과 · 표시. 행을 누르면 입력값·오류·질문 ID 등이 펼쳐진다
-//         변경 작업 행은 '층별로 따져 보기'로 역추적을 연다 (AuditTrace)
+//   목록: 시각 · 요청자 · 도구 · 요약 · 결과 · 표시. 행을 누르면 팝업창(AuditDetailModal)에 입력값·오류·질문 ID 등이 보인다
+//         변경 작업은 팝업창에서 '층별로 따져 보기'로 역추적을 연다 (AuditTrace)
 //   아래: 더 보기 (cursor로 이어 읽는다)
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { fetchAudit } from '@/api/audit';
 import { ROLE_LABELS, type Role } from '@/auth/authClient';
 import { LoadingCard, useMinimumVisible } from '@/components/LoadingCard';
@@ -310,33 +311,73 @@ function ResultBadge({ record }: { record: AuditRecord }) {
     );
 }
 
-function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boolean; onToggle: () => void }) {
+// 도구 칸: 질문·변경 작업·사용자 관리는 종류를, 도구 호출은 도구 이름을 보인다 (목록 행과 팝업창 제목이 같이 쓴다)
+function KindLabel({ record }: { record: AuditRecord }) {
+    if (record.kind === 'request') return <span className="audit-kind-request">질문</span>;
+    if (record.kind === 'action')
+        return <span className="audit-kind-action">{labelOf(record.tool ?? '').replace(/ 요청$/, '')}</span>;
+    if (record.kind === 'admin') return <span className="audit-kind-admin">사용자 관리</span>;
+    return <>{labelOf(record.tool ?? '')}</>;
+}
+
+// 표시 칸: Slack · 의심 문구 · 의심 뒤 요청 · 미등록 도구 · 가림 (목록 행과 팝업창 머리가 같이 쓴다)
+function Flags({ record }: { record: AuditRecord }) {
     const redacted = redactedTotal(record);
+    return (
+        <>
+            {record.source === 'slack' ? <span className="audit-flag">Slack</span> : null}
+            {suspiciousOf(record) ? (
+                <span className="audit-flag is-suspicious" title="도구 결과에 지시문처럼 보이는 문구가 있었습니다">
+                    의심 문구
+                </span>
+            ) : null}
+            {record.taintedBy?.length ? (
+                <span
+                    className="audit-flag is-suspicious"
+                    title="의심 문구가 든 도구 결과를 읽은 뒤 같은 질문에서 요청한 변경입니다 (체류)"
+                >
+                    의심 뒤 요청
+                </span>
+            ) : null}
+            {record.locus === 'interface' ? (
+                <span className="audit-flag is-suspicious" title="위험도 등록부에 없는 도구입니다 (경계)">
+                    미등록 도구
+                </span>
+            ) : null}
+            {redacted ? (
+                <span className="audit-flag is-redacted" title="Claude로 보내기 전에 가린 값의 수">
+                    가림 {redacted}
+                </span>
+            ) : null}
+        </>
+    );
+}
+
+// 목록 한 행. 누르면 팝업창으로 자세히 본다 (행 안에서 펼치지 않는다)
+function AuditRow({
+    record,
+    open,
+    onOpen,
+}: {
+    record: AuditRecord;
+    open: boolean;
+    onOpen: (button: HTMLButtonElement) => void; // 누른 행 버튼 (팝업창을 닫으면 여기로 포커스를 돌려준다)
+}) {
     const summary = summaryOf(record);
-    const detailsId = `audit-details-${keyOf(record).replace(/[^a-zA-Z0-9_-]/g, '')}`;
     return (
         <li className={`plan-table-row audit-row${open ? ' is-open' : ''}`}>
             <button
                 type="button"
                 className="audit-row-button"
-                aria-expanded={open}
-                aria-controls={detailsId}
-                onClick={onToggle}
+                aria-haspopup="dialog"
+                onClick={(event) => onOpen(event.currentTarget)}
             >
                 <span className="audit-col-time">{formatKoreanDateTimeSeconds(timeOf(record))}</span>
                 <span className="audit-col-user" title={record.userId}>
                     {requesterOf(record)}
                 </span>
                 <span className="audit-col-tool" title={record.tool}>
-                    {record.kind === 'request' ? (
-                        <span className="audit-kind-request">질문</span>
-                    ) : record.kind === 'action' ? (
-                        <span className="audit-kind-action">{labelOf(record.tool ?? '').replace(/ 요청$/, '')}</span>
-                    ) : record.kind === 'admin' ? (
-                        <span className="audit-kind-admin">사용자 관리</span>
-                    ) : (
-                        labelOf(record.tool ?? '')
-                    )}
+                    <KindLabel record={record} />
                 </span>
                 <span className="audit-col-summary" title={summary}>
                     {summary || <span className="audit-muted">-</span>}
@@ -346,38 +387,78 @@ function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boole
                     <span className="audit-ms">{secondsOf(record.ms)}</span>
                 </span>
                 <span className="audit-col-flags">
-                    {record.source === 'slack' ? <span className="audit-flag">Slack</span> : null}
-                    {suspiciousOf(record) ? (
-                        <span className="audit-flag is-suspicious" title="도구 결과에 지시문처럼 보이는 문구가 있었습니다">
-                            의심 문구
-                        </span>
-                    ) : null}
-                    {record.taintedBy?.length ? (
-                        <span
-                            className="audit-flag is-suspicious"
-                            title="의심 문구가 든 도구 결과를 읽은 뒤 같은 질문에서 요청한 변경입니다 (체류)"
-                        >
-                            의심 뒤 요청
-                        </span>
-                    ) : null}
-                    {record.locus === 'interface' ? (
-                        <span className="audit-flag is-suspicious" title="위험도 등록부에 없는 도구입니다 (경계)">
-                            미등록 도구
-                        </span>
-                    ) : null}
-                    {redacted ? (
-                        <span className="audit-flag is-redacted" title="Claude로 보내기 전에 가린 값의 수">
-                            가림 {redacted}
-                        </span>
-                    ) : null}
+                    <Flags record={record} />
                 </span>
             </button>
-            {open ? (
-                <div id={detailsId} className="audit-row-details">
+        </li>
+    );
+}
+
+const CLOSE_MS = 180; // 닫히는 효과 시간 (대화 목록 팝업창과 같다: model-overlay-out·model-sheet-out)
+
+// 기록 한 건을 자세히 보는 팝업창. 모양과 여닫는 효과는 대화 목록 팝업창(SessionListModal)과 같다:
+// 오른쪽 위 ✕, 큰 제목(도구·종류), 그 아래 시각·요청자·결과·표시, 본문은 항목 표(Details). 본문이 길면 팝업창 안에서 스크롤한다.
+// Esc·바깥 누르기·✕로 닫는다. 열릴 때 팝업창 자체에 포커스를 두고(화면 읽기 프로그램이 제목부터 읽는다),
+// 닫으면 부르는 쪽이 눌렀던 행으로 포커스를 돌려준다
+function AuditDetailModal({ record, onClose }: { record: AuditRecord; onClose: () => void }) {
+    const [isClosing, setIsClosing] = useState(false);
+    const dialog = useRef<HTMLDivElement>(null);
+
+    const close = () => {
+        if (isClosing) return;
+        setIsClosing(true);
+        window.setTimeout(onClose, CLOSE_MS);
+    };
+
+    useEffect(() => {
+        dialog.current?.focus();
+    }, []);
+
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') close();
+        };
+        document.addEventListener('keydown', onKeyDown);
+        return () => document.removeEventListener('keydown', onKeyDown);
+    });
+
+    return createPortal(
+        <div
+            className={`create-plan-model-overlay${isClosing ? ' is-closing' : ''}`}
+            role="presentation"
+            onClick={close}
+        >
+            <div
+                ref={dialog}
+                tabIndex={-1}
+                className="create-plan-model audit-detail-model"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="audit-detail-title"
+                onClick={(event) => event.stopPropagation()}
+            >
+                <button className="vdt-model-close" type="button" onClick={close} aria-label="닫기">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                        <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                </button>
+                <div className="audit-detail-head">
+                    <h3 id="audit-detail-title" className="create-plan-step-heading">
+                        <KindLabel record={record} />
+                    </h3>
+                    <div className="audit-detail-meta">
+                        <span>{formatKoreanDateTimeSeconds(timeOf(record))}</span>
+                        <span title={record.userId}>{requesterOf(record)}</span>
+                        <ResultBadge record={record} />
+                        <Flags record={record} />
+                    </div>
+                </div>
+                <div className="audit-detail-body">
                     <Details record={record} />
                 </div>
-            ) : null}
-        </li>
+            </div>
+        </div>,
+        document.body,
     );
 }
 
@@ -396,7 +477,8 @@ export function AuditPage() {
     const [loading, setLoading] = useState<'list' | 'more' | null>('list');
     const listLoading = useMinimumVisible(loading === 'list'); // 목록 자리의 기다림 카드 (최소 1초)
     const [error, setError] = useState<string | null>(null);
-    const [openKey, setOpenKey] = useState<string | null>(null);
+    const [openKey, setOpenKey] = useState<string | null>(null); // 팝업창으로 보고 있는 기록
+    const opener = useRef<HTMLButtonElement | null>(null); // 그 기록의 행 버튼
     // 거르기용 도구 목록: 지금까지 받은 기록에 나온 도구 (서버는 정확한 도구 이름으로만 거른다)
     const [toolNames, setToolNames] = useState<string[]>([]);
     // 조건을 빠르게 바꾸면 앞 요청의 응답이 늦게 올 수 있다. 마지막 요청의 응답만 쓴다
@@ -443,6 +525,8 @@ export function AuditPage() {
     }, [load]);
 
     const update = (change: Partial<Filters>) => setFilters((prev) => ({ ...prev, ...change }));
+    // 팝업창에 보일 기록 (목록에서 누른 행)
+    const openRecord = openKey ? items.find((record) => keyOf(record) === openKey) : undefined;
 
     return (
         <section className="plan-panel audit-panel" aria-label="감사 로그">
@@ -525,7 +609,10 @@ export function AuditPage() {
                                         key={key}
                                         record={record}
                                         open={openKey === key}
-                                        onToggle={() => setOpenKey((prev) => (prev === key ? null : key))}
+                                        onOpen={(button) => {
+                                            opener.current = button;
+                                            setOpenKey(key);
+                                        }}
                                     />
                                 );
                             })}
@@ -550,6 +637,16 @@ export function AuditPage() {
                 <div className="plan-panel-loading">
                     <LoadingCard text="감사 로그를 불러오는 중…" />
                 </div>
+            ) : null}
+
+            {openRecord ? (
+                <AuditDetailModal
+                    record={openRecord}
+                    onClose={() => {
+                        setOpenKey(null);
+                        opener.current?.focus(); // 눌렀던 행으로 포커스를 돌려준다 (키보드로 이어서 읽는다)
+                    }}
+                />
             ) : null}
         </section>
     );
