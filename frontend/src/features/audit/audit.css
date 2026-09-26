@@ -1075,28 +1075,104 @@
 
 /* ---------------------------------------------------------------- 역추적 (AuditTrace) */
 
-/* ---------------------------------------------------------------- 층 다이어그램 (AuditLayers.tsx)
-   7계층의 순환 다이어그램(셰브런 조각 7개의 고리)과 오른쪽 설명 칸. 팝업창 본문 맨 위에 있고, 아래 항목 표와 줄로 나눈다.
-   이 기록의 층은 파랑으로 채우고 바깥으로 밀어내며, 흔적은 옅은 주황, 기록으로 남지 않는 층(판단·매개)은 점선 */
+/* ---------------------------------------------------------------- 7계층 위치 (AuditLayers.tsx)
+   한 가지 뜻에는 한 가지 표시만: 조각의 바탕색 = 판정, 파란 점 = 이 기록의 계층, 바깥 호 = 고른 계층.
+   오른쪽은 카드 하나에 가는 선으로 구역을 나눈다 */
 .audit-layers {
   margin: 0 0 16px;
   padding-bottom: 16px;
   border-bottom: 1px solid #edf1f6;
 }
 
+.audit-layers-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
 .audit-layers-title {
-  margin: 0 0 10px;
+  margin: 0;
   font-family: var(--font-label);
   font-size: 13px;
   font-weight: 700;
   color: #1f2933;
 }
 
+.audit-layers-question {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: #6c757d;
+  overflow-wrap: anywhere;
+}
+
+/* 판정 개수: ● 주의 3  ● 정상 3  ● 참고 1 */
+.audit-counts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12.5px;
+  color: #5f6670;
+}
+
+.audit-counts li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audit-counts strong {
+  font-family: var(--font-label);
+  color: #1f2933;
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-counts-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+
+.audit-counts .is-ok .audit-counts-dot { background: var(--layer-ok); }
+.audit-counts .is-warn .audit-counts-dot { background: var(--layer-warn); }
+.audit-counts .is-fail .audit-counts-dot { background: var(--layer-fail); }
+.audit-counts .is-info .audit-counts-dot { background: var(--layer-info); }
+
+.audit-counts-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #6c757d;
+}
+
+.audit-counts-note.is-error {
+  color: #b02a37;
+}
+
+/* 판정의 바탕색 (조각·개수 점) 과 글자색 */
+.audit-layers {
+  --layer-none: #eef2f7;
+  --layer-ok: #d5ecdc;
+  --layer-warn: #fbe6a6;
+  --layer-fail: #f6d0d4;
+  --layer-info: #e3e7ec;
+  --layer-ok-ink: #276544;
+  --layer-warn-ink: #735600;
+  --layer-fail-ink: #9c1f2c;
+  --layer-info-ink: #5f6670;
+}
+
 .audit-cycle {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  align-items: center;
-  gap: 24px;
+  grid-template-columns: 236px minmax(0, 1fr);
+  align-items: start;
+  gap: 22px;
+  margin-top: 12px;
 }
 
 .audit-cycle-svg {
@@ -1106,92 +1182,47 @@
   overflow: visible;
 }
 
-/* 조각 (누르면 그 계층의 설명) */
+/* 조각 */
 .audit-cycle-seg {
   cursor: pointer;
   outline: none;
-  /* backwards: 나타난 뒤에는 opacity를 붙잡지 않는다 (다른 계층을 고르면 나머지를 옅게 해야 한다) */
-  animation: audit-cycle-in 360ms cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
-  transition: transform 200ms ease, opacity 200ms ease;
+  animation: audit-cycle-in 320ms ease backwards;
 }
 
 .audit-cycle-shape {
-  fill: #eef2f7;
-  stroke: #fff;
-  stroke-width: 1;
-  transition: fill 160ms ease, stroke 160ms ease, filter 160ms ease;
+  fill: var(--layer-none);
+  transition: fill 160ms ease, filter 160ms ease;
 }
 
-.audit-cycle-no {
-  font-family: var(--font-label);
-  font-size: 9.5px;
-  font-weight: 700;
-  fill: #8a939e;
-  pointer-events: none;
-}
+.audit-cycle-seg.is-ok .audit-cycle-shape { fill: var(--layer-ok); }
+.audit-cycle-seg.is-warn .audit-cycle-shape { fill: var(--layer-warn); }
+.audit-cycle-seg.is-fail .audit-cycle-shape { fill: var(--layer-fail); }
+.audit-cycle-seg.is-info .audit-cycle-shape { fill: var(--layer-info); }
 
 .audit-cycle-label {
   font-family: var(--font-label);
   font-size: 12.5px;
-  font-weight: 700;
+  font-weight: 600;
   fill: #3c4650;
   pointer-events: none;
 }
 
-/* 마우스를 올리거나 고르면 그 조각의 바탕을 조금 짙게 (파랑·주황·흰 바탕 모두 같은 비율로: brightness).
-   고른 조각에 마우스를 올리면 한 단계 더 */
-.audit-cycle-seg:hover .audit-cycle-shape {
-  filter: brightness(0.95);
-}
+.audit-cycle-seg.is-ok .audit-cycle-label { fill: var(--layer-ok-ink); }
+.audit-cycle-seg.is-warn .audit-cycle-label { fill: var(--layer-warn-ink); }
+.audit-cycle-seg.is-fail .audit-cycle-label { fill: var(--layer-fail-ink); }
+.audit-cycle-seg.is-info .audit-cycle-label { fill: var(--layer-info-ink); }
 
-/* 고른 조각: 그림자와 함께 살짝 떠오른다 (색은 그대로: 색은 계층의 성격) */
-.audit-cycle-seg.is-selected {
-  transform: translate(var(--dx), var(--dy));
+/* 마우스를 올리거나 고르면 바탕이 조금 짙게 */
+.audit-cycle-seg:hover .audit-cycle-shape {
+  filter: brightness(0.96);
 }
 
 .audit-cycle-seg.is-selected .audit-cycle-shape {
-  filter: brightness(0.93) drop-shadow(0 4px 8px rgba(31, 41, 51, 0.16));
+  filter: brightness(0.92);
 }
 
-.audit-cycle-seg.is-selected:hover .audit-cycle-shape {
-  filter: brightness(0.9) drop-shadow(0 4px 8px rgba(31, 41, 51, 0.18));
-}
-
-/* 다른 계층을 고르면 나머지 조각은 은은하게 옅게. 이 기록의 계층은 덜 옅게 (어디인지 계속 보이게) */
-.audit-cycle-svg.has-pick .audit-cycle-seg:not(.is-selected) {
-  opacity: 0.55;
-}
-
-.audit-cycle-svg.has-pick .audit-cycle-seg.is-here:not(.is-selected) {
-  opacity: 0.8;
-}
-
-.audit-cycle-svg.has-pick .audit-cycle-seg:not(.is-selected):hover {
-  opacity: 0.9;
-}
-
-/* 선택 표시: 고리 바깥의 둥근 호. 고른 조각으로 미끄러져 가고, 색은 그 계층의 성격을 따른다 */
-.audit-cycle-mark {
-  fill: none;
-  stroke: #5f6b7a;
-  stroke-width: 4;
-  stroke-linecap: round;
-  pointer-events: none;
-  transition: transform 460ms cubic-bezier(0.34, 1.2, 0.4, 1), stroke 240ms ease;
-  animation: audit-cycle-mark-in 420ms ease 280ms backwards;
-}
-
-.audit-cycle-mark.is-here {
-  stroke: var(--color-primary);
-}
-
-.audit-cycle-mark.is-marked {
-  stroke: #ff9900;
-}
-
-@keyframes audit-cycle-mark-in {
-  from { opacity: 0; stroke-dasharray: 0 200; }
-  to { opacity: 1; stroke-dasharray: 200 0; }
+.audit-cycle-seg.is-selected .audit-cycle-label {
+  font-weight: 800;
 }
 
 .audit-cycle-seg:focus-visible .audit-cycle-shape {
@@ -1199,117 +1230,66 @@
   stroke-width: 2;
 }
 
-/* 이 기록의 계층: 파랑으로 채운다 */
-.audit-cycle-seg.is-here .audit-cycle-shape {
+/* 이 기록의 계층: 이름 위의 파란 점 */
+.audit-cycle-here {
   fill: var(--color-primary);
+  stroke: #fff;
+  stroke-width: 1.5;
+  pointer-events: none;
 }
 
-.audit-cycle-seg.is-here.is-selected .audit-cycle-shape {
-  filter: brightness(0.93) drop-shadow(0 4px 9px rgba(0, 123, 255, 0.3));
-}
-
-.audit-cycle-seg.is-here.is-selected:hover .audit-cycle-shape {
-  filter: brightness(0.9) drop-shadow(0 4px 9px rgba(0, 123, 255, 0.32));
-}
-
-.audit-cycle-seg.is-here .audit-cycle-label,
-.audit-cycle-seg.is-here .audit-cycle-no {
-  fill: #fff;
-}
-
-/* 흔적 */
-.audit-cycle-seg.is-marked .audit-cycle-shape {
-  fill: #ffe7bf;
-}
-
-.audit-cycle-seg.is-marked .audit-cycle-label {
-  fill: #8a5200;
-}
-
-.audit-cycle-seg.is-marked .audit-cycle-no {
-  fill: #b0741a;
-}
-
-/* 기록으로 남지 않는 층: 흰 바탕에 점선 테두리, 옅은 글자 (흔적이 있으면 바탕은 흔적을 따른다) */
-.audit-cycle-seg.is-off-record .audit-cycle-shape {
-  stroke: #b8c2ce;
-  stroke-width: 1.2;
-  stroke-dasharray: 3 2.5;
-}
-
-.audit-cycle-seg.is-off-record:not(.is-marked):not(.is-here) .audit-cycle-shape {
-  fill: #fff;
-}
-
-.audit-cycle-seg.is-off-record:not(.is-marked):not(.is-here) .audit-cycle-label {
-  fill: #8a939e;
-}
-
-.audit-cycle-seg.is-off-record.is-marked:not(.is-selected) .audit-cycle-shape {
-  stroke: #e0a040;
-}
-
-/* 가운데: 옅은 원판 위에 차례(작은 회색 숫자)와 이름 */
-.audit-cycle-hub {
-  fill: #f7f9fc;
-  stroke: #e6ebf2;
-  stroke-width: 1;
-}
-
-.audit-cycle-center {
-  animation: audit-cycle-center-in 260ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+/* 고른 계층: 고리 바깥의 둥근 호가 미끄러져 간다 */
+.audit-cycle-mark {
+  fill: none;
+  stroke: #334155;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  pointer-events: none;
+  transition: transform 420ms cubic-bezier(0.34, 1.2, 0.4, 1);
+  animation: audit-cycle-in 300ms ease 240ms backwards;
 }
 
 .audit-cycle-name {
   font-family: var(--font-headline);
-  font-size: 19px;
+  font-size: 18px;
   font-weight: 600;
   letter-spacing: -0.03em;
   fill: #1f2933;
-}
-
-.audit-cycle-center.is-here .audit-cycle-name {
-  fill: var(--color-primary);
-}
-
-.audit-cycle-center.is-marked .audit-cycle-name {
-  fill: #9a5b00;
-}
-
-@keyframes audit-cycle-center-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* 설명 칸 */
-.audit-cycle-panel {
-  display: grid;
-  gap: 8px;
   animation: audit-cycle-in 200ms ease both;
-  min-width: 0;
-  min-height: 150px;
-  align-content: center;
 }
 
-.audit-cycle-panel-head {
+/* 카드 */
+.audit-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid #e3e9f1;
+  border-radius: 12px;
+  background: #fff;
+  animation: audit-cycle-in 180ms ease both;
+}
+
+.audit-card-head {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
-.audit-cycle-panel-head strong {
+.audit-card-head strong {
   font-family: var(--font-label);
-  font-size: 17px;
+  font-size: 16px;
   color: #1f2933;
 }
 
-.audit-cycle-panel-no {
+.audit-card-no {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
   background: #eef2f7;
   color: #5f6670;
   font-family: var(--font-label);
@@ -1317,134 +1297,169 @@
   font-weight: 800;
 }
 
-.audit-cycle-panel-no.is-here {
+.audit-card-no.is-here {
   background: var(--color-primary);
   color: #fff;
 }
 
-.audit-cycle-panel-no.is-marked {
-  background: #ffe7bf;
-  color: #8a5200;
-}
-
-.audit-cycle-en {
+.audit-card-en {
   font-family: var(--font-label);
   font-size: 13px;
   font-weight: 600;
   color: #9aa4ae;
 }
 
-.audit-cycle-panel-text {
+.audit-card-info {
+  display: inline-flex;
+  color: #9aa4ae;
+  cursor: help;
+}
+
+.audit-card-badge {
+  margin-left: auto;
+  padding: 2px 9px;
+  border-radius: 6px;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.audit-card-badge.is-ok { background: var(--layer-ok); color: var(--layer-ok-ink); }
+.audit-card-badge.is-warn { background: var(--layer-warn); color: var(--layer-warn-ink); }
+.audit-card-badge.is-fail { background: var(--layer-fail); color: var(--layer-fail-ink); }
+.audit-card-badge.is-info { background: var(--layer-info); color: var(--layer-info-ink); }
+
+.audit-card-text {
   margin: 0;
-  font-size: 13px;
+  font-size: 13.5px;
   line-height: 1.55;
-  color: #5f6670;
+  color: #1f2933;
   overflow-wrap: anywhere;
 }
 
-/* 근거(파랑): 이 기록이 그 계층에 있는 까닭, 흔적(주황): 다른 계층에 남긴 표시. 둘 다 단계 › 단계 › 단계 */
-.audit-evidence {
+/* 카드의 구역: 가는 선 위에 왼쪽 이름표, 오른쪽 내용 */
+.audit-card-section {
   display: grid;
-  gap: 8px;
-  padding: 10px 12px 12px;
-  border: 1px solid #dbe7f7;
-  border-radius: 10px;
-  background: linear-gradient(180deg, #f5f9ff 0%, #eef5fe 100%);
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eef2f7;
 }
 
-.audit-evidence-title {
+.audit-card-section-title {
+  padding-top: 1px;
   font-family: var(--font-label);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  color: #5b8fd6;
+  color: #8a939e;
 }
 
-/* 흔적: 같은 모양의 주황 상자 */
-.audit-evidence.is-mark {
-  border-color: #f6dfb8;
-  background: linear-gradient(180deg, #fffaf1 0%, #fff4e2 100%);
+.audit-card-section-body {
+  min-width: 0;
 }
 
-.audit-evidence.is-mark .audit-evidence-title {
-  color: #c07a12;
+/* 값의 흐름: 단계마다 이름표(작게) · 값(굵게) · 도구 이름(작게)을 세로로 쌓고, 단계 사이를 가는 선으로 잇는다 (상자 없음) */
+.audit-flows {
+  display: grid;
+  gap: 10px;
 }
 
-.audit-evidence.is-mark .audit-evidence-arrow {
-  color: #e4b56e;
-}
-
-.audit-evidence.is-mark .audit-evidence-step {
-  box-shadow: 0 0 0 1px #f3e2c4, 0 1px 2px rgba(31, 41, 51, 0.04);
-}
-
-.audit-evidence-flow {
+.audit-flow {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-wrap: wrap;
-  align-items: stretch;
-  gap: 6px;
-}
-
-.audit-evidence-flow li {
-  display: flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
+  gap: 6px 0;
 }
 
-.audit-evidence-arrow {
-  flex: none;
-  color: #9db8dc;
-}
-
-.audit-evidence-step {
+.audit-flow li {
+  position: relative;
   display: grid;
   gap: 1px;
   min-width: 0;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 0 0 1px #e1eaf5, 0 1px 2px rgba(31, 41, 51, 0.04);
 }
 
-.audit-evidence-label {
-  font-size: 11px;
+/* 단계 사이의 가는 선 (끝에 작은 점) */
+.audit-flow li + li {
+  padding-left: 36px;
+}
+
+.audit-flow li + li::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 20px;
+  height: 1px;
+  background: #cfd8e3;
+}
+
+.audit-flow li + li::after {
+  content: "";
+  position: absolute;
+  left: 26px;
+  top: calc(50% - 2px);
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #b8c4d2;
+}
+
+.audit-flow-label {
+  font-size: 11.5px;
   color: #8a939e;
 }
 
-.audit-evidence-value {
+.audit-flow-value {
   font-family: var(--font-label);
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   color: #1f2933;
   overflow-wrap: anywhere;
 }
 
-.audit-evidence-sub {
-  max-width: 200px;
+.audit-flow-sub {
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
-  color: #6c757d;
+  color: #8a939e;
 }
 
-/* 끝 단계의 뜻: 바뀌지 않음(초록) · 실패·미등록(빨강) · AWS가 바뀜(파랑) */
-.audit-evidence-flow li.is-good .audit-evidence-value {
-  color: #2f7d52;
+.audit-flow li.is-good .audit-flow-value { color: var(--layer-ok-ink); }
+.audit-flow li.is-bad .audit-flow-value { color: var(--layer-fail-ink); }
+.audit-flow li.is-change .audit-flow-value { color: var(--color-primary); }
+
+/* 근거 기록: 시각 · 무엇 */
+.audit-cites {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
 }
 
-.audit-evidence-flow li.is-bad .audit-evidence-value {
-  color: #b02a37;
+.audit-cites li {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 12.5px;
+  color: #3c4650;
 }
 
-.audit-evidence-flow li.is-change .audit-evidence-value {
-  color: var(--color-primary);
+.audit-cites time {
+  font-variant-numeric: tabular-nums;
+  color: #8a939e;
 }
 
+.audit-cites span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 @keyframes audit-cycle-in {
   from { opacity: 0; }
@@ -1454,13 +1469,14 @@
 @media (prefers-reduced-motion: reduce) {
   .audit-cycle-seg,
   .audit-cycle-mark,
-  .audit-cycle-center {
+  .audit-cycle-name,
+  .audit-card {
     animation: none;
     transition: none;
   }
 }
 
-/* 좁은 팝업창: 고리 위, 설명 아래 */
+/* 좁은 팝업창: 고리 위, 카드 아래 */
 @media (max-width: 640px) {
   .audit-cycle {
     grid-template-columns: minmax(0, 1fr);
@@ -1468,30 +1484,13 @@
   }
 
   .audit-cycle-svg {
-    max-width: 240px;
+    max-width: 230px;
     margin: 0 auto;
   }
 
-  .audit-cycle-panel {
-    min-height: 0;
-  }
-
-  /* 근거: 줄이 바뀌면 화살표가 줄 앞에 떨어지므로, 좁으면 위에서 아래로 쌓고 화살표를 아래로 */
-  .audit-evidence-flow {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 2px;
-  }
-
-  .audit-evidence-flow li {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 2px;
-  }
-
-  .audit-evidence-arrow {
-    align-self: center;
-    transform: rotate(90deg);
+  .audit-card-section {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
   }
 }
 
@@ -1506,193 +1505,6 @@
 .audit-trace-error {
   margin: 0;
   color: #b02a37;
-}
-
-/* ---------------------------------------------------------------- 역추적 (AuditLayers.tsx, 변경 작업 행)
-   제목 줄의 결론, 조각 안쪽의 판정 선, 설명 칸의 물음·판정·답·근거가 된 기록 */
-.audit-layers-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px 12px;
-  margin-bottom: 4px;
-}
-
-.audit-layers-head .audit-layers-title {
-  margin: 0;
-}
-
-.audit-layers-question {
-  margin: 0 0 6px;
-  font-size: 12.5px;
-  color: #6c757d;
-  overflow-wrap: anywhere;
-}
-
-.audit-trace-verdict-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-family: var(--font-label);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.audit-trace-verdict-pill.is-ok { background: rgba(88, 167, 121, 0.14); color: #3f8a61; }
-.audit-trace-verdict-pill.is-warn { background: rgba(255, 153, 0, 0.15); color: #9a5b00; }
-.audit-trace-verdict-pill.is-fail { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
-.audit-trace-verdict-pill.is-loading { background: #f0f3f7; color: #6c757d; font-weight: 600; }
-
-/* 조각 안쪽 가장자리의 판정 선 */
-.audit-cycle-status {
-  fill: none;
-  stroke-width: 3.5;
-  stroke-linecap: round;
-  pointer-events: none;
-  animation: audit-cycle-in 300ms ease 200ms backwards;
-}
-
-.audit-cycle-status.is-ok { stroke: #58a779; }
-.audit-cycle-status.is-warn { stroke: #ff9900; }
-.audit-cycle-status.is-fail { stroke: #dc3545; }
-.audit-cycle-status.is-info { stroke: #b8c2ce; }
-
-/* 파란 조각(이 기록) 위에서도 보이게 흰 테두리를 두른다 */
-.audit-cycle-seg.is-here .audit-cycle-status {
-  stroke-width: 3.5;
-  paint-order: stroke;
-  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.9));
-}
-
-/* 고리 아래: 판정 선의 뜻 */
-.audit-cycle-figure {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-.audit-trace-legend {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 4px 12px;
-  font-size: 11.5px;
-  color: #6c757d;
-}
-
-.audit-trace-legend li {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.audit-trace-legend li.is-caption {
-  font-family: var(--font-label);
-  font-weight: 700;
-  color: #8a939e;
-}
-
-.audit-trace-legend-line {
-  width: 14px;
-  height: 3.5px;
-  border-radius: 999px;
-  background: #b8c2ce;
-}
-
-.audit-trace-legend-line.is-ok { background: #58a779; }
-.audit-trace-legend-line.is-warn { background: #ff9900; }
-.audit-trace-legend-line.is-fail { background: #dc3545; }
-
-/* 설명 칸의 역추적 */
-.audit-trace-answer-box {
-  display: grid;
-  gap: 6px;
-  padding: 10px 12px;
-  border: 1px solid #e3e9f1;
-  border-left: 3px solid #b8c2ce;
-  border-radius: 10px;
-  background: #fff;
-}
-
-.audit-trace-answer-box.is-ok { border-left-color: #58a779; }
-.audit-trace-answer-box.is-warn { border-left-color: #ff9900; }
-.audit-trace-answer-box.is-fail { border-left-color: #dc3545; }
-
-.audit-trace-answer-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.audit-trace-answer-title {
-  font-family: var(--font-label);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: #6c757d;
-}
-
-.audit-trace-badge {
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-family: var(--font-label);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.audit-trace-badge.is-ok { background: rgba(88, 167, 121, 0.15); color: #3f8a61; }
-.audit-trace-badge.is-warn { background: rgba(255, 153, 0, 0.16); color: #9a5b00; }
-.audit-trace-badge.is-fail { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
-.audit-trace-badge.is-info { background: rgba(120, 120, 120, 0.12); color: #5f6670; }
-
-.audit-trace-answer-q {
-  margin: 0;
-  font-family: var(--font-label);
-  font-size: 13.5px;
-  font-weight: 700;
-  color: #1f2933;
-}
-
-.audit-trace-answer-a {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: #3c4650;
-  overflow-wrap: anywhere;
-}
-
-.audit-trace-cites {
-  margin: 2px 0 0;
-  padding: 8px 0 0;
-  border-top: 1px dashed #e3e9f1;
-  list-style: none;
-  display: grid;
-  gap: 3px;
-}
-
-.audit-trace-cites li {
-  display: grid;
-  grid-template-columns: 62px minmax(0, 1fr);
-  gap: 8px;
-  font-size: 12px;
-  color: #5f6670;
-}
-
-.audit-trace-cites time {
-  font-variant-numeric: tabular-nums;
-  color: #8a939e;
-}
-
-.audit-trace-cites span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------- 좁은 화면: 행은 두 줄로 */
