@@ -10,12 +10,13 @@
 //
 // - 고리는 조각 7개다. 조각 끝이 뾰족해(셰브런) 따로 화살표 없이 도는 방향이 보인다.
 //   차례는 서버의 판정(services/llm/audit_trace.py)이 따지는 차례다 (맨 위 1 효과부터 시계 방향)
-// - 색은 계층의 성격: 이 기록의 계층(행의 locus)은 파랑, 흔적이 있는 계층은 옅은 주황,
-//   기록으로 남지 않는 계층(판단: 모델 안, 매개: 앱 밖)은 점선 테두리. 색은 고르는 것과 상관없이 그대로다
+// - 이 기록의 계층(행의 locus): 색이 아니라 가운데 원판에서 뻗은 바늘이 가리키고, 원판 위에 그 이름이 늘 보인다.
+//   열 때 바늘이 조금 뒤에서 돌아와 멈춘다
+// - 조각의 색: 판정이 있으면 판정, 없으면 흔적이 있는 계층만 옅은 주황. 기록으로 남지 않는 계층(판단: 모델 안,
+//   매개: 앱 밖)은 점선 테두리. 색은 고르는 것과 상관없이 그대로다
 // - 고른 계층(처음에는 이 기록의 계층): 고리 바깥의 선택 표시(둥근 호)가 그 조각 위로 미끄러져 가고(가까운 쪽으로 돈다),
-//   조각은 그림자와 함께 살짝 떠오르며, 나머지 조각은 은은하게 옅어진다. 선택 표시의 색은 그 계층의 성격을 따른다.
-//   마우스를 올리거나 고른 조각은 바탕이 조금 짙어진다. 고리 가운데(옅은 원판 위에 이름)와 오른쪽 설명 칸도 고른 계층을 보인다. 색(성격)과 고름(표시·떠오름)을 나눠야
-//   다른 계층을 골랐을 때 이 기록의 계층과 헷갈리지 않는다
+//   조각은 그림자와 함께 살짝 떠오르며, 나머지 조각은 은은하게 옅어진다. 마우스를 올리거나 고른 조각은 바탕이 조금 짙어진다.
+//   오른쪽 설명 칸도 고른 계층을 보인다. 바늘(이 기록)과 선택 표시(고른 계층)를 나눠야 다른 계층을 골라도 헷갈리지 않는다
 // - 조각을 누르면(키보드는 Enter·Space) 그 계층을 고르고, 고른 조각을 다시 누르면 이 기록의 계층으로 돌아온다
 // - 설명 칸: 계층의 설명 → 근거(이 기록이 그 계층에 있는 까닭을 값의 흐름으로, 파란 상자) → 그 계층의 흔적(주황 상자).
 //   이 기록의 계층을 고르고 있으면 다른 계층에 남긴 흔적도 모아 보인다. 제목 옆에는 영어 이름을 회색으로 (고리 안은 한글만)
@@ -25,7 +26,7 @@
 //     제목 줄   7계층 위치                      ● 주의 3  ● 정상 3  ● 참고 1   ← 판정 개수 (나쁜 것부터, 이름표 없이)
 //               질문 "로그대로 보존 기간 줄여줘"                              ← 이 변경을 낳은 사용자의 질문
 //     고리      조각의 바탕색 = 그 계층의 판정 (정상 초록 · 주의 노랑 · 실패 빨강 · 참고 회색).
-//               이때 이 기록의 계층은 번호의 파란 원으로 보이고, 흔적은 설명 칸에서만 보인다 (주황이 '주의'와 섞이지 않게)
+//               이때 흔적은 설명 칸에서만 보인다 (주황이 '주의'와 섞이지 않게)
 //     설명 칸   제목 옆에 판정 배지, 그 계층에서 찾은 것과 근거 기록(시각 · 무엇).
 //               서버의 물음은 계층 정의와 겹쳐 보이지 않는다
 //   작업의 사건은 요청·승인·실행 행이 모두 같은 판정을 보인다 (같은 작업 ID)
@@ -253,6 +254,9 @@ const R_MID = (R_OUT + R_IN) / 2;
 const SPAN = 360 / LAYERS.length; // 조각 하나의 각 (도)
 const GAP = 2.2; // 조각 사이 틈 (도)
 const TIP = 5; // 셰브런의 뾰족한 끝이 나아가는 각 (도)
+const R_HUB = 50; // 가운데 원판의 반지름
+// 바늘: 원판 둘레에서 고리 안쪽 가장자리까지 뻗은 좁은 삼각형 (가운데가 원점, 위를 가리킨 모양. 돌려서 쓴다)
+const NEEDLE_PATH = `M -6 ${-(R_HUB - 2)} L 0 ${-(R_IN - 3)} L 6 ${-(R_HUB - 2)} Z`;
 const POP = 4; // 고른 조각을 바깥으로 띄우는 거리
 
 const rad = (deg: number) => (deg * Math.PI) / 180;
@@ -315,10 +319,11 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
               (count) => count.n,
           )
         : [];
-    // 계층의 성격 (색): 이 기록 · 흔적. 판정이 있으면 조각의 바탕색은 판정이 쓰므로
-    // 이 기록의 계층은 번호의 파란 원으로만 보이고, 흔적은 설명 칸에서만 보인다 (주황이 '주의'와 섞이지 않게)
-    const toneOf = (index: number) =>
-        index === hereIndex ? 'is-here' : !trace && marks[LAYERS[index].id] ? 'is-marked' : '';
+    // 조각의 색: 판정이 있으면 판정, 없으면 흔적(주황)만. 이 기록의 계층은 색이 아니라 가운데 바늘로 가리킨다.
+    // 판정이 있으면 흔적은 설명 칸에서만 보인다 (주황이 '주의'와 섞이지 않게)
+    const toneOf = (index: number) => (index !== hereIndex && !trace && marks[LAYERS[index].id] ? 'is-marked' : '');
+    // 바늘의 각: 이 기록의 조각 가운데 (셰브런 끝만큼 앞으로 치우친 글자 자리). 열 때 조금 뒤에서 돌아와 멈춘다
+    const needleAngle = hereIndex * SPAN + TIP / 2;
 
     // 선택 표시의 회전각. 고른 조각이 바뀌면 가까운 쪽으로 돈다 (7 → 1은 한 칸 앞으로, 거꾸로 여섯 칸 돌지 않게)
     const [turn, setTurn] = useState(selectedIndex * SPAN);
@@ -372,7 +377,7 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                         const label = labelAt(index);
                         const step = stepOf(layer.id);
                         const state = [
-                            tone === 'is-here' ? '이 기록의 계층' : tone === 'is-marked' ? '흔적' : offRecord ? '기록으로 남지 않음' : '',
+                            index === hereIndex ? '이 기록의 계층' : tone === 'is-marked' ? '흔적' : offRecord ? '기록으로 남지 않음' : '',
                             step ? `판정 ${STATUS_LABELS[step.status]}` : '',
                         ]
                             .filter(Boolean)
@@ -382,7 +387,7 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                         return (
                             <g
                                 key={layer.id}
-                                className={`audit-cycle-seg ${tone}${offRecord ? ' is-off-record' : ''}${
+                                className={`audit-cycle-seg ${tone}${index === hereIndex ? ' is-here' : ''}${offRecord ? ' is-off-record' : ''}${
                                     step ? ` has-status is-${step.status}` : ''
                                 }${isSelected ? ' is-selected' : ''}`}
                                 // 고른 조각은 가운데에서 바깥으로 밀어낸다 (--dx·--dy: CSS가 transform으로)
@@ -405,10 +410,6 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                                 }}
                             >
                                 <path className="audit-cycle-shape" d={segmentPath(index)} />
-                                {/* 판정이 있을 때 이 기록의 계층: 번호를 파란 원으로 (바탕색은 판정이 쓴다) */}
-                                {step && index === hereIndex ? (
-                                    <circle className="audit-cycle-here-dot" cx={label.x} cy={label.y - 10.5} r={7.5} />
-                                ) : null}
                                 <text className="audit-cycle-no" x={label.x} y={label.y - 7} textAnchor="middle">
                                     {index + 1}
                                 </text>
@@ -428,14 +429,26 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                             />
                         </g>
                     ) : null}
-                    {/* 가운데: 옅은 원판 위에 고른 계층의 이름(색은 그 계층의 성격). 고르면 바뀌며 살짝 떠오른다 */}
-                    <circle className="audit-cycle-hub" cx={C} cy={C} r={R_IN - 9} aria-hidden="true" />
-                    {selected ? (
-                        <g key={selected.id} className={`audit-cycle-center ${toneOf(selectedIndex)}`} aria-hidden="true">
-                            <text x={C} y={C + 6.5} textAnchor="middle" className="audit-cycle-name">
-                                {selected.label}
-                            </text>
+                    {/* 가운데: 원판과 이 기록의 조각을 가리키는 바늘, 원판 위에 이 기록의 계층 이름 */}
+                    {here ? (
+                        <g transform={`translate(${C} ${C})`} aria-hidden="true">
+                            <path
+                                className="audit-cycle-needle"
+                                d={NEEDLE_PATH}
+                                style={
+                                    {
+                                        transform: `rotate(${needleAngle}deg)`,
+                                        '--needle-from': `${needleAngle - 150}deg`,
+                                    } as CSSProperties
+                                }
+                            />
                         </g>
+                    ) : null}
+                    <circle className="audit-cycle-hub" cx={C} cy={C} r={R_HUB} aria-hidden="true" />
+                    {here ? (
+                        <text x={C} y={C + 6.5} textAnchor="middle" className="audit-cycle-name" aria-hidden="true">
+                            {here.label}
+                        </text>
                     ) : null}
                 </svg>
                 </div>

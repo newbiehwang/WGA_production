@@ -1181,10 +1181,6 @@
   animation: audit-cycle-mark-in 420ms ease 280ms backwards;
 }
 
-.audit-cycle-mark.is-here {
-  stroke: var(--color-primary);
-}
-
 .audit-cycle-mark.is-marked {
   stroke: #ff9900;
 }
@@ -1197,24 +1193,6 @@
 .audit-cycle-seg:focus-visible .audit-cycle-shape {
   stroke: var(--color-primary);
   stroke-width: 2;
-}
-
-/* 이 기록의 계층: 파랑으로 채운다 */
-.audit-cycle-seg.is-here .audit-cycle-shape {
-  fill: var(--color-primary);
-}
-
-.audit-cycle-seg.is-here.is-selected .audit-cycle-shape {
-  filter: brightness(0.93) drop-shadow(0 4px 9px rgba(0, 123, 255, 0.3));
-}
-
-.audit-cycle-seg.is-here.is-selected:hover .audit-cycle-shape {
-  filter: brightness(0.9) drop-shadow(0 4px 9px rgba(0, 123, 255, 0.32));
-}
-
-.audit-cycle-seg.is-here .audit-cycle-label,
-.audit-cycle-seg.is-here .audit-cycle-no {
-  fill: #fff;
 }
 
 /* 흔적 */
@@ -1249,11 +1227,23 @@
   stroke: #e0a040;
 }
 
-/* 가운데: 옅은 원판 위에 차례(작은 회색 숫자)와 이름 */
+/* 가운데: 옅은 원판, 이 기록의 계층을 가리키는 바늘, 원판 위의 이름 */
 .audit-cycle-hub {
   fill: #f7f9fc;
-  stroke: #e6ebf2;
-  stroke-width: 1;
+  stroke: #dfe5ee;
+  stroke-width: 1.2;
+}
+
+/* 바늘: 이 기록의 계층을 가리킨다. 열 때 조금 뒤에서 돌아와 멈춘다 (--needle-from) */
+.audit-cycle-needle {
+  fill: #334155;
+  pointer-events: none;
+  animation: audit-needle-in 720ms cubic-bezier(0.3, 1.3, 0.45, 1) 120ms backwards;
+}
+
+@keyframes audit-needle-in {
+  from { transform: rotate(var(--needle-from)); opacity: 0; }
+  35% { opacity: 1; }
 }
 
 .audit-cycle-center {
@@ -1266,10 +1256,6 @@
   font-weight: 600;
   letter-spacing: -0.03em;
   fill: #1f2933;
-}
-
-.audit-cycle-center.is-here .audit-cycle-name {
-  fill: var(--color-primary);
 }
 
 .audit-cycle-center.is-marked .audit-cycle-name {
@@ -1315,11 +1301,6 @@
   font-family: var(--font-label);
   font-size: 12px;
   font-weight: 800;
-}
-
-.audit-cycle-panel-no.is-here {
-  background: var(--color-primary);
-  color: #fff;
 }
 
 .audit-cycle-panel-no.is-marked {
@@ -1454,6 +1435,7 @@
 @media (prefers-reduced-motion: reduce) {
   .audit-cycle-seg,
   .audit-cycle-mark,
+  .audit-cycle-needle,
   .audit-cycle-center {
     animation: none;
     transition: none;
@@ -1607,16 +1589,6 @@
 
 /* 기록으로 남지 않는 층(점선)도 판정 바탕색을 따른다 */
 .audit-cycle-svg .audit-cycle-seg.has-status.is-off-record .audit-cycle-shape { stroke: #b8c2ce; }
-
-/* 판정이 있을 때 이 기록의 계층: 번호를 파란 원으로 */
-.audit-cycle-here-dot {
-  fill: var(--color-primary);
-  pointer-events: none;
-}
-
-.audit-cycle-svg .audit-cycle-seg.has-status.is-here .audit-cycle-no {
-  fill: #fff;
-}
 
 /* 판정 바탕 위에서는 파란 빛 그림자 대신 중립 그림자 */
 .audit-cycle-svg .audit-cycle-seg.has-status.is-selected .audit-cycle-shape {
