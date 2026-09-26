@@ -12,6 +12,7 @@ from slack_sdk import WebClient
 from llm_progress import REQUEST_ID, ProgressReporter, read_progress
 from redaction import Redactor
 from audit import AuditLog, AuditQueryError, CloudWatchSink, groups_of, query_audit
+from audit_trace import query_trace
 from approvals import (APPROVED, DENIED, FINISHED, ApprovalError, ApprovalRequester, ApprovalStore, approval_mode,
                        can_view, check_decision, execute_approved, follow_up_prompt, public_view)
 from mcp_client import MCPClient
@@ -612,8 +613,11 @@ def handle_progress(request_id, caller_id, origin):
 
 
 def handle_audit(params, caller_id, claims, origin):
-    """GET /audit: 감사 로그. admins 그룹만 볼 수 있다 (audit.query_audit, 일반 사용자는 403)."""
+    """GET /audit: 감사 로그. admins 그룹만 볼 수 있다 (audit.query_audit, 일반 사용자는 403).
+    trace=<actionId>가 있으면 그 변경 작업의 역추적 (audit_trace.query_trace)."""
     try:
+        if (params or {}).get("trace"):
+            return cors_response(200, query_trace(audit_table, caller_id, claims, params), origin)
         return cors_response(200, query_audit(audit_table, caller_id, claims, params), origin)
     except AuditQueryError as error:
         return cors_response(error.status, {"error": str(error)}, origin)

@@ -3,11 +3,13 @@
 //   머리: 제목 · 새로 고침
 //   거르기: 기간 · 대상 · 결과 · 종류 · 층 · 도구 (관리자만 여는 화면이다)
 //   목록: 시각 · 요청자 · 도구 · 요약 · 결과 · 표시. 행을 누르면 입력값·오류·질문 ID 등이 펼쳐진다
+//         변경 작업 행은 '층별로 따져 보기'로 역추적을 연다 (AuditTrace)
 //   아래: 더 보기 (cursor로 이어 읽는다)
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { fetchAudit } from '@/api/audit';
 import type { AuditKind, AuditLocus, AuditRecord, AuditStatus } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
+import { AuditTrace } from './AuditTrace';
 import { labelOf, summarize } from '@/utils/toolTrace';
 import './audit.css';
 
@@ -227,14 +229,37 @@ function Details({ record }: { record: AuditRecord }) {
     if (record.toolUseId) rows.push(['도구 호출 ID', <code key="use">{record.toolUseId}</code>]);
 
     return (
-        <dl className="audit-details">
-            {rows.map(([name, value]) => (
-                <Fragment key={name}>
-                    <dt>{name}</dt>
-                    <dd>{value}</dd>
-                </Fragment>
-            ))}
-        </dl>
+        <>
+            <dl className="audit-details">
+                {rows.map(([name, value]) => (
+                    <Fragment key={name}>
+                        <dt>{name}</dt>
+                        <dd>{value}</dd>
+                    </Fragment>
+                ))}
+            </dl>
+            {record.kind === 'action' && record.actionId ? (
+                <TraceSection actionId={record.actionId} day={record.day} />
+            ) : null}
+        </>
+    );
+}
+
+// 변경 작업 행: 누르면 역추적을 연다 (누를 때만 서버에 묻는다)
+function TraceSection({ actionId, day }: { actionId: string; day: string }) {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="audit-trace-section">
+            <button
+                type="button"
+                className="plan-reload-button"
+                aria-expanded={open}
+                onClick={() => setOpen((prev) => !prev)}
+            >
+                {open ? '역추적 닫기' : '층별로 따져 보기'}
+            </button>
+            {open ? <AuditTrace actionId={actionId} day={day} /> : null}
+        </div>
     );
 }
 
