@@ -8,6 +8,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { fetchAudit } from '@/api/audit';
 import { ROLE_LABELS, type Role } from '@/auth/authClient';
+import { LoadingCard, useMinimumVisible } from '@/components/LoadingCard';
 import { RefreshButton } from '@/components/RefreshButton';
 import type { AuditKind, AuditLocus, AuditRecord, AuditStatus } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
@@ -393,6 +394,7 @@ export function AuditPage() {
     const [items, setItems] = useState<AuditRecord[]>([]);
     const [cursor, setCursor] = useState<string | null>(null);
     const [loading, setLoading] = useState<'list' | 'more' | null>('list');
+    const listLoading = useMinimumVisible(loading === 'list'); // 목록 자리의 기다림 카드 (최소 1초)
     const [error, setError] = useState<string | null>(null);
     const [openKey, setOpenKey] = useState<string | null>(null);
     // 거르기용 도구 목록: 지금까지 받은 기록에 나온 도구 (서버는 정확한 도구 이름으로만 거른다)
@@ -446,7 +448,7 @@ export function AuditPage() {
         <section className="plan-panel audit-panel" aria-label="감사 로그">
             <div className="plan-panel-header">
                 <h1 className="plan-panel-eyebrow">감사 로그</h1>
-                <RefreshButton onClick={() => load()} loading={loading !== null} />
+                <RefreshButton onClick={() => load()} loading={loading !== null || listLoading} />
             </div>
 
             <div className="audit-filters">
@@ -507,14 +509,8 @@ export function AuditPage() {
                         <span className="audit-col-flags">표시</span>
                     </div>
 
-                    {loading === 'list' ? (
-                        <div className="plan-panel-loading" role="status">
-                            <div>
-                                <div className="plan-inline-spinner" />
-                                <p>감사 로그를 불러오는 중…</p>
-                            </div>
-                        </div>
-                    ) : items.length === 0 ? (
+                    {/* 불러오는 동안 목록은 비워 두고, 카드는 흰 박스 전체의 가운데에 띄운다 (아래 plan-panel-loading) */}
+                    {listLoading ? null : items.length === 0 ? (
                         error ? null : (
                             <div className="plan-panel-empty">
                                 <p>이 조건에 맞는 기록이 없습니다. 질문을 보내면 도구 호출마다 기록이 남습니다.</p>
@@ -549,6 +545,12 @@ export function AuditPage() {
                     )}
                 </div>
             </div>
+
+            {listLoading ? (
+                <div className="plan-panel-loading">
+                    <LoadingCard text="감사 로그를 불러오는 중…" />
+                </div>
+            ) : null}
         </section>
     );
 }

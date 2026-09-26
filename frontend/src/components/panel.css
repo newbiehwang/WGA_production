@@ -510,7 +510,6 @@
   animation: menu-in 140ms ease both;
 }
 
-.plan-panel-loading,
 .plan-panel-empty,
 .plan-panel-error {
   border: 1px dashed #dde4ec;
@@ -522,7 +521,6 @@
   text-align: center;
 }
 
-.plan-panel-loading p,
 .plan-panel-empty p {
   margin: 0;
   font-family: var(--font-label);
@@ -538,6 +536,51 @@
   border-top-color: var(--color-primary);
   animation: spin 0.85s linear infinite;
   margin-bottom: 10px;
+}
+
+/* 목록을 불러오는 동안: 흰 박스(.plan-panel, position: relative) 전체를 덮는 투명한 층을 두고 그 정가운데에
+   기다림 카드(.loading-card)를 띄운다. 로그아웃 카드가 화면 전체의 가운데에 뜨는 것과 같은 방식이다.
+   층은 누름을 막지 않는다(pointer-events: none). 표 머리(z-index: 6)보다 위에 둔다.
+   나타날 때는 로그아웃 중 화면(.logout-overlay, layout.css)과 같은 효과: 6px 위에서 내려오며 흐릿하게 나타난다 */
+.plan-panel-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  animation: menu-in 160ms ease both;
+}
+
+/* 기다림 카드 (components/LoadingCard.tsx). 로그아웃 중 화면과 목록 로딩이 같이 쓴다 */
+.loading-card {
+  width: min(320px, calc(100% - 32px));
+  border-radius: 14px;
+  border: 1px solid rgba(223, 230, 238, 0.92);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 20px 34px rgba(15, 23, 42, 0.24);
+  padding: 18px 16px;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+
+.loading-card-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 3px solid rgba(0, 123, 255, 0.22);
+  border-top-color: var(--color-primary);
+  animation: spin 0.85s linear infinite;
+}
+
+.loading-card-text {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #1f4f86;
 }
 
 .plan-panel-error-title {
@@ -864,20 +907,6 @@
 .icon-button:disabled {
   cursor: wait;
   opacity: 0.7;
-}
-
-.refresh-button.is-loading svg {
-  animation: refresh-spin 0.9s linear infinite;
-}
-
-@keyframes refresh-spin {
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .refresh-button.is-loading svg {
-    animation: none;
-  }
 }
 
 .plan-panel-error-inline {
