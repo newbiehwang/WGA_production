@@ -1,14 +1,15 @@
-// 감사 로그의 조건(기간·거르기)을 주소에 담는다: 같은 화면을 링크로 나누고, 새로 고쳐도 조건이 남는다.
+// 감사 로그의 조건(기간·거르기·검색어)을 주소에 담는다: 같은 화면을 링크로 나누고, 새로 고쳐도 조건이 남는다.
 //   /audit?range=1d&result=error&requester=7c1e9a52-kim,slack:U04ABCDE
 //   /audit?from=2026-09-20T05:00:00.000Z&to=2026-09-20T17:00:00.000Z     ← 직접 정한 구간 (UTC)
-// 기본값(최근 7일, 거르기 없음)은 주소에 적지 않는다. 이 화면이 모르는 값(mock-role 등)은 그대로 둔다
+//   /audit?q=i-0428%20실패                                                  ← 검색어
+// 기본값(최근 7일, 거르기·검색어 없음)은 주소에 적지 않는다. 이 화면이 모르는 값(mock-role 등)은 그대로 둔다
 import { FACETS, type FacetId, type Selection } from './auditModel';
 import { DEFAULT_PERIOD, PRESETS, isPreset, type Period } from './timeWindow';
 
 const FACET_IDS = FACETS.map((facet) => facet.id);
-const PERIOD_KEYS = ['range', 'from', 'to'];
+const OWN_KEYS = ['range', 'from', 'to', 'q']; // 기간과 검색어 (거르기는 FACET_IDS)
 
-export function readUrl(params: URLSearchParams): { period: Period; selection: Selection } {
+export function readUrl(params: URLSearchParams): { period: Period; selection: Selection; query: string } {
     let period: Period = DEFAULT_PERIOD;
     const range = params.get('range');
     const from = Date.parse(params.get('from') ?? '');
@@ -21,12 +22,12 @@ export function readUrl(params: URLSearchParams): { period: Period; selection: S
         const values = (params.get(id) ?? '').split(',').filter(Boolean);
         if (values.length) selection[id as FacetId] = values;
     }
-    return { period, selection };
+    return { period, selection, query: params.get('q') ?? '' };
 }
 
-export function writeUrl(current: URLSearchParams, period: Period, selection: Selection): URLSearchParams {
+export function writeUrl(current: URLSearchParams, period: Period, selection: Selection, query: string): URLSearchParams {
     const next = new URLSearchParams(current);
-    for (const key of [...PERIOD_KEYS, ...FACET_IDS]) next.delete(key);
+    for (const key of [...OWN_KEYS, ...FACET_IDS]) next.delete(key);
     if (isPreset(period)) {
         if (period.preset !== (DEFAULT_PERIOD as { preset: string }).preset) next.set('range', period.preset);
     } else {
@@ -37,5 +38,6 @@ export function writeUrl(current: URLSearchParams, period: Period, selection: Se
         const values = selection[id as FacetId];
         if (values?.length) next.set(id, values.join(','));
     }
+    if (query.trim()) next.set('q', query.trim());
     return next;
 }

@@ -8,6 +8,8 @@
 // - 목록을 가리지 않는다(배경을 어둡게 하지 않는다). 목록의 다른 행을 누르면 그 기록으로 바뀐다
 // - ↑/↓(또는 k/j)로 거른 목록의 앞뒤 기록으로 옮긴다. Esc·✕로 닫는다. 입력칸에 글을 쓰는 중에는 키를 가로채지 않는다
 // - 열릴 때 패널에 포커스를 두고, 닫으면 부르는 쪽이 그 기록의 행으로 포커스를 돌려준다
+// - 머리 아래 버튼으로 이 기록에서 이어 찾는다: 같은 질문·대화·작업의 기록(ID로 검색하고 거르기를 푼다),
+//   이 요청자만·이 도구만(그 거르기를 이 값 하나로)
 // - 패널(plan-panel)은 등장 효과로 transform이 남아 있어 그 안의 position: fixed가 화면이 아니라 패널 기준이 된다.
 //   그래서 document.body에 그린다
 import { useEffect, useRef, useState } from 'react';
@@ -15,7 +17,7 @@ import { createPortal } from 'react-dom';
 import type { AuditRecord } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
 import { Details, Flags, KindLabel, ResultBadge } from './AuditDetails';
-import { keyOf, requesterOf, timeOf } from './auditModel';
+import { keyOf, requesterOf, timeOf, toolLabelOf, type FacetId } from './auditModel';
 
 const CLOSE_MS = 160; // 닫히는 효과 시간 (audit.css의 audit-side-out)
 
@@ -29,12 +31,16 @@ export function AuditSidePanel({
     total,
     onMove,
     onClose,
+    onRelated,
+    onFacet,
 }: {
     record: AuditRecord;
     index: number; // 거른 목록 안의 자리 (0부터)
     total: number;
     onMove: (step: -1 | 1) => void;
     onClose: () => void;
+    onRelated: (id: string) => void; // 이 ID가 든 기록을 모두 (검색어로)
+    onFacet: (id: FacetId, value: string) => void; // 그 거르기를 이 값 하나로
 }) {
     const [isClosing, setIsClosing] = useState(false);
     const panel = useRef<HTMLElement>(null);
@@ -130,6 +136,31 @@ export function AuditSidePanel({
                     <span title={record.userId}>{requesterOf(record)}</span>
                     <ResultBadge record={record} />
                     <Flags record={record} />
+                </div>
+                <div className="audit-side-actions" role="group" aria-label="이 기록에서 이어 찾기">
+                    {record.requestId ? (
+                        <button type="button" onClick={() => onRelated(record.requestId!)}>
+                            같은 질문의 기록
+                        </button>
+                    ) : null}
+                    {record.sessionId ? (
+                        <button type="button" onClick={() => onRelated(record.sessionId!)}>
+                            같은 대화의 기록
+                        </button>
+                    ) : null}
+                    {record.actionId ? (
+                        <button type="button" onClick={() => onRelated(record.actionId!)}>
+                            같은 작업의 기록
+                        </button>
+                    ) : null}
+                    <button type="button" onClick={() => onFacet('requester', record.userId)} title={requesterOf(record)}>
+                        이 요청자만
+                    </button>
+                    {record.tool ? (
+                        <button type="button" onClick={() => onFacet('tool', record.tool!)} title={toolLabelOf(record.tool)}>
+                            이 도구만
+                        </button>
+                    ) : null}
                 </div>
             </div>
             <div ref={body} className="audit-side-body">
