@@ -18,7 +18,7 @@ import { LoadingCard, useMinimumVisible } from '@/components/LoadingCard';
 import { RefreshButton } from '@/components/RefreshButton';
 import type { AuditRecord } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
-import { Flags, KindLabel, ResultBadge } from './AuditDetails';
+import { KindLabel, ResultBadge } from './AuditDetails';
 import { AuditHistogram } from './AuditHistogram';
 import { AuditDetailModal } from './AuditDetailModal';
 import {
@@ -28,7 +28,6 @@ import {
     matchesQuery,
     parseQuery,
     requesterOf,
-    secondsOf,
     summaryOf,
     timeOf,
     type FacetId,
@@ -56,7 +55,8 @@ const RENDER_STEP = 100; // 목록은 이만큼씩 그린다 (2,000행을 한 �
 const rowButtonOf = (key: string) =>
     document.querySelector<HTMLButtonElement>(`.audit-row-button[data-key="${CSS.escape(key)}"]`);
 
-// 목록 한 행. 누르면 팝업창으로 자세히 본다
+// 목록 한 행. 누르면 팝업창으로 자세히 본다.
+// 걸린 시간과 표시(Slack·의심 문구·가림 등)는 팝업창에서 보이므로 목록에는 두지 않는다. 도구 칸은 종류와 상관없이 검은 글자
 function AuditRow({ record, selected, onOpen }: { record: AuditRecord; selected: boolean; onOpen: () => void }) {
     const summary = summaryOf(record);
     return (
@@ -81,10 +81,6 @@ function AuditRow({ record, selected, onOpen }: { record: AuditRecord; selected:
                 </span>
                 <span className="audit-col-status">
                     <ResultBadge record={record} />
-                    <span className="audit-ms">{secondsOf(record.ms)}</span>
-                </span>
-                <span className="audit-col-flags">
-                    <Flags record={record} />
                 </span>
             </button>
         </li>
@@ -292,7 +288,6 @@ export function AuditPage() {
                             <span className="audit-col-tool">도구</span>
                             <span className="audit-col-summary">요약</span>
                             <span className="audit-col-status">결과</span>
-                            <span className="audit-col-flags">표시</span>
                         </div>
 
                         {/* 처음 불러올 때는 목록을 비워 두고, 카드는 흰 박스 전체의 가운데에 띄운다 (아래 plan-panel-loading) */}

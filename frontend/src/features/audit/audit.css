@@ -824,8 +824,8 @@
 .audit-table-header,
 .audit-row-button {
   display: grid;
-  /* 시각 · 요청자 · 도구 · 요약(남는 폭) · 결과 · 표시 */
-  grid-template-columns: 158px minmax(96px, 150px) 132px minmax(140px, 1fr) 104px 84px;
+  /* 시각 · 요청자 · 도구 · 요약(남는 폭) · 결과. 걸린 시간·표시는 기록 팝업창에서 본다 */
+  grid-template-columns: 158px minmax(96px, 150px) 132px minmax(140px, 1fr) 88px;
   align-items: center;
   gap: 12px;
 }
@@ -904,6 +904,11 @@
   color: #007bff;
 }
 
+/* 목록의 도구 칸은 종류(질문·변경 작업·사용자 관리)와 상관없이 검은 글자 (색은 기록 팝업창 제목에만) */
+.audit-row-button .audit-col-tool > span {
+  color: inherit;
+}
+
 .audit-event-requested {
   background: rgba(255, 153, 0, 0.16);
   color: #9a5b00;
@@ -928,13 +933,6 @@
 .audit-muted {
   font-size: 12px;
   color: #8a94a0;
-}
-
-.audit-row-button .audit-col-flags {
-  display: inline-flex;
-  flex-wrap: wrap; /* Slack과 가림이 함께 있으면 두 줄로 */
-  gap: 4px;
-  white-space: normal;
 }
 
 .audit-flag {
@@ -1294,8 +1292,7 @@
     grid-template-areas:
       "tool status"
       "summary summary"
-      "time flags"
-      "user user";
+      "user time";
     gap: 4px 10px;
   }
 
@@ -1304,7 +1301,6 @@
   .audit-row-button .audit-col-tool { grid-area: tool; }
   .audit-row-button .audit-col-summary { grid-area: summary; }
   .audit-row-button .audit-col-status { grid-area: status; }
-  .audit-row-button .audit-col-flags { grid-area: flags; justify-content: flex-end; }
 
   .audit-details {
     grid-template-columns: minmax(0, 1fr);
