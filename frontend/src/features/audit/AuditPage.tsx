@@ -2,8 +2,8 @@
 // 관리자만 여는 화면이다. 구성은 Datadog Audit Trail을 따랐다 (패널·배지·버튼 모양은 이 앱의 것을 그대로 쓴다).
 //   머리: 제목 · 새로 고침(아이콘)
 //   검색창(AuditSearch)
-//   기간(PeriodPicker) · 필터(FilterMenu: 누르면 종류·결과·층·요청자·도구·출처·표시를 고르는 창, 고른 조건은 칩) · 건수 · 필터 초기화
-//   시간대별 막대그래프(AuditHistogram, 나눠 보기·드래그로 기간 좁히기)
+//   필터(FilterMenu: 누르면 기간·그룹 기준·종류·결과·층·요청자·도구·출처·표시를 고르는 창, 걸린 조건은 칩) · 건수 · 필터 초기화
+//   시간대별 막대그래프(AuditHistogram, 그룹 기준으로 색을 나눠 쌓기·드래그로 기간 좁히기)
 //   목록(시각 · 요청자 · 도구 · 요약 · 결과 · 표시). 내려가면 이어서 더 그린다
 //   행을 누르면 팝업창(AuditDetailModal, 이 앱의 다른 팝업창과 같은 모양)으로 자세히 보인다. ↑/↓로 앞뒤 기록, 변경 작업은 '층별로 따져 보기',
 //   '같은 질문의 기록'·'이 요청자만' 같은 버튼으로 이어 찾는다
@@ -38,7 +38,6 @@ import {
 import { AuditSearch } from './AuditSearch';
 import { readUrl, writeUrl } from './auditUrl';
 import { FilterMenu } from './FilterMenu';
-import { PeriodPicker } from './PeriodPicker';
 import {
     DEFAULT_PERIOD,
     containsRange,
@@ -114,7 +113,7 @@ function ResetButton({ onClick, disabled }: { onClick: () => void; disabled: boo
             className="audit-reset"
             onClick={onClick}
             disabled={disabled}
-            title="처음 화면으로 되돌립니다 (거르기·검색어를 지우고, 기간은 최근 7일, 나눠 보기는 결과)"
+            title="처음 화면으로 되돌립니다 (거르기·검색어를 지우고, 기간은 최근 7일, 그룹 기준은 결과)"
         >
             <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
                 <path
@@ -153,7 +152,7 @@ export function AuditPage() {
     const [period, setPeriod] = useState<Period>(initial.period);
     const [selection, setSelection] = useState<Selection>(initial.selection);
     const [query, setQuery] = useState(initial.query);
-    const [groupBy, setGroupBy] = useState<GroupBy>(initial.groupBy); // 막대그래프 나눠 보기
+    const [groupBy, setGroupBy] = useState<GroupBy>(initial.groupBy); // 막대그래프 그룹 기준
     const [now, setNow] = useState(() => Date.now()); // '최근 n시간'의 끝. 새로 고침하면 지금으로
     const timeWindow = useMemo(() => windowOf(period, now), [period, now]);
 
@@ -193,7 +192,7 @@ export function AuditPage() {
     const searched = useMemo(() => inWindow.filter((record) => matchesQuery(record, parsed)), [inWindow, parsed]);
     const filtered = useMemo(() => searched.filter((record) => matches(record, selection)), [searched, selection]);
     const conditions = activeCount(selection) + (query.trim() ? 1 : 0);
-    // 처음 화면(최근 7일, 거르기·검색어 없음, 결과로 나눠 보기)과 다른가: '필터 초기화'를 켠다
+    // 처음 화면(최근 7일, 거르기·검색어 없음, 그룹 기준 결과)과 다른가: '필터 초기화'를 켠다
     const customized =
         conditions > 0 ||
         !isPreset(period) ||
@@ -237,7 +236,7 @@ export function AuditPage() {
     const [pointAt, setPointAt] = useState<number | null>(null);
 
     // 필터 초기화: 처음 열었을 때와 똑같은 화면으로 되돌린다.
-    // 조건(거르기·검색어·기간 최근 7일)뿐 아니라 화면 상태(나눠 보기, 열린 필터 창·거르기 목록의 접기·더 보기,
+    // 조건(거르기·검색어·기간 최근 7일)뿐 아니라 화면 상태(그룹 기준, 열린 필터 창·거르기 목록의 접기·더 보기,
     // 목록 스크롤, 열린 팝업창)도 처음으로. '최근 7일'의 끝도 지금으로 맞춘다
     const [resetNo, setResetNo] = useState(0); // 바뀌면 필터 창을 닫고 거르기 목록을 새로 그린다
     const listBody = useRef<HTMLUListElement>(null);
@@ -275,12 +274,16 @@ export function AuditPage() {
                 <div className="audit-results">
                     <AuditSearch value={query} onChange={setQuery} />
                     <div className="audit-toolbar">
-                        <PeriodPicker period={period} window={timeWindow} onChange={setPeriod} />
                         <FilterMenu
                             records={searched}
                             allRecords={records}
                             selection={selection}
                             onChange={setSelection}
+                            period={period}
+                            window={timeWindow}
+                            onPeriod={setPeriod}
+                            groupBy={groupBy}
+                            onGroupBy={setGroupBy}
                             resetNo={resetNo}
                         />
                         <p className="audit-count" role="status">
@@ -308,7 +311,6 @@ export function AuditPage() {
                             loading={listLoading}
                             highlightAt={pointAt}
                             groupBy={groupBy}
-                            onGroupBy={setGroupBy}
                             onSelect={setPeriod}
                             onFilter={(facet, values) => setSelection((prev) => ({ ...prev, [facet]: values }))}
                         />

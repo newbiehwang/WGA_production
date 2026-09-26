@@ -250,7 +250,7 @@ export function toggleValue(selection: Selection, id: FacetId, value: string): S
 export const activeCount = (selection: Selection) =>
     Object.values(selection).reduce((sum, chosen) => sum + (chosen?.length ?? 0), 0);
 
-// ---------------------------------------------------------------- 막대그래프 나눠 보기 (AuditHistogram)
+// ---------------------------------------------------------------- 막대그래프 그룹 기준 (AuditHistogram)
 
 export type GroupBy = 'result' | 'kind' | 'requester' | 'tool';
 export const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [

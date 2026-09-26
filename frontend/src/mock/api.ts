@@ -586,7 +586,7 @@ const AUDIT_USERS = [
   { userId: MOCK_USER_ID, email: "demo@example.com", source: "web" as const },
   { userId: "7c1e9a52-kim", email: "kim@example.com", source: "web" as const },
   { userId: "slack:U04ABCDE", source: "slack" as const },
-  // 요청자를 더 둔다: 기본은 셋 더(나눠 보기의 상위 5명 + '기타' 확인용), ?mock-audit=many는 여섯 더(거르기 목록의 '더 보기' 확인용)
+  // 요청자를 더 둔다: 기본은 셋 더(그룹 기준 요청자의 상위 5명 + '기타' 확인용), ?mock-audit=many는 여섯 더(거르기 목록의 '더 보기' 확인용)
   ...["lee", "park", "choi", "jung", "kang", "yoon"]
     .slice(0, MOCK_AUDIT_MANY ? 6 : 3)
     .map((name, index) => ({
