@@ -580,10 +580,20 @@ let answerIndex = 1; // 0번은 예시 대화에 이미 나와 있으므로 다�
 // 질문을 보내면 그 질문과 도구 호출이 맨 위에 바로 추가된다.
 
 const MOCK_USER_ID = "mock-user";
+const MOCK_AUDIT_MANY =
+  new URLSearchParams(window.location.search).get("mock-audit") === "many";
 const AUDIT_USERS = [
   { userId: MOCK_USER_ID, email: "demo@example.com", source: "web" as const },
   { userId: "7c1e9a52-kim", email: "kim@example.com", source: "web" as const },
   { userId: "slack:U04ABCDE", source: "slack" as const },
+  // ?mock-audit=many일 때만: 요청자가 많을 때의 거르기 목록('더 보기') 확인용
+  ...(MOCK_AUDIT_MANY
+    ? ["lee", "park", "choi", "jung", "kang", "yoon"].map((name, index) => ({
+        userId: `a${index}0f3b-${name}`,
+        email: `${name}@example.com`,
+        source: "web" as const,
+      }))
+    : []),
 ];
 const AUDIT_EXTRA_TOOLS: MockTool[] = [
   {
@@ -678,10 +688,13 @@ const seedAudit = (): AuditRecord[] => {
     [AUDIT_EXTRA_TOOLS[0]],
     [AUDIT_EXTRA_TOOLS[1]],
   ];
-  // 30일 동안 하루 한두 건씩 (시각·사람·도구가 골고루 섞이도록 번호로 돌린다)
-  for (let n = 0; n < 42; n += 1) {
+  // 30일 동안 하루 한두 건씩 (시각·사람·도구가 골고루 섞이도록 번호로 돌린다).
+  // 주소에 ?mock-audit=many를 붙이면 질문 1,100개(30일에 기록 약 2,200건)를 만든다: 감사 로그의 2,000건 한도와 긴 목록 확인용
+  const count = MOCK_AUDIT_MANY ? 1100 : 42;
+  const stepHours = MOCK_AUDIT_MANY ? 0.64 : 17;
+  for (let n = 0; n < count; n += 1) {
     const time = new Date(
-      Date.now() - (n * 17 + 3) * 60 * 60 * 1000 - (n % 7) * 11 * 60 * 1000,
+      Date.now() - (n * stepHours + 3) * 60 * 60 * 1000 - (n % 7) * 11 * 60 * 1000,
     );
     const user = AUDIT_USERS[n % AUDIT_USERS.length];
     const tools = toolSets[n % toolSets.length];
