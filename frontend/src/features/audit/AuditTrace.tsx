@@ -12,19 +12,10 @@
 // 답은 서버가 기록만으로 계산한다 (같은 기록이면 언제나 같은 답). 화면은 보여 주기만 한다.
 import { useEffect, useState } from 'react';
 import { fetchTrace } from '@/api/audit';
-import type { AuditRecord, AuditTrace as Trace, TraceLayer, TraceStatus } from '@/types/audit';
+import type { AuditRecord, AuditTrace as Trace, TraceStatus } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
 import { labelOf } from '@/utils/toolTrace';
-
-const LAYERS: Record<TraceLayer, string> = {
-    effect: '효과',
-    egress: '유출',
-    residence: '체류',
-    deliberation: '판단',
-    ingress: '유입',
-    interface: '경계',
-    mediation: '매개',
-};
+import { layerLabel } from './auditModel';
 
 const STATUSES: Record<TraceStatus, string> = { ok: '정상', warn: '주의', fail: '실패', info: '참고' };
 
@@ -108,7 +99,7 @@ export function AuditTrace({ actionId, day }: { actionId: string; day: string })
                         </span>
                         <div className="audit-trace-body">
                             <p className="audit-trace-head">
-                                <strong className="audit-trace-layer">{LAYERS[step.layer]}</strong>
+                                <strong className="audit-trace-layer">{layerLabel(step.layer)}</strong>
                                 <span className="audit-trace-q">{step.question}</span>
                                 <span className={`audit-trace-status is-${step.status}`}>{STATUSES[step.status]}</span>
                             </p>

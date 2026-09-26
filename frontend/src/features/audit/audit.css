@@ -1075,6 +1075,176 @@
 
 /* ---------------------------------------------------------------- 역추적 (AuditTrace) */
 
+/* ---------------------------------------------------------------- 층 다이어그램 (AuditLayers.tsx)
+   7계층을 위에서 아래로 쌓는다. 왼쪽 번호를 세로줄로 이어 한 덩어리로 보이게 하고,
+   이 기록의 층은 파랑, 흔적이 있는 층은 주황, 기록으로 남지 않는 층(판단·매개)은 점선 */
+.audit-layers {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #edf1f6;
+}
+
+.audit-layers-title {
+  margin: 0 0 10px;
+  font-family: var(--font-label);
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f2933;
+}
+
+.audit-layers-title .audit-muted {
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+.audit-layer-stack {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+/* 번호를 잇는 세로줄 (첫 번호 가운데부터 마지막 번호 가운데까지) */
+.audit-layer-stack::before {
+  content: "";
+  position: absolute;
+  left: 21px;
+  top: 18px;
+  bottom: 18px;
+  width: 2px;
+  background: #e3e9f1;
+}
+
+.audit-layer {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #e8edf3;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.audit-layer-no {
+  position: relative; /* 세로줄 위에 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #f0f3f7;
+  color: #5f6670;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.audit-layer-name {
+  font-family: var(--font-label);
+  font-weight: 700;
+  color: #1f2933;
+}
+
+.audit-layer-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.audit-layer-desc {
+  color: #6c757d;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.audit-layer-mark {
+  color: #9a5b00;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.audit-layer-tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(0, 123, 255, 0.12);
+  color: var(--color-primary);
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.audit-layer-tag.is-mark {
+  background: rgba(255, 153, 0, 0.16);
+  color: #9a5b00;
+}
+
+/* 이 기록의 층 */
+.audit-layer.is-here {
+  border-color: rgba(0, 123, 255, 0.35);
+  background: #f1f6fd;
+}
+
+.audit-layer.is-here .audit-layer-no {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.audit-layer.is-here .audit-layer-desc {
+  color: #1f2933;
+}
+
+/* 흔적이 있는 층 */
+.audit-layer.is-marked {
+  border-color: rgba(255, 153, 0, 0.45);
+  background: #fff8ec;
+}
+
+.audit-layer.is-marked .audit-layer-no {
+  background: #ff9900;
+  color: #fff;
+}
+
+/* 기록으로 남지 않는 층 (판단: 모델 안, 매개: 앱 밖). 흔적이 있으면(매개의 CloudTrail 요청 ID) 배경만 주황 */
+.audit-layer.is-off-record {
+  border-style: dashed;
+  border-color: #d3dbe5;
+}
+
+.audit-layer.is-off-record:not(.is-marked) {
+  background: #fafbfd;
+}
+
+.audit-layer.is-off-record.is-marked {
+  border-color: rgba(255, 153, 0, 0.55);
+}
+
+.audit-layers-legend {
+  margin: 8px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #6c757d;
+}
+
+.audit-layers-key {
+  flex: none;
+  width: 18px;
+  height: 10px;
+  border: 1px dashed #b8c2ce;
+  border-radius: 3px;
+  background: #fafbfd;
+}
+
 .audit-trace-section {
   display: grid;
   justify-items: start;
@@ -1292,6 +1462,22 @@
   .audit-details {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
+  }
+
+  /* 좁은 화면: 설명을 이름 아래로 내리고, 표시는 이름 옆에 */
+  .audit-layer {
+    grid-template-columns: 22px auto minmax(0, 1fr);
+    row-gap: 2px;
+  }
+
+  .audit-layer-text {
+    grid-column: 2 / -1;
+  }
+
+  .audit-layer-tag {
+    grid-row: 1;
+    grid-column: 3;
+    justify-self: start;
   }
 
   .audit-details dd {
