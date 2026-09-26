@@ -1,10 +1,11 @@
-// 감사 로그의 기간: 미리 정한 기간(최근 1시간·4시간·1일·7일·30일) 또는 직접 정한 구간(막대그래프 드래그·날짜 입력).
+// 감사 로그의 기간: 전체(기본) · 미리 정한 기간(최근 1시간·4시간·1일·7일·30일) · 직접 정한 구간(막대그래프 드래그·날짜 입력).
+// - 전체: 서버가 감사 기록을 보관하는 90일(services/llm/audit.py AUDIT_TTL_DAYS, DynamoDB TTL)
 // - 화면의 시각은 앱 전체가 한국 시간(UTC+9)으로 보이므로(utils/formatters.ts), 막대 나누기·날짜 입력도 한국 시간으로 한다
 // - 서버는 날짜를 UTC로 나눠 저장한다(services/llm/audit.py). 받아 올 범위는 구간이 걸친 UTC 날짜들이고,
 //   받은 기록 중 구간 안의 것만 쓴다 (그래서 '최근 1시간'도 정확하다)
-// - 서버는 전체 사용자 기록을 31일(UTC 날짜 수)까지 조회한다
+// - 서버는 전체 사용자 기록을 한 번에 31일(UTC 날짜 수)까지 조회하므로, 그보다 긴 기간은 useAuditRecords가 나눠 부른다
 
-export type PresetId = '1h' | '4h' | '1d' | '7d' | '30d';
+export type PresetId = 'all' | '1h' | '4h' | '1d' | '7d' | '30d';
 export type Period = { preset: PresetId } | { from: number; to: number }; // 직접 정한 구간 (밀리초)
 export interface TimeWindow {
     from: number;
@@ -14,16 +15,18 @@ export interface TimeWindow {
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 export const KST = 9 * HOUR;
-export const MAX_DAYS = 31;
+export const RETENTION_DAYS = 90; // 서버의 감사 기록 보관 기간 (services/llm/audit.py AUDIT_TTL_DAYS)
+export const MAX_DAYS = RETENTION_DAYS; // 직접 정하는 구간의 최대 길이 (보관 기간보다 길 필요가 없다)
 
 export const PRESETS: { id: PresetId; label: string; ms: number }[] = [
+    { id: 'all', label: '전체', ms: RETENTION_DAYS * DAY },
     { id: '1h', label: '1시간', ms: HOUR },
     { id: '4h', label: '4시간', ms: 4 * HOUR },
     { id: '1d', label: '1일', ms: DAY },
     { id: '7d', label: '7일', ms: 7 * DAY },
     { id: '30d', label: '30일', ms: 30 * DAY },
 ];
-export const DEFAULT_PERIOD: Period = { preset: '7d' };
+export const DEFAULT_PERIOD: Period = { preset: 'all' };
 
 export const isPreset = (period: Period): period is { preset: PresetId } => 'preset' in period;
 export const isDefaultPeriod = (period: Period) =>
@@ -31,13 +34,16 @@ export const isDefaultPeriod = (period: Period) =>
 
 export const windowOf = (period: Period, now: number): TimeWindow => {
     if (!isPreset(period)) return period;
-    const preset = PRESETS.find((p) => p.id === period.preset) ?? PRESETS[3];
+    const preset = PRESETS.find((p) => p.id === period.preset) ?? PRESETS[0];
     return { from: now - preset.ms, to: now };
 };
 
-// 기간 이름 (필터 칩): '최근 7일' 또는 직접 정한 구간(9. 21. 09:00 ~ 9. 22. 18:00)
-export const periodLabel = (period: Period) =>
-    isPreset(period) ? `최근 ${PRESETS.find((p) => p.id === period.preset)?.label ?? ''}` : formatWindow(period);
+// 기간 이름 (필터 칩): '전체', '최근 7일' 또는 직접 정한 구간(9. 21. 09:00 ~ 9. 22. 18:00)
+export const periodLabel = (period: Period) => {
+    if (!isPreset(period)) return formatWindow(period);
+    if (period.preset === 'all') return '전체';
+    return `최근 ${PRESETS.find((p) => p.id === period.preset)?.label ?? ''}`;
+};
 
 // ---------------------------------------------------------------- 받아 올 범위 (UTC 날짜)
 
@@ -95,6 +101,7 @@ export const bucketSizeOf = (window: TimeWindow) =>
 
 // 칸의 시작 (한국 시간 기준으로 맞춘다: 6시간 칸은 0·6·12·18시, 하루 칸은 0시에서 시작)
 export const bucketStart = (ms: number, size: number) => Math.floor((ms + KST) / size) * size - KST;
+export const dayStart = (ms: number) => bucketStart(ms, DAY); // 그날(한국 시간) 0시
 
 // ---------------------------------------------------------------- 가로 눈금
 

@@ -2,7 +2,7 @@
 // 관리자만 여는 화면이다. 구성은 Datadog Audit Trail을 따랐다 (패널·배지·버튼 모양은 이 앱의 것을 그대로 쓴다).
 //   머리: 제목 · 새로 고침(아이콘)
 //   검색창(AuditSearch)
-//   필터(FilterMenu: 누르면 기간·그룹 기준·종류·결과·층·요청자·도구·출처·표시를 고르는 창, 걸린 조건은 칩) · 건수 · 필터 초기화
+//   필터(FilterMenu: 누르면 기간·그룹 기준·종류·결과·층·요청자·도구·출처·표시를 고르는 창과 필터 초기화, 걸린 조건은 칩) · 건수
 //   시간대별 막대그래프(AuditHistogram, 그룹 기준으로 색을 나눠 쌓기·드래그로 기간 좁히기)
 //   목록(시각 · 요청자 · 도구 · 요약 · 결과 · 표시). 내려가면 이어서 더 그린다
 //   행을 누르면 팝업창(AuditDetailModal, 이 앱의 다른 팝업창과 같은 모양)으로 자세히 보인다. ↑/↓로 앞뒤 기록, 변경 작업은 '층별로 따져 보기',
@@ -37,10 +37,11 @@ import {
 } from './auditModel';
 import { AuditSearch } from './AuditSearch';
 import { readUrl, writeUrl } from './auditUrl';
-import { FilterMenu } from './FilterMenu';
+import { FilterMenu, ResetButton } from './FilterMenu';
 import {
     DEFAULT_PERIOD,
     containsRange,
+    dayStart,
     fetchRangeOf,
     isPreset,
     windowOf,
@@ -105,31 +106,6 @@ function AuditRow({
     );
 }
 
-// 필터 초기화 버튼 (기간·건수 줄의 오른쪽 끝, 조건에 맞는 기록이 없을 때의 안내). 처음 화면이면 꺼 둔다
-function ResetButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
-    return (
-        <button
-            type="button"
-            className="audit-reset"
-            onClick={onClick}
-            disabled={disabled}
-            title="처음 화면으로 되돌립니다 (거르기·검색어를 지우고, 기간은 최근 7일, 그룹 기준은 결과)"
-        >
-            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
-                <path
-                    d="M4 12a8 8 0 1 0 2.34-5.66M4 4v5h5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                />
-            </svg>
-            필터 초기화
-        </button>
-    );
-}
-
 // 목록 끝에 닿으면 onReach를 부른다 (다음 묶음을 그린다)
 function EndSentinel({ onReach }: { onReach: () => void }) {
     const ref = useRef<HTMLLIElement>(null);
@@ -154,18 +130,28 @@ export function AuditPage() {
     const [query, setQuery] = useState(initial.query);
     const [groupBy, setGroupBy] = useState<GroupBy>(initial.groupBy); // 막대그래프 그룹 기준
     const [now, setNow] = useState(() => Date.now()); // '최근 n시간'의 끝. 새로 고침하면 지금으로
-    const timeWindow = useMemo(() => windowOf(period, now), [period, now]);
+    const baseWindow = useMemo(() => windowOf(period, now), [period, now]); // 받아 올 기간 ('전체'는 보관 90일)
 
-    // 받아 올 범위(UTC 날짜): 이미 받은 범위 안에서 기간을 좁히면(7일 → 1일, 막대 드래그) 다시 받지 않는다.
+    // 받아 올 범위(UTC 날짜): 이미 받은 범위 안에서 기간을 좁히면(전체 → 7일, 막대 드래그) 다시 받지 않는다.
     // 다만 2,000건 한도로 잘려 기간의 앞쪽이 비어 있으면 그 기간만 다시 받는다
-    const wanted = fetchRangeOf(timeWindow);
+    const wanted = fetchRangeOf(baseWindow);
     const [fetchRange, setFetchRange] = useState(wanted);
     const { records, loading, truncated, error, reload } = useAuditRecords(fetchRange);
     const oldest = records.length ? Date.parse(timeOf(records[records.length - 1])) : Infinity;
     useEffect(() => {
-        const missing = !containsRange(fetchRange, wanted) || (truncated && !loading && timeWindow.from < oldest);
+        const missing = !containsRange(fetchRange, wanted) || (truncated && !loading && baseWindow.from < oldest);
         if (missing && (fetchRange.from !== wanted.from || fetchRange.to !== wanted.to)) setFetchRange(wanted);
-    }, [wanted.from, wanted.to, fetchRange, truncated, loading, timeWindow.from, oldest]); // wanted는 글자 두 개로 비교한다 (매번 새 객체)
+    }, [wanted.from, wanted.to, fetchRange, truncated, loading, baseWindow.from, oldest]); // wanted는 글자 두 개로 비교한다 (매번 새 객체)
+
+    // 보이는 기간: '전체'는 가장 오래된 기록의 날(한국 시간 0시)부터. 보관 90일 중 기록이 없는 앞쪽을 막대그래프에서 비우지 않게
+    const isAll = isPreset(period) && period.preset === 'all';
+    const timeWindow = useMemo(
+        () =>
+            isAll && Number.isFinite(oldest)
+                ? { from: Math.max(baseWindow.from, dayStart(oldest)), to: baseWindow.to }
+                : baseWindow,
+        [isAll, oldest, baseWindow],
+    );
     const listLoading = useMinimumVisible(loading); // 흰 박스 가운데의 기다림 카드 (최소 1초)
 
     // 조건을 주소에 담는다 (뒤로 가기가 조건마다 쌓이지 않게 replace). 주소가 바뀌어도 다시 돌지 않게 조건만 지켜본다
@@ -192,7 +178,7 @@ export function AuditPage() {
     const searched = useMemo(() => inWindow.filter((record) => matchesQuery(record, parsed)), [inWindow, parsed]);
     const filtered = useMemo(() => searched.filter((record) => matches(record, selection)), [searched, selection]);
     const conditions = activeCount(selection) + (query.trim() ? 1 : 0);
-    // 처음 화면(최근 7일, 거르기·검색어 없음, 그룹 기준 결과)과 다른가: '필터 초기화'를 켠다
+    // 처음 화면(기간 전체, 거르기·검색어 없음, 그룹 기준 결과)과 다른가: '필터 초기화'를 켠다
     const customized =
         conditions > 0 ||
         !isPreset(period) ||
@@ -235,9 +221,9 @@ export function AuditPage() {
     // 목록에서 마우스를 올린 기록의 시각 (막대그래프가 그 칸을 짚는다)
     const [pointAt, setPointAt] = useState<number | null>(null);
 
-    // 필터 초기화: 처음 열었을 때와 똑같은 화면으로 되돌린다.
-    // 조건(거르기·검색어·기간 최근 7일)뿐 아니라 화면 상태(그룹 기준, 열린 필터 창·거르기 목록의 접기·더 보기,
-    // 목록 스크롤, 열린 팝업창)도 처음으로. '최근 7일'의 끝도 지금으로 맞춘다
+    // 필터 초기화(필터 창 안): 처음 열었을 때와 똑같은 화면으로 되돌린다.
+    // 조건(거르기·검색어·기간 전체)뿐 아니라 화면 상태(그룹 기준, 열린 필터 창·거르기 목록의 접기·더 보기,
+    // 목록 스크롤, 열린 팝업창)도 처음으로. 기간의 끝도 지금으로 맞춘다
     const [resetNo, setResetNo] = useState(0); // 바뀌면 필터 창을 닫고 거르기 목록을 새로 그린다
     const listBody = useRef<HTMLUListElement>(null);
     const resetFilters = () => {
@@ -284,6 +270,8 @@ export function AuditPage() {
                             onPeriod={setPeriod}
                             groupBy={groupBy}
                             onGroupBy={setGroupBy}
+                            onReset={resetFilters}
+                            canReset={customized}
                             resetNo={resetNo}
                         />
                         <p className="audit-count" role="status">
@@ -299,7 +287,6 @@ export function AuditPage() {
                                 </>
                             )}
                         </p>
-                        <ResetButton onClick={resetFilters} disabled={!customized} />
                     </div>
 
                     {/* 다시 불러오는 동안에도 앞 그래프·목록을 흐리게 남겨 둔다 (자리가 들썩이지 않게) */}
