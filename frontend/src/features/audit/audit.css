@@ -556,32 +556,6 @@
   vertical-align: middle;
 }
 
-/* 이전 기간: 막대그래프로 좁힌 뒤에만 보인다 */
-.audit-zoom-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 12px;
-  border: 1px solid rgba(0, 123, 255, 0.35);
-  border-radius: 10px;
-  background: #f1f6fd;
-  color: var(--color-primary);
-  font-family: var(--font-label);
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.audit-zoom-back:hover {
-  background: #e6f0fc;
-}
-
-.audit-zoom-back:focus-visible {
-  outline: 2px solid rgba(0, 123, 255, 0.32);
-  outline-offset: 2px;
-}
-
 /* 필터 초기화: 기간·건수 줄의 오른쪽 끝. 처음 화면이면 흐리게 꺼 둔다 */
 .audit-reset {
   display: inline-flex;
