@@ -1,14 +1,18 @@
 // 감사 로그 (GET /audit, services/llm/audit.py)와 같은 모양
+import type { TaintedBy } from './actions';
 
 export type AuditKind = 'tool' | 'request' | 'action';
 export type AuditStatus = 'ok' | 'error';
 export type AuditScope = 'mine' | 'all' | 'user';
+// 층: 도구 반복 위의 자리 (services/llm/audit.py 모듈 설명). residence는 조회 조건으로만 쓴다 (taintedBy가 있는 승인 요청)
+export type AuditLocus = 'interface' | 'ingress' | 'residence' | 'egress' | 'effect';
 
 export interface AuditRecord {
     userId: string; // 웹은 Cognito sub, Slack은 'slack:<사용자 ID>'
     at: string; // 시각(UTC, 밀리초까지) + '#' + 도구 호출 ID 또는 'request#<질문 ID>'
     day: string; // YYYY-MM-DD (UTC)
     kind: AuditKind;
+    locus?: Exclude<AuditLocus, 'residence'>; // 질문 행(요약)에는 없다
     status: AuditStatus;
     source?: 'web' | 'slack' | 'direct';
     email?: string;
@@ -36,6 +40,7 @@ export interface AuditRecord {
     result?: string; // 실행 결과
     awsRequestId?: string; // 실행한 AWS API의 요청 ID = CloudTrail 이벤트의 requestID
     cloudTrailEvent?: string; // 예: "logs.amazonaws.com:PutRetentionPolicy"
+    taintedBy?: TaintedBy[]; // 승인 요청 행: 이 변경 전에 같은 질문에서 읽은 의심 결과 (체류층)
 }
 
 export interface AuditPage {
@@ -55,6 +60,7 @@ export interface AuditQuery {
     tool?: string;
     status?: AuditStatus;
     kind?: AuditKind;
+    locus?: AuditLocus;
     limit?: number;
     cursor?: string;
 }

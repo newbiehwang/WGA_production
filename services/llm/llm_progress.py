@@ -82,8 +82,10 @@ class ProgressReporter:
         self.steps.append({"type": "thinking", "text": _clip(text, PROGRESS_TEXT_LIMIT)})
         self._save()
 
-    def tool_started(self, tool_id: str, name: str, tool_input: Any, restore: bool = True) -> None:
-        """restore(도구에 가명을 되돌려 넘겼는지)는 감사 로그가 쓴다. 진행 상황은 가린 값만 보여 준다."""
+    def tool_started(self, tool_id: str, name: str, tool_input: Any, restore: bool = True,
+                     locus: str = "ingress") -> None:
+        """restore(도구에 가명을 되돌려 넘겼는지)와 locus(감사 로그의 층)는 감사 로그가 쓴다.
+        진행 상황은 가린 값만 보여 준다."""
         self.phase = "tool"
         self._tool_started[tool_id] = time.time()
         self.steps.append({"type": "tool", "id": tool_id, "name": name, "input": _short_input(tool_input),

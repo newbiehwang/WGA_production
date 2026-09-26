@@ -1,12 +1,12 @@
 // 감사 로그 화면: 누가 언제 어떤 질문으로 어떤 도구를 불렀고 결과가 어땠는지 (GET /audit, services/llm/audit.py).
 // AXPI 패널·목록 행을 그대로 쓴다.
 //   머리: 제목 · 새로 고침
-//   거르기: 기간 · 결과 · 종류 · 도구 (관리자는 '모든 사용자'도)
+//   거르기: 기간 · 대상 · 결과 · 종류 · 층 · 도구 (관리자만 여는 화면이다)
 //   목록: 시각 · 요청자 · 도구 · 요약 · 결과 · 표시. 행을 누르면 입력값·오류·질문 ID 등이 펼쳐진다
 //   아래: 더 보기 (cursor로 이어 읽는다)
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { fetchAudit } from '@/api/audit';
-import type { AuditKind, AuditRecord, AuditStatus } from '@/types/audit';
+import type { AuditKind, AuditLocus, AuditRecord, AuditStatus } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
 import { labelOf, summarize } from '@/utils/toolTrace';
 import './audit.css';
@@ -31,6 +31,21 @@ const KINDS: { value: '' | AuditKind; label: string }[] = [
     { value: 'request', label: '질문' },
     { value: 'action', label: '변경 작업' },
 ];
+
+// 층 (services/llm/audit.py 모듈 설명, fingate-x의 '원인의 계층'을 참고). 사고가 나면 어느 층이 뚫렸는지 좁혀 본다.
+// 판단층(모델 안)은 기록할 수 없어 없다: 유입·체류·유출이 함께 보이면 그 층이 뚫린 것으로 본다
+const LOCI: { value: AuditLocus; label: string; description: string }[] = [
+    { value: 'interface', label: '경계', description: '위험도 등록부에 없는 도구를 불렀습니다. 변경 도구로 다룹니다' },
+    { value: 'ingress', label: '유입', description: '조회·결과물 도구의 결과가 들어왔습니다' },
+    { value: 'residence', label: '체류', description: '의심 문구가 든 결과를 읽은 뒤 같은 질문에서 변경을 요청했습니다' },
+    { value: 'egress', label: '유출', description: '변경 도구를 부르려 했습니다. 실행하지 않고 승인을 요청합니다' },
+    { value: 'effect', label: '효과', description: '승인·거절·실행·실패' },
+];
+const LOCUS_OPTIONS: { value: '' | AuditLocus; label: string }[] = [
+    { value: '', label: '전체' },
+    ...LOCI.map(({ value, label }) => ({ value, label })),
+];
+const locusOf = (value?: string) => LOCI.find((locus) => locus.value === value);
 
 // 변경 작업의 사건 → 결과 열에 보일 이름과 모양
 const ACTION_EVENTS: Record<string, { label: string; className: string }> = {
@@ -62,6 +77,7 @@ interface Filters {
     scope: 'mine' | 'all';
     status: '' | AuditStatus;
     kind: '' | AuditKind;
+    locus: '' | AuditLocus;
     tool: string;
 }
 
@@ -136,6 +152,14 @@ function Segment<T extends string | number>({
 
 function Details({ record }: { record: AuditRecord }) {
     const rows: [string, ReactNode][] = [];
+    const locus = locusOf(record.locus);
+    if (locus)
+        rows.push([
+            '층',
+            <span key="locus">
+                {locus.label} <span className="audit-muted">({locus.description})</span>
+            </span>,
+        ]);
     if (record.kind === 'tool') {
         rows.push(['도구 이름', <code key="tool">{record.tool}</code>]);
         rows.push([
@@ -157,6 +181,20 @@ function Details({ record }: { record: AuditRecord }) {
                 {typeof record.input === 'string' ? record.input : JSON.stringify(record.input ?? {}, null, 2)}
             </pre>,
         ]);
+        if (record.taintedBy?.length)
+            rows.push([
+                '먼저 읽은 의심 결과',
+                <ul key="tainted" className="audit-tainted">
+                    {record.taintedBy.map((seen) => (
+                        <li key={seen.toolUseId}>
+                            {labelOf(seen.tool)} 결과 ·{' '}
+                            {seen.callsAgo <= 1 ? '바로 다음 호출' : `${seen.callsAgo}번째 뒤 호출`}에서 요청 ·{' '}
+                            <span className="audit-muted">{seen.kinds.join(', ')}</span> ·{' '}
+                            <code>{seen.toolUseId}</code>
+                        </li>
+                    ))}
+                </ul>,
+            ]);
         if (record.decidedBy) rows.push(['결정한 사람', <code key="by">{record.decidedBy}</code>]);
         if (record.result) rows.push(['실행 결과', record.result]);
         if (record.awsRequestId)
@@ -252,6 +290,19 @@ function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boole
                             의심 문구
                         </span>
                     ) : null}
+                    {record.taintedBy?.length ? (
+                        <span
+                            className="audit-flag is-suspicious"
+                            title="의심 문구가 든 도구 결과를 읽은 뒤 같은 질문에서 요청한 변경입니다 (체류)"
+                        >
+                            의심 뒤 요청
+                        </span>
+                    ) : null}
+                    {record.locus === 'interface' ? (
+                        <span className="audit-flag is-suspicious" title="위험도 등록부에 없는 도구입니다 (경계)">
+                            미등록 도구
+                        </span>
+                    ) : null}
                     {redacted ? (
                         <span className="audit-flag is-redacted" title="Claude로 보내기 전에 가린 값의 수">
                             가림 {redacted}
@@ -270,7 +321,14 @@ function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boole
 
 export function AuditPage() {
     // 관리자만 여는 화면이므로 처음부터 모든 사용자의 기록을 보인다
-    const [filters, setFilters] = useState<Filters>({ days: 7, scope: 'all', status: '', kind: '', tool: '' });
+    const [filters, setFilters] = useState<Filters>({
+        days: 7,
+        scope: 'all',
+        status: '',
+        kind: '',
+        locus: '',
+        tool: '',
+    });
     const [items, setItems] = useState<AuditRecord[]>([]);
     const [cursor, setCursor] = useState<string | null>(null);
     const [loading, setLoading] = useState<'list' | 'more' | null>('list');
@@ -292,6 +350,7 @@ export function AuditPage() {
                     scope: filters.scope,
                     status: filters.status || undefined,
                     kind: filters.kind || undefined,
+                    locus: filters.locus || undefined,
                     tool: filters.tool || undefined,
                     limit: PAGE_SIZE,
                     cursor: next,
@@ -360,6 +419,12 @@ export function AuditPage() {
                 />
                 <Segment label="결과" options={STATUSES} value={filters.status} onChange={(status) => update({ status })} />
                 <Segment label="종류" options={KINDS} value={filters.kind} onChange={(kind) => update({ kind })} />
+                <Segment
+                    label="층"
+                    options={LOCUS_OPTIONS}
+                    value={filters.locus}
+                    onChange={(locus) => update({ locus })}
+                />
                 <label className="audit-filter">
                     <span className="audit-filter-label">도구</span>
                     <select
