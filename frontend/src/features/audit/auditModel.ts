@@ -250,6 +250,16 @@ export function toggleValue(selection: Selection, id: FacetId, value: string): S
 export const activeCount = (selection: Selection) =>
     Object.values(selection).reduce((sum, chosen) => sum + (chosen?.length ?? 0), 0);
 
+// ---------------------------------------------------------------- 막대그래프 나눠 보기 (AuditHistogram)
+
+export type GroupBy = 'result' | 'kind' | 'requester' | 'tool';
+export const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
+    { value: 'result', label: '결과' },
+    { value: 'kind', label: '종류' },
+    { value: 'requester', label: '요청자' },
+    { value: 'tool', label: '도구' },
+];
+
 // ---------------------------------------------------------------- 검색창
 //
 // 낱말을 띄어 쓰면 모두 들어 있는 기록만(그리고), "따옴표"는 한 덩어리, 앞에 -를 붙이면 그 낱말이 없는 기록만.

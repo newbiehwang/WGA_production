@@ -1,5 +1,6 @@
 // 감사 로그 목록 위의 시간대별 건수 막대그래프 (Datadog Audit Trail의 막대그래프를 따랐다).
-//   ■ 성공 471  ■ 실패 43                                     드래그하거나 막대를 눌러 기간 좁히기
+//   나눠 보기 [결과][종류][요청자][도구]                         드래그하거나 막대를 눌러 기간 좁히기
+//   ■ 성공 471  ■ 실패 43 · 8.4%                               ← 범례: 누르면 그 값으로 거른다
 //   30 ┤─────────────────────────────────          ← 가는 가로 눈금선 (0 · 중간 · 윗값)
 //   20 ┤──────────────▅──────────────────
 //   10 ┤──▂──▅─▃█──▁─▁█─▇─█─▂──────────────
@@ -7,7 +8,12 @@
 //        9/24     06:00     12:00     18:00    9/25      ← 날이 바뀌는 눈금은 날짜(굵게), 나머지는 시각
 //
 // - 목록과 같은 기록(기간·검색어·거르기를 적용한 것)을 칸마다 센다. 칸은 기간에 따라 1분~하루 (timeWindow.bucketSizeOf)
-// - 칸마다 실패(아래)·성공(위)을 쌓는다. 실패를 바닥에 두어 칸끼리 실패 건수를 비교하기 쉽게
+// - 나눠 보기(Datadog의 group by): 칸마다 무엇으로 나눠 쌓을지 고른다 (seriesOf)
+//   · 결과: 실패(아래)·성공(위). 실패를 바닥에 두어 칸끼리 실패 건수를 비교하기 쉽게. 범례에 실패율
+//   · 종류: 도구 호출·질문·변경 작업·사용자 관리
+//   · 요청자·도구: 받은 기록 전체에서 많은 순 5개 + 기타 (도구는 도구 없는 기록을 '도구 없음'으로 따로)
+//     순위는 받은 기록 전체(rankRecords)로 정한다: 거르기·검색·드래그로 목록이 바뀌어도 같은 사람·도구는 같은 색을 지킨다
+// - 범례의 값을 누르면 왼쪽 거르기를 그 값 하나로 바꾼다 (기타·도구 없음은 누를 수 없다)
 // - 가로 눈금은 막대 수와 상관없이 '보기 좋은 시각'에 찍는다 (10분·3시간·하루·5일 등, timeWindow.ticksOf)
 // - 기록이 없으면 그래프 자리에 '이 기간에 기록이 없습니다'. 불러오는 동안에는 앞 그래프를 흐리게 남겨 둔다
 // - 마우스를 올리면 그 칸의 시각과 건수를 막대 옆 말풍선으로 보인다 (그래프 안에 두어 위의 버튼을 가리지 않게)
@@ -15,25 +21,104 @@
 //   (좁힌 뒤 돌아가는 '이전 기간'은 AuditPage가 쌓아 둔다)
 // - 목록의 행에 마우스를 올리면(highlightAt) 그 기록이 든 칸을 옅게 칠하고 바닥선 바로 아래에 파란 줄을 긋는다
 // - 키보드: 그래프에 포커스를 두고 ←/→로 칸을 옮기고 Enter로 그 칸만 본다. 칸의 내용은 화면 읽기 프로그램에도 알린다
-// - 색: 성공 #4a8fe0, 실패 #d03b3b (흰 바탕에서 색각 이상 구분·대비 검사를 통과한 값). 색만으로 구분하지 않게
-//   범례와 말풍선에 이름을 함께 적는다
+// - 색: 결과는 성공 #4a8fe0·실패 #d03b3b, 나머지는 차례가 정해진 색 목록의 앞 다섯(CATEGORICAL)과 기타 회색.
+//   모두 흰 바탕에서 이웃한 색끼리의 색각 이상 구분 검사를 통과했다. 대비가 3:1보다 낮은 색(초록·노랑·분홍)이 있어
+//   색만으로 구분하지 않게 범례(건수)·말풍선에 이름을 함께 적고, 아래 목록이 표 역할을 한다
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import type { AuditRecord } from '@/types/audit';
-import { timeOf } from './auditModel';
+import {
+    GROUP_OPTIONS,
+    KIND_LABELS,
+    requesterOf,
+    timeOf,
+    toolLabelOf,
+    type FacetId,
+    type GroupBy,
+} from './auditModel';
 import { bucketSizeOf, bucketStart, formatShort, ticksOf, type TimeWindow } from './timeWindow';
 
-// 쌓는 계열 (아래부터). 나눠 보기를 더하면 이 목록이 바뀐다
+// ---------------------------------------------------------------- 나눠 보기
+
+// 쌓는 계열 하나 (아래부터 쌓는다). facet·values: 범례를 누르면 왼쪽 거르기를 이 값들로 (없으면 누를 수 없다)
 interface Series {
     key: string;
     label: string;
     color: string;
+    facet?: FacetId;
+    values?: string[];
 }
-const RESULT_SERIES: Series[] = [
-    { key: 'error', label: '실패', color: '#d03b3b' },
-    { key: 'ok', label: '성공', color: '#4a8fe0' },
-];
+
+// 차례가 정해진 색 목록의 앞 다섯 (dataviz 기본 팔레트: 파랑·주황·청록·노랑·분홍). 차례를 바꾸지 않는다
+const CATEGORICAL = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4'];
+const TOP_N = CATEGORICAL.length;
+const OTHER: Series = { key: '__other', label: '기타', color: '#9aa4ae' };
+const NO_TOOL: Series = { key: '__none', label: '도구 없음', color: '#cfd6de' };
+
 const failedOf = (record: AuditRecord) => record.status === 'error' || record.event === 'failed';
-const resultKeyOf = (record: AuditRecord) => (failedOf(record) ? 'error' : 'ok');
+
+// 결과: 실패에는 변경 작업의 실행 실패(failed)도 든다. 범례를 누르면 거르기의 결과 값 여럿으로 거른다
+const RESULT_SERIES: Series[] = [
+    { key: 'error', label: '실패', color: '#d03b3b', facet: 'result', values: ['error', 'failed'] },
+    {
+        key: 'ok',
+        label: '성공',
+        color: '#4a8fe0',
+        facet: 'result',
+        values: ['ok', 'requested', 'approved', 'denied', 'executed'],
+    },
+];
+
+// 많은 순 n개 (같으면 이름 순)
+const topKeys = (records: AuditRecord[], keyOf: (r: AuditRecord) => string | undefined) => {
+    const counts = new Map<string, number>();
+    for (const record of records) {
+        const key = keyOf(record);
+        if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, TOP_N).map(([key]) => key);
+};
+
+function seriesOf(groupBy: GroupBy, rankRecords: AuditRecord[]) {
+    if (groupBy === 'kind') {
+        const series = (Object.keys(KIND_LABELS) as (keyof typeof KIND_LABELS)[]).map((kind, index) => ({
+            key: kind,
+            label: KIND_LABELS[kind],
+            color: CATEGORICAL[index],
+            facet: 'kind' as const,
+            values: [kind],
+        }));
+        return { series, keyOf: (record: AuditRecord) => record.kind as string };
+    }
+    if (groupBy === 'requester') {
+        const top = topKeys(rankRecords, (record) => record.userId);
+        const names = new Map(rankRecords.map((record) => [record.userId, requesterOf(record)]));
+        const series: Series[] = top.map((userId, index) => ({
+            key: userId,
+            label: names.get(userId) ?? userId,
+            color: CATEGORICAL[index],
+            facet: 'requester',
+            values: [userId],
+        }));
+        const set = new Set(top);
+        return { series: [...series, OTHER], keyOf: (record: AuditRecord) => (set.has(record.userId) ? record.userId : OTHER.key) };
+    }
+    if (groupBy === 'tool') {
+        const top = topKeys(rankRecords, (record) => record.tool);
+        const series: Series[] = top.map((tool, index) => ({
+            key: tool,
+            label: toolLabelOf(tool),
+            color: CATEGORICAL[index],
+            facet: 'tool',
+            values: [tool],
+        }));
+        const set = new Set(top);
+        return {
+            series: [...series, OTHER, NO_TOOL],
+            keyOf: (record: AuditRecord) => (!record.tool ? NO_TOOL.key : set.has(record.tool) ? record.tool : OTHER.key),
+        };
+    }
+    return { series: RESULT_SERIES, keyOf: (record: AuditRecord) => (failedOf(record) ? 'error' : 'ok') };
+}
 
 const PLOT_H = 140; // 막대가 서는 높이
 const TOP = 8; // 윗값 글자가 잘리지 않게 둔 여백
@@ -69,16 +154,24 @@ const barPath = (x: number, y: number, w: number, h: number, rounded: boolean) =
 
 export function AuditHistogram({
     records,
+    rankRecords,
     window,
     loading,
     highlightAt,
+    groupBy,
+    onGroupBy,
     onSelect,
+    onFilter,
 }: {
     records: AuditRecord[];
+    rankRecords: AuditRecord[]; // 요청자·도구의 많은 순을 정할 기록 (받은 기록 전체)
     window: TimeWindow;
     loading: boolean; // 다시 불러오는 중: 앞 그래프를 흐리게 남겨 둔다
     highlightAt: number | null; // 목록에서 마우스를 올린 기록의 시각
+    groupBy: GroupBy;
+    onGroupBy: (groupBy: GroupBy) => void;
     onSelect: (window: TimeWindow) => void;
+    onFilter: (facet: FacetId, values: string[]) => void; // 범례를 눌렀다
 }) {
     const wrap = useRef<HTMLDivElement>(null);
     const [width, setWidth] = useState(0);
@@ -93,7 +186,7 @@ export function AuditHistogram({
         return () => observer.disconnect();
     }, []);
 
-    const series = RESULT_SERIES;
+    const { series, keyOf } = useMemo(() => seriesOf(groupBy, rankRecords), [groupBy, rankRecords]);
     const size = bucketSizeOf(window);
     const first = bucketStart(window.from, size);
     const buckets = useMemo(() => {
@@ -106,12 +199,12 @@ export function AuditHistogram({
         for (const record of records) {
             const bucket = list[Math.floor((Date.parse(timeOf(record)) - first) / size)];
             if (!bucket) continue;
-            const key = resultKeyOf(record);
+            const key = keyOf(record);
             bucket.counts[key] = (bucket.counts[key] ?? 0) + 1;
             bucket.total += 1;
         }
         return list;
-    }, [records, first, window.to, size]);
+    }, [records, first, window.to, size, keyOf]);
 
     const totals = useMemo(() => {
         const sums: Record<string, number> = {};
@@ -213,22 +306,71 @@ export function AuditHistogram({
     // 목록에서 가리킨 기록이 든 칸
     const marked =
         highlightAt !== null && total > 0 ? Math.floor((highlightAt - first) / size) : -1;
+    // 말풍선·알림에는 그 칸에 있는 계열만 (결과로 나눌 때는 0건도), 위에 쌓인 것부터
+    const rowsOf = (bucket: Bucket) =>
+        [...series].reverse().filter((s) => groupBy === 'result' || (bucket.counts[s.key] ?? 0) > 0);
     const summary = (bucket: Bucket) =>
-        `${rangeText(bucket)}: ${[...series].reverse().map((s) => `${s.label} ${bucket.counts[s.key] ?? 0}건`).join(', ')}`;
+        `${rangeText(bucket)}: ${rowsOf(bucket).map((s) => `${s.label} ${bucket.counts[s.key] ?? 0}건`).join(', ')}`;
+    // 범례: 이 기간에 있는 계열만 (결과는 늘 둘 다). 결과는 성공·실패 순, 나머지는 색 차례(많은 순)대로 기타를 끝에
+    const legend = (groupBy === 'result' ? [...series].reverse() : series).filter(
+        (s) => groupBy === 'result' || (totals[s.key] ?? 0) > 0,
+    );
 
     return (
         <div className={`audit-histogram${loading ? ' is-loading' : ''}`}>
-            <div className="audit-histogram-legend">
-                {[...series].reverse().map((s) => (
-                    <span key={s.key}>
-                        <svg width="10" height="10" aria-hidden="true">
-                            <rect width="10" height="10" rx="2" fill={s.color} />
-                        </svg>
-                        {s.label} <strong>{(totals[s.key] ?? 0).toLocaleString()}</strong>
+            <div className="audit-histogram-head">
+                <div className="audit-histogram-group" role="group" aria-label="나눠 보기">
+                    <span className="audit-filter-label" aria-hidden="true">
+                        나눠 보기
                     </span>
-                ))}
+                    <div className="audit-segment">
+                        {GROUP_OPTIONS.map((option) => (
+                            <button
+                                key={option.value}
+                                type="button"
+                                className={`audit-segment-btn${option.value === groupBy ? ' is-active' : ''}`}
+                                aria-pressed={option.value === groupBy}
+                                onClick={() => onGroupBy(option.value)}
+                            >
+                                {option.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
                 {total > 0 ? <span className="audit-histogram-hint">드래그하거나 막대를 눌러 기간 좁히기</span> : null}
             </div>
+            <ul className="audit-histogram-legend" aria-label="범례">
+                {legend.map((s) => {
+                    const count = totals[s.key] ?? 0;
+                    const content = (
+                        <>
+                            <svg width="10" height="10" aria-hidden="true">
+                                <rect width="10" height="10" rx="2" fill={s.color} />
+                            </svg>
+                            <span className="audit-histogram-legend-name">{s.label}</span>
+                            <strong>{count.toLocaleString()}</strong>
+                            {groupBy === 'result' && s.key === 'error' && total > 0 ? (
+                                <span className="audit-muted">· {((count / total) * 100).toFixed(1)}%</span>
+                            ) : null}
+                        </>
+                    );
+                    return (
+                        <li key={s.key}>
+                            {s.facet && s.values && count > 0 ? (
+                                <button
+                                    type="button"
+                                    onClick={() => onFilter(s.facet!, s.values!)}
+                                    title={`${s.label}만 보기`}
+                                >
+                                    {content}
+                                </button>
+                            ) : (
+                                <span>{content}</span>
+                            )}
+                        </li>
+                    );
+                })}
+            </ul>
             <div ref={wrap} className="audit-histogram-plot">
                 {width > 0 ? (
                     <svg
@@ -355,7 +497,8 @@ export function AuditHistogram({
                 {shown && !drag ? (
                     <div className="audit-histogram-tooltip" style={tooltipStyle} aria-hidden="true">
                         <div className="audit-histogram-tooltip-time">{rangeText(shown)}</div>
-                        {[...series].reverse().map((s) => (
+                        {rowsOf(shown).length === 0 ? <div className="audit-muted">기록 없음</div> : null}
+                        {rowsOf(shown).map((s) => (
                             <div key={s.key}>
                                 <i style={{ background: s.color }} />
                                 <strong>{(shown.counts[s.key] ?? 0).toLocaleString()}</strong> {s.label}
