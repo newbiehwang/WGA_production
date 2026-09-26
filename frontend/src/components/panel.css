@@ -1106,7 +1106,7 @@
 }
 
 .panel-toast.is-success .panel-toast-icon {
-  background: #3f8a61;
+  background: var(--color-primary);
 }
 
 .panel-toast.is-error .panel-toast-icon {
