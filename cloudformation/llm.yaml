@@ -34,6 +34,10 @@ Parameters:
     Type: String
     Description: 배포 코드 버전 (Lambda zip S3 키에 포함되어 배포마다 새 코드가 반영되게 함)
 
+  UserPoolId:
+    Type: String
+    Description: Cognito User Pool ID (사용자 관리 Lambda가 이 풀의 사용자만 다룬다)
+
 Resources:
   McpLambdaFunction:
     Type: AWS::Lambda::Function
@@ -838,3 +842,195 @@ Resources:
       FunctionName: !Ref LlmLambdaFunction
       Principal: 'apigateway.amazonaws.com'
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayId}/*/GET/health'
+
+  # ---------------------------------------------------------------- 사용자 관리 (services/llm/user_admin.py)
+  # 관리자 화면의 '사용자 관리' 탭. LLM Lambda와 같은 코드 묶음을 쓰지만 함수·역할을 나눈다:
+  # Cognito 사용자를 바꾸는 권한은 이 역할에만 두고, 모델을 돌리는 LLM 역할에는 주지 않는다.
+  UserAdminExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'wga-user-admin-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: UserAdminAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # 이 환경의 User Pool 사용자만: 목록·그룹·정지·초대. 삭제(AdminDeleteUser), 비밀번호·속성 바꾸기,
+              # 그룹 만들기·지우기는 주지 않는다
+              - Effect: Allow
+                Action:
+                  - cognito-idp:ListUsers
+                  - cognito-idp:ListUsersInGroup
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminListGroupsForUser
+                  - cognito-idp:AdminAddUserToGroup
+                  - cognito-idp:AdminRemoveUserFromGroup
+                  - cognito-idp:AdminDisableUser
+                  - cognito-idp:AdminEnableUser
+                  - cognito-idp:AdminUserGlobalSignOut
+                  - cognito-idp:AdminCreateUser
+                Resource: !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}'
+              # 감사 로그 (audit.admin_event): 추가만. 조회·수정·삭제는 주지 않는다
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt AuditTable.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt AuditLogGroup.Arn
+              # CORS 허용 주소를 읽는 설정 로드 (common/config.py)
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/wga/${Environment}'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/wga/${Environment}/*'
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+
+  UserAdminFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: API Gateway가 동기로 부르는 함수라 실패한 호출은 화면이 오류로 받는다 (DLQ로 모을 비동기 호출이 없다)
+          - id: CKV_AWS_117
+            comment: Cognito·DynamoDB·SSM만 부른다. VPC에 두면 NAT·엔드포인트 비용이 든다 (다른 함수와 같은 판단)
+          - id: CKV_AWS_115
+            comment: 관리자만 드물게 부른다. 예약 동시성은 계정의 예약되지 않은 동시성을 줄여 다른 함수에 영향을 준다
+          - id: CKV_AWS_173
+            comment: 환경 변수에 비밀 값이 없다 (User Pool ID, 테이블·로그 그룹 이름)
+    Properties:
+      FunctionName: !Sub 'wga-user-admin-${Environment}'
+      Runtime: python3.12
+      Handler: user_admin.lambda_handler
+      Code:
+        S3Bucket: !Sub 'wga-deployment-${AWS::AccountId}-${Environment}'
+        S3Key: !Sub 'llm/llm-lambda-${Environment}-${CodeVersion}.zip'
+      Timeout: 30
+      MemorySize: 256
+      Role: !GetAtt UserAdminExecutionRole.Arn
+      TracingConfig:
+        Mode: Active
+      LoggingConfig:
+        LogFormat: JSON
+        ApplicationLogLevel: INFO
+        SystemLogLevel: INFO
+      Environment:
+        Variables:
+          ENV: !Ref Environment
+          USER_POOL_ID: !Ref UserPoolId
+          AUDIT_TABLE: !Ref AuditTable
+          AUDIT_LOG_GROUP: !Ref AuditLogGroup
+      Layers:
+        - !Ref LlmLambdaLayer
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # GET·POST /users, 그 아래는 {proxy+} 하나로 받는다 (/users/{username}/groups/{group}, /disable, /enable).
+  # 경로 검사는 함수가 한다 (user_admin.route). 브라우저의 사전 요청(OPTIONS)만 인증 없이 받는다
+  UsersApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ParentId: !Ref ApiGatewayRootResourceId
+      PathPart: 'users'
+
+  UsersGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref UsersApiResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UserAdminFunction.Arn}/invocations'
+
+  UsersPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref UsersApiResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UserAdminFunction.Arn}/invocations'
+
+  UsersOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref UsersApiResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UserAdminFunction.Arn}/invocations'
+
+  UserApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ParentId: !Ref UsersApiResource
+      PathPart: '{proxy+}'
+
+  UserAnyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref UserApiResource
+      HttpMethod: ANY
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizerId
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UserAdminFunction.Arn}/invocations'
+
+  UserOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref UserApiResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UserAdminFunction.Arn}/invocations'
+
+  UserAdminPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref UserAdminFunction
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayId}/*/*/users*'

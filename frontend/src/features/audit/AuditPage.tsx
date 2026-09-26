@@ -32,7 +32,23 @@ const KINDS: { value: '' | AuditKind; label: string }[] = [
     { value: 'tool', label: '도구 호출' },
     { value: 'request', label: '질문' },
     { value: 'action', label: '변경 작업' },
+    { value: 'admin', label: '사용자 관리' },
 ];
+
+// 사용자 관리의 사건 (services/llm/user_admin.py)
+const ADMIN_EVENTS: Record<string, string> = {
+    invited: '초대',
+    group_added: '그룹 추가',
+    group_removed: '그룹 제외',
+    disabled: '정지',
+    enabled: '정지 해제',
+};
+const GROUP_NAMES: Record<string, string> = { admins: '관리자', approvers: '승인자' };
+const adminSummaryOf = (record: AuditRecord) =>
+    [record.targetEmail ?? record.targetUser, ADMIN_EVENTS[record.event ?? ''] ?? record.event,
+        record.group ? GROUP_NAMES[record.group] ?? record.group : null]
+        .filter(Boolean)
+        .join(' · ');
 
 // 층 (services/llm/audit.py 모듈 설명, fingate-x의 '원인의 계층'을 참고). 사고가 나면 어느 층이 뚫렸는지 좁혀 본다.
 // 판단층(모델 안)은 기록할 수 없어 없다: 유입·체류·유출이 함께 보이면 그 층이 뚫린 것으로 본다
@@ -107,6 +123,7 @@ const requesterOf = (record: AuditRecord) => {
 const summaryOf = (record: AuditRecord) => {
     if (record.kind === 'request') return record.question ?? '';
     if (record.kind === 'action') return record.summary ?? '';
+    if (record.kind === 'admin') return adminSummaryOf(record);
     if (typeof record.input === 'string') return record.input;
     return summarize(record.input);
 };
@@ -208,6 +225,14 @@ function Details({ record }: { record: AuditRecord }) {
                 </span>,
             ]);
         if (record.actionId) rows.push(['작업 ID', <code key="action">{record.actionId}</code>]);
+    } else if (record.kind === 'admin') {
+        rows.push(['사건', ADMIN_EVENTS[record.event ?? ''] ?? record.event ?? '']);
+        rows.push(['대상', record.targetEmail ?? '']);
+        if (record.targetUser) rows.push(['대상 사용자 이름', <code key="target">{record.targetUser}</code>]);
+        if (record.group) rows.push(['그룹', `${GROUP_NAMES[record.group] ?? record.group} (${record.group})`]);
+        if (record.decidedBy) rows.push(['바꾼 사람', <code key="by">{record.decidedBy}</code>]);
+        if (record.status === 'error')
+            rows.push(['결과', '바꾸지 못했습니다 (바로 앞의 같은 사건 행은 시도를 기록한 것입니다)']);
     } else {
         rows.push(['질문', record.question ?? '']);
         if (record.model) rows.push(['모델', <code key="model">{record.model}</code>]);
@@ -297,6 +322,8 @@ function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boole
                         <span className="audit-kind-request">질문</span>
                     ) : record.kind === 'action' ? (
                         <span className="audit-kind-action">{labelOf(record.tool ?? '').replace(/ 요청$/, '')}</span>
+                    ) : record.kind === 'admin' ? (
+                        <span className="audit-kind-admin">사용자 관리</span>
                     ) : (
                         labelOf(record.tool ?? '')
                     )}

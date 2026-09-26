@@ -91,6 +91,7 @@ Resources:
         McpImageUri: !Ref McpImageUri # << 이 줄 추가
         KnowledgeBaseIdParameter: !Ref KnowledgeBaseIdParameter
         CognitoAuthorizerId: !Ref CognitoAuthorizerIdParameter
+        UserPoolId: !Ref UserPoolId # 사용자 관리 Lambda (user_admin.py)
       Tags:
         - Key: Environment
           Value: !Ref Environment

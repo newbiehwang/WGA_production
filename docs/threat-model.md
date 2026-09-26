@@ -109,6 +109,14 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | T36 | 사고가 났을 때 어디가 뚫렸는지 좁히지 못한다 | 감사 행마다 층(경계·유입·유출·효과)을 적고, 관리자는 층과 체류(의심 뒤 요청)로 거른다. 등록부에 없는 도구 호출은 경계층으로 따로 남는다 | `tests/test_audit_locus.py::test_unregistered_tool_is_recorded_at_the_interface`, `tests/test_audit_locus.py::test_change_requested_after_reading_an_injected_log_is_flagged`, `tests/test_audit_trace.py::test_trace_of_a_change_that_followed_an_injected_log` |
 | T37 | 기록이 서로 어긋나도(승인 없이 실행, 요청 없이 결정) 아무도 모른다 | 관리자가 변경 작업 하나를 역추적하면 요청자·승인자의 기록과 같은 질문의 도구 기록을 모아 층마다 예·아니오로 답하고, 어긋난 층은 실패로 보인다. 앱 밖(CloudTrail)과는 대조할 요청 ID를 준다 | `tests/test_audit_trace.py::test_records_that_do_not_add_up_fail`, `tests/test_audit_trace.py::test_trace_finds_events_across_midnight`, `tests/test_audit_trace.py::test_trace_errors` |
 
+### 사용자 관리
+
+| # | 위협 | 방어 | 테스트 |
+|:--|:--|:--|:--|
+| T38 | 관리자 권한을 잃은 사람(그룹에서 빠졌거나 정지됨)이 남은 토큰으로 사용자를 바꾼다 | 사용자 관리 API는 토큰의 그룹에 더해 Cognito에 지금 그룹과 정지 여부를 다시 묻는다. 정지하면 갱신 토큰도 무효로 한다 | `tests/test_user_admin.py::test_token_is_not_trusted_alone`, `tests/test_user_admin.py::test_only_admins_can_manage_users` |
+| T39 | 관리자가 실수로 모두를 잠근다 (자기 권한 빼기, 마지막 관리자 정지) | 자기 admins 빼기·자기 정지를 막고, 정지되지 않은 마지막 관리자는 빼거나 정지할 수 없다. 삭제는 기능도 권한도 없다 | `tests/test_user_admin.py::test_admins_cannot_lock_themselves_out`, `tests/test_user_admin.py::test_last_admin_cannot_be_removed_or_disabled` |
+| T40 | 모델을 돌리는 역할이 사용자 권한까지 바꾼다 (LLM Lambda가 뚫렸을 때 피해 확대) | 사용자 관리는 따로 된 Lambda·역할에서 돈다. Cognito 쓰기 권한은 그 역할에만, 이 환경의 User Pool로만 주고, 감사 로그는 추가만 한다. 바꾸기 전에 감사 로그에 남기지 못하면 바꾸지 않는다 | `tests/test_user_admin.py::test_only_the_user_admin_role_can_change_users`, `tests/test_user_admin.py::test_nothing_changes_without_an_audit_record`, `tests/test_user_admin.py::test_add_and_remove_groups_are_audited` |
+
 ## 5. 남은 위험
 
 막지 못했거나 일부만 막은 것입니다. 심각도는 이 프로젝트의 쓰임(한 계정, 소수의 사용자)을 기준으로 적었습니다.
@@ -116,7 +124,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | # | 위험 | 심각도 | 지금 상태 | 다음에 할 수 있는 것 |
 |:--|:--|:--|:--|:--|
 | R1 | ~~차트 데이터가 계정 밖의 제3자 서버로 나간다~~ | **해결** | 차트 도구 15개가 데이터를 외부 차트 서버(`antv-studio.alipay.com`)로 보내 이미지를 만들었다. 가명도 원래 값으로 되돌려 보냈다. 이제 Lambda 안에서 그리고, 결과물 도구에는 가명 그대로 넘긴다 (T30) | - |
-| R2 | 누구나 가입해 계정 정보를 조회할 수 있다 | 중간 (공개 배포 시) | 자체 가입은 연다 (가입해 바로 쓸 수 있게). 가입한 사람은 IAM 정책·버킷 목록·비용을 조회할 수 있다. 변경은 막았다: 예전에는 dev·test에서 그룹 없이 자기 요청(EC2 중지 포함)을 승인할 수 있었지만, 이제 어느 환경이든 `approvers` 그룹만 승인한다 (T14) | 권한 없는 사용자가 '관리자에게 요청'하면 AI가 요청을 정리해 승인자에게 보내고, 승인자가 확인해 승인하면 실행하는 흐름(계획). 조회 범위는 R8(그룹별 도구 제한)로 좁힌다 |
+| R2 | 누구나 가입해 계정 정보를 조회할 수 있다 | 중간 (공개 배포 시) | 자체 가입은 연다 (가입해 바로 쓸 수 있게). 가입한 사람은 IAM 정책·버킷 목록·비용을 조회할 수 있다. 변경은 막았다: 예전에는 dev·test에서 그룹 없이 자기 요청(EC2 중지 포함)을 승인할 수 있었지만, 이제 어느 환경이든 `approvers` 그룹만 승인한다 (T14). 관리자는 사용자 관리 탭에서 원치 않는 가입자를 정지할 수 있다 (T38~T40) | 권한 없는 사용자가 '관리자에게 요청'하면 AI가 요청을 정리해 승인자에게 보내고, 승인자가 확인해 승인하면 실행하는 흐름(계획). 조회 범위는 R8(그룹별 도구 제한)로 좁힌다 |
 | R3 | EC2 중지·시작은 IAM이 대상을 좁히지 않는다 | 중간 | PR #58에서 태그 조건(ABAC)을 없앴다. 이 리전의 모든 인스턴스가 대상이고, 사람의 승인과 MCP 재확인만으로 통제한다 | 필요해지면 태그 조건 또는 인스턴스 ID 허용 목록을 IAM에 다시 두기 |
 | R4 | 공식 MCP 서버가 MCP 역할의 권한으로 같은 프로세스에서 돈다 | 중간 | 승인 재확인은 우리 코드에 있다. 패키지가 오염되면 우리 코드를 거치지 않고 MCP 역할로 AWS를 부를 수 있다. 버전은 고정했지만 해시 고정은 아니다 | 해시 고정(`--require-hashes`), 변경 권한을 가진 도구만 다른 Lambda·역할로 분리 |
 | R5 | 인젝션 탐지는 패턴이다 | 중간 | 다른 말로 바꾸면 빠져나간다. 변경은 승인으로 막고 계정 밖으로 나가는 통로는 Claude API뿐이지만, 답변을 왜곡해 사용자를 속이는 것(무결성)은 막지 못한다 | 답변에 근거 도구 결과 표시 |
@@ -125,6 +133,8 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | R8 | 조회 권한이 사용자별로 나뉘지 않는다 | 낮음 | 모든 사용자가 같은 MCP 역할로 조회한다. 감사 기록은 `admins` 그룹만 조회한다 | Cognito 그룹별로 쓸 수 있는 도구 제한 |
 | R9 | 계정 관리자는 감사 기록을 지울 수 있다 | 낮음 | LLM 역할은 덧붙이기만 하지만 계정 관리자 권한은 이 앱 밖의 일이다 | 로그를 다른 계정·S3 Object Lock으로 복제 |
 | R10 | 체류 신호는 질문 하나 안에서만 센다 | 낮음 | 대화 기록에는 도구 결과가 아니라 글만 남는다. 앞 질문에서 읽은 의심 결과를 모델이 답변에 옮겼고, 다음 질문에서 그 답변을 보고 변경을 요청하면 신호가 없다 (승인은 여전히 필요하다) | 대화 단위로 의심 결과를 서버에 남겨 다음 질문의 변경 요청에도 적기 |
+| R11 | 관리자 토큰을 빼앗기면 승인자를 늘릴 수 있다 | 중간 | 관리자는 사용자 관리 탭에서 누구든 approvers에 넣을 수 있다. 바꾼 내용은 감사 로그에 남고 prod의 승인은 요청자 본인이 할 수 없지만, 관리자 계정 하나로 승인자를 만들고 그 사람으로 승인할 수 있다 | 관리자 MFA 필수, 그룹 변경에도 다른 관리자의 승인(두 사람 규칙) |
+| R12 | 정지해도 이미 받은 토큰은 최대 1시간 쓸 수 있다 | 낮음 | 정지하면 갱신 토큰은 바로 무효가 되지만, API Gateway의 Cognito 권한 부여자는 ID 토큰의 서명과 만료만 본다. 사용자 관리 API만 Cognito에 다시 묻는다 | ID 토큰 유효 시간 줄이기, 변경 작업 승인에도 Cognito 재확인 |
 
 ## 6. 설계 판단
 

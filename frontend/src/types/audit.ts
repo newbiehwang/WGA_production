@@ -1,8 +1,9 @@
 // 감사 로그 (GET /audit, services/llm/audit.py)와 같은 모양
 import type { TaintedBy } from './actions';
 
-export type AuditKind = 'tool' | 'request' | 'action';
+export type AuditKind = 'tool' | 'request' | 'action' | 'admin';
 export type AuditStatus = 'ok' | 'error';
+export type AdminEvent = 'invited' | 'group_added' | 'group_removed' | 'disabled' | 'enabled';
 export type AuditScope = 'mine' | 'all' | 'user';
 // 층: 도구 반복 위의 자리 (services/llm/audit.py 모듈 설명). residence는 조회 조건으로만 쓴다 (taintedBy가 있는 승인 요청)
 export type AuditLocus = 'interface' | 'ingress' | 'residence' | 'egress' | 'effect';
@@ -33,7 +34,7 @@ export interface AuditRecord {
     toolCount?: number;
     redacted?: Record<string, number>; // Claude로 보내기 전에 가린 값의 수 (종류별)
     // 변경 작업의 사건 (kind: 'action', services/llm/approvals.py)
-    event?: 'requested' | 'approved' | 'denied' | 'executed' | 'failed';
+    event?: 'requested' | 'approved' | 'denied' | 'executed' | 'failed' | AdminEvent;
     actionId?: string;
     summary?: string; // 예: "보존 기간 30일 → 14일"
     decidedBy?: string; // 승인·거절한 사람 (Cognito sub)
@@ -41,6 +42,10 @@ export interface AuditRecord {
     awsRequestId?: string; // 실행한 AWS API의 요청 ID = CloudTrail 이벤트의 requestID
     cloudTrailEvent?: string; // 예: "logs.amazonaws.com:PutRetentionPolicy"
     taintedBy?: TaintedBy[]; // 승인 요청 행: 이 변경 전에 같은 질문에서 읽은 의심 결과 (체류층)
+    // 사용자 관리의 사건 (kind: 'admin', services/llm/user_admin.py). event: invited·group_added·group_removed·disabled·enabled
+    targetUser?: string; // 바꾼 사용자의 Cognito 사용자 이름
+    targetEmail?: string;
+    group?: string; // admins, approvers
 }
 
 export interface AuditPage {

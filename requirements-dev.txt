@@ -1,6 +1,6 @@
 # 테스트·정적 분석용 의존성 (Lambda 런타임에는 포함되지 않음)
 pytest==8.3.5
-moto[dynamodb,logs,cloudwatch]==5.2.3
+moto[dynamodb,logs,cloudwatch,cognitoidp]==5.2.3
 boto3
 requests
 python-jose[cryptography]
