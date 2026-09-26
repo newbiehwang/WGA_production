@@ -279,7 +279,7 @@ def test_llm1_answer_and_inference_are_redacted(aws, monkeypatch):
     llm = load_service_module("services/llm", "llm_service")
     monkeypatch.setattr(llm, "ACCOUNT_ID", ACCOUNT)
     fake = FakeClient()
-    monkeypatch.setattr(llm, "get_client", lambda model_id: fake)
+    monkeypatch.setattr(llm, "get_client", lambda: fake)
 
     response = llm.handle_llm1_with_mcp({"text": "알람 알려줘"}, "https://test.abc.amplifyapp.com", caller_id="alice")
     result = json.loads(response["body"])

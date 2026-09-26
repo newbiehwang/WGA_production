@@ -14,7 +14,6 @@
 import axios, { type CancelTokenSource } from 'axios';
 import { create } from 'zustand';
 import type { BotResponse, ChatMessageType, ChatSession } from '@/types/chat';
-import { useModelsStore } from './modelsStore';
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
 const shortTitle = (text: string) => (text.length > 30 ? `${text.substring(0, 30)}...` : text);
@@ -203,7 +202,6 @@ export const useChatStore = create<ChatState>((set, get) => {
                 {
                     text: question,
                     sessionId,
-                    modelId: useModelsStore.getState().selectedModel.id,
                     // 대화 컨텍스트는 항상 기억한다: 백엔드가 이 세션의 이전 대화를 함께 모델에 보낸다.
                     // 백엔드는 값이 없으면 false로 보므로 반드시 true를 보낸다
                     isCached: true,

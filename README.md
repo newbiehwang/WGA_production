@@ -46,7 +46,7 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 | main (`main.yaml`) | `wga-{env}` | 아래 5개 Nested Stack과 API Gateway 최종 Deployment |
 | └ llm (`llm.yaml`) | Nested | LLM Lambda, MCP Lambda(Container Image, Function URL), 사용자 관리 Lambda(`/users`), `/llm1`, `/llm1/progress/{requestId}`, `/llm2`, `/audit`, `/actions/{actionId}` 등, 답변 진행 상황 테이블, 감사 로그 테이블·로그 그룹, 변경 작업 승인 테이블 |
 | └ logs (`logs.yaml`) | Nested | Athena 유틸리티 Lambda, `/execute-query`, `/create-table` |
-| └ slackbot (`slackbot.yaml`) | Nested | Slack 봇 Lambda, `/login`, `/callback`, `/models`, `/req` 등 |
+| └ slackbot (`slackbot.yaml`) | Nested | Slack 봇 Lambda, `/login`, `/callback`, `/events`, `/slack-interactions` |
 | └ chat-history (`chat-history.yaml`) | Nested | 대화 기록 Lambda, `/sessions/*` |
 | └ monitoring (`monitoring.yaml`) | Nested | CloudWatch 알람 21개, SNS 알림 토픽, 서비스 대시보드, Logs Insights 저장 쿼리 |
 
@@ -388,8 +388,7 @@ Lambda 알람은 `Fn::ForEach`(AWS::LanguageExtensions)로 함수 목록과 임�
    - Signing Secret은 Slack 앱의 Basic Information → App Credentials에서 확인합니다.
    - Slack 요청은 이 값으로 서명을 검증하며, 설정되지 않으면 모든 Slack 요청을 거부합니다.
 3. Slack 앱에 다음 기능 추가:
-   - Slash Commands: `/models`
-   - Interactive Components
+   - Interactive Components (로그인 버튼을 누르면 Slack이 보내는 알림을 받습니다)
    - Bot Token Scopes: `chat:write`, `im:write`
 
 ## 사용 예시
@@ -401,9 +400,6 @@ Lambda 알람은 `Fn::ForEach`(AWS::LanguageExtensions)로 함수 목록과 임�
 
 ### Slack 봇
 ```
-# 모델 설정
-/models
-
 # 질의 실행
 어제 EC2 인스턴스를 시작한 사용자는 누구인가요?
 지난 주 S3 비용 분석해주세요
@@ -472,7 +468,7 @@ uv run --no-project --python 3.12 --with-requirements requirements-dev.txt pytho
 
 - 화면이 요청마다 `requestId`를 만들어 `/llm1`에 함께 보내고, 답을 기다리는 동안 `GET /llm1/progress/{requestId}`를 1초마다 부릅니다.
 - LLM Lambda는 모델 요청·사고 요약·도구 시작과 끝마다 진행 상황 테이블(`wga-llm-progress-{env}`)에 기록합니다(`services/llm/llm_progress.py`). 요청한 사람만 쓰고 읽을 수 있고, 한 시간 뒤 TTL로 지워집니다.
-- 사고 과정(extended thinking)은 모델마다 받는 설정이 달라, Anthropic Models API가 알려 주는 모델의 지원 방식(adaptive / enabled)에 맞춰 켭니다. 도구를 쓰는 반복에서는 받은 사고 블록을 고치지 않고 다음 요청에 그대로 보냅니다.
+- 사고 과정(extended thinking)은 모델마다 받는 설정이 달라, Anthropic Models API가 알려 주는 그 모델의 지원 방식(adaptive / enabled)에 맞춰 켭니다. adaptive면 사고 요약을 요청합니다(`display: summarized`). 도구를 쓰는 반복에서는 받은 사고 블록을 고치지 않고 다음 요청에 그대로 보냅니다.
 - 같은 단계 목록을 답변의 `inference.steps`에도 넣어, 다시 불러온 대화에서도 순서대로 볼 수 있습니다.
 - **화면**: 답을 기다리는 동안에는 지금 단계만 한 줄로 보입니다(예: "로그 그룹 조회 중… (12초)"). 단계가 바뀌면 새 글자가 아래에서 올라오며 바뀝니다. 답이 오면 답변 아래 **'사고 과정'**을 펼쳐 사고 요약과 도구 호출(입력·결과·걸린 시간·의심 문구)을 순서대로 봅니다. 움직임을 줄이는 설정이면 전환 효과를 끕니다.
 
@@ -483,7 +479,7 @@ uv run --no-project --python 3.12 --with-requirements requirements-dev.txt pytho
 이전 대화 내용을 활용한 연속적인 질의응답을 위해 DynamoDB 기반의 세션 관리 시스템을 구현했습니다. 각 사용자의 대화 히스토리를 Messages 배열 형태로 저장하고, 새로운 질의 시 이전 대화와 함께 AI 모델에 전달합니다. MCP 세션 테이블(`wga-mcp-sessions-{env}`)은 `expires_at` TTL로 오래된 세션을 자동 삭제합니다. MCP 클라이언트의 `process_user_input_with_history` 메서드로 히스토리가 있는 요청과 단일 요청을 구분해 처리합니다.
 
 ### API Gateway 통합 및 라우팅 시스템
-모든 Lambda 함수들을 통합하는 단일 API Gateway를 구현하여 RESTful API 엔드포인트를 제공합니다. AWS_PROXY 통합 방식을 채택하여 Lambda 함수에서 HTTP 요청과 응답을 직접 처리할 수 있도록 했으며, 각 서비스별로 리소스를 분리하여 명확한 API 구조를 구성했습니다(/llm1, /llm2, /sessions, /execute-query, /create-table, /login, /callback, /models, /req 등). OPTIONS 메서드로 브라우저의 CORS preflight 요청을 처리합니다. 환경별 스테이지(dev/test/prod)로 독립적인 API 엔드포인트를 관리하며, API 리소스와 메서드는 CloudFormation으로 정의하고 main 스택의 Deployment로 한 번에 배포합니다. Slack 봇은 웹과 별도로 OAuth 로그인(`/login`, `/callback`)과 슬래시 커맨드(`/models`) 경로를 제공합니다.
+모든 Lambda 함수들을 통합하는 단일 API Gateway를 구현하여 RESTful API 엔드포인트를 제공합니다. AWS_PROXY 통합 방식을 채택하여 Lambda 함수에서 HTTP 요청과 응답을 직접 처리할 수 있도록 했으며, 각 서비스별로 리소스를 분리하여 명확한 API 구조를 구성했습니다(/llm1, /llm2, /sessions, /execute-query, /create-table, /login, /callback, /events 등). OPTIONS 메서드로 브라우저의 CORS preflight 요청을 처리합니다. 환경별 스테이지(dev/test/prod)로 독립적인 API 엔드포인트를 관리하며, API 리소스와 메서드는 CloudFormation으로 정의하고 main 스택의 Deployment로 한 번에 배포합니다. Slack 봇은 웹과 별도로 OAuth 로그인(`/login`, `/callback`)과 슬래시 커맨드(`/models`) 경로를 제공합니다.
 
 ### 배포 자동화 스크립트
 CloudFormation 기반 IaC와 `deploy.sh` 스크립트로 전체 시스템 배포를 자동화했습니다. 스크립트 하나로 템플릿 업로드, 스택 생성·업데이트, Lambda 패키징, MCP 이미지 빌드, 프론트엔드 빌드·배포까지 수행하며, 환경(dev/test/prod)별로 스택을 분리합니다. MCP 서버는 Docker 이미지로 만들어 CodeBuild로 빌드한 뒤 ECR에 저장하고, Lambda Container Image로 배포합니다. 스택 간 의존 관계에 맞춰 배포 순서를 스크립트에서 제어하며(위 [스택 구성](#cloudformation-스택-구성) 참고), 개별 스택 배포가 실패하면 CloudFormation 기본 롤백이 적용됩니다.
@@ -517,7 +513,7 @@ pytest
 | `test_mcp_client.py` | MCP Function URL 호출 시 SigV4 서명 |
 | `test_slack_security.py` | Slack 요청 서명(위조·변조·재전송), Cognito ID 토큰(aud·iss·만료·서명) 검증 |
 | `test_mcp_tools.py` | MCP 도구: 공식 서버 도구가 목록에 합쳐지는지(`$ref` 없이), 공식 CloudWatch·Cost Explorer·문서 검색 호출, 도구 오류를 `isError` 결과로 돌려주는지, 대시보드 도구와 세션 저장소 |
-| `test_model_selection.py` | 기본 모델 선택(지금 제공되는 최신 Sonnet), 퇴역한 모델 요청의 대체, 모델 목록 페이지 넘김·캐시 |
+| `test_latest_model.py` | 요청할 때 최신 Sonnet 자동 선택(출시일 비교, 새 Sonnet으로 저절로 넘어감), 목록 캐시·오류 시 마지막 목록·한 번도 못 받았을 때의 예비 모델, 모델별 사고 설정, 요청의 modelId 무시, 화면·Slack에 모델 선택이 없음 |
 
 ### CI (`.github/workflows/ci.yml`)
 PR과 `main` 푸시마다 세 작업이 병렬로 실행됩니다. AWS 자격 증명은 사용하지 않습니다.
@@ -573,7 +569,7 @@ A: 서버리스 구성이라 고정 비용은 낮고, 대부분 LLM 호출(토�
 A: 현재는 AWS 클라우드 전용입니다.
 
 ### Q: 다른 AI 모델을 사용할 수 있나요?
-A: 네, Anthropic이 제공하는 다양한 모델을 지원하며, 설정에서 변경 가능합니다.
+A: 아니요. 모든 요청(웹·Slack)이 요청할 때의 최신 Sonnet을 쓰고, 화면이나 Slack에서 고르는 기능은 없습니다. 모델 ID를 코드에 고정하지 않고 Anthropic Models API 목록에서 가장 최근에 나온 Sonnet을 고르므로(한 시간 캐시), 새 Sonnet이 나오면 배포 없이 넘어가고 모델이 퇴역해도 요청이 실패하지 않습니다. 목록을 한 번도 받지 못했을 때만 `FALLBACK_MODEL`(`claude-sonnet-5`)을 씁니다 (`services/llm/llm_service.py`).
 
 ## 지원 및 문의
 

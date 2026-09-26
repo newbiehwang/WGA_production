@@ -12,7 +12,6 @@ import { ChatPage } from './features/chat/ChatPage';
 import { HomePage } from './features/home/HomePage';
 import { UsersPage } from './features/users/UsersPage';
 import { useChatStore } from './stores/chatStore';
-import { useModelsStore } from './stores/modelsStore';
 
 export default function App() {
     const status = useAuthStore((s) => s.status);
@@ -46,11 +45,6 @@ export default function App() {
             window.clearTimeout(fallback);
         };
     }, [refresh]); // refresh는 스토어 함수라 바뀌지 않는다
-
-    // 로그인하면 모델 목록을 받는다 (/health는 인증 없이 열려 있다)
-    useEffect(() => {
-        if (status === 'signedIn') useModelsStore.getState().fetchModels().catch(() => {});
-    }, [status]);
 
     const handleLogout = async () => {
         useChatStore.getState().cancelRequest();

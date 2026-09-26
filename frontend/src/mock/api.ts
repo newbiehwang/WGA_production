@@ -41,23 +41,8 @@ const FIRST_THINKING_AT = 600; // 첫 사고 요약이 나오는 때
 const TOOL_MS = 1400; // 도구 하나가 도는 시간
 const STEP_GAP_MS = 400; // 단계 사이
 
-const MODELS = [
-  {
-    id: "claude-sonnet-5",
-    display_name: "Claude Sonnet 5",
-    created_at: "2026-06-01T00:00:00Z",
-  },
-  {
-    id: "claude-opus-5",
-    display_name: "Claude Opus 5",
-    created_at: "2026-05-01T00:00:00Z",
-  },
-  {
-    id: "claude-haiku-4-5",
-    display_name: "Claude Haiku 4.5",
-    created_at: "2025-10-01T00:00:00Z",
-  },
-];
+// 지금 쓰는 모델 (실제로는 요청할 때의 최신 Sonnet, services/llm/llm_service.py의 current_model)
+const MODEL = { id: "claude-sonnet-5", display_name: "Claude Sonnet 5" };
 
 interface MockTool {
   tool_name: string;
@@ -660,7 +645,7 @@ const auditRecordsOf = (
     day: time.toISOString().slice(0, 10),
     kind: "request",
     question,
-    model: MODELS[0].id,
+    model: MODEL.id,
     status: "ok",
     toolCount: tools.length,
     injectionSuspected: tools.filter((tool) => tool.suspicious?.length).length,
@@ -1018,7 +1003,7 @@ const route = (
   if (first === "users") return usersRoute(method, path.split("/").filter(Boolean), body, params);
   if (method === "get" && path === "/audit") return queryAudit(params);
   if (method === "get" && path === "/health") {
-    return [200, { status: "ok", models: MODELS, default_model: MODELS[0] }];
+    return [200, { status: "ok", model: MODEL }];
   }
   if (first === "sessions" && !id) {
     if (method === "get") return [200, { sessions: sessions.map(summary) }];

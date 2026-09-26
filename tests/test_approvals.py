@@ -477,7 +477,7 @@ class FakeClient:
 
 def test_follow_up_explains_the_stored_result(env, monkeypatch):
     llm = env["llm"]
-    monkeypatch.setattr(llm, "get_client", lambda model_id: FakeClient())
+    monkeypatch.setattr(llm, "get_client", lambda: FakeClient())
     action = make_action(env)
 
     def ask(sub):
@@ -503,7 +503,7 @@ def test_llm1_response_lists_pending_actions(env, monkeypatch):
                                    {"summary": "보존 기간 30일 → 14일", "before": "30일", "after": "14일"})
             return "승인이 필요합니다."
 
-    monkeypatch.setattr(llm, "get_client", lambda model_id: Requesting())
+    monkeypatch.setattr(llm, "get_client", lambda: Requesting())
     body = json.loads(llm.handle_llm1_with_mcp({"text": "줄여줘"}, ORIGIN, caller_id="alice")["body"])
     pending = body["inference"]["pendingActions"]
     assert len(pending) == 1 and pending[0]["status"] == "pending" and pending[0]["before"] == "30일"
@@ -517,7 +517,7 @@ def test_llm1_response_lists_pending_actions(env, monkeypatch):
             seen["approvals"] = self.approvals
             return "답"
 
-    monkeypatch.setattr(llm, "get_client", lambda model_id: Slack())
+    monkeypatch.setattr(llm, "get_client", lambda: Slack())
     monkeypatch.setattr(llm, "send_slack_dm", lambda user, text: None)
     llm.handle_llm1_with_mcp({"text": "줄여줘", "user_id": "U1", "previous_questions": [{"role": "user",
                                                                                    "content": "x"}]}, ORIGIN)
