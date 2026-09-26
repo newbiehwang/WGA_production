@@ -5,8 +5,7 @@
 //   필터(FilterMenu: 누르면 기간·그룹 기준·종류·결과·층·요청자·도구·출처·표시를 고르는 창과 필터 초기화, 걸린 조건은 칩) · 건수
 //   시간대별 막대그래프(AuditHistogram, 그룹 기준으로 색을 나눠 쌓기·드래그로 기간 좁히기)
 //   목록(시각 · 요청자 · 도구 · 요약 · 결과 · 표시). 내려가면 이어서 더 그린다
-//   행을 누르면 팝업창(AuditDetailModal, 이 앱의 다른 팝업창과 같은 모양)으로 자세히 보인다. ↑/↓로 앞뒤 기록, 변경 작업은 '층별로 따져 보기',
-//   '같은 질문의 기록'·'이 요청자만' 같은 버튼으로 이어 찾는다
+//   행을 누르면 팝업창(AuditDetailModal, 이 앱의 다른 팝업창과 같은 모양)으로 자세히 보인다. ↑/↓로 앞뒤 기록, 변경 작업은 '층별로 따져 보기'
 //
 // 거르는 순서: 기간 → 검색어 → 필터. 필터 창의 건수는 검색어까지 적용한 기록에서 센다 (Datadog과 같다)
 //
@@ -30,7 +29,6 @@ import {
     requesterOf,
     summaryOf,
     timeOf,
-    type FacetId,
     type GroupBy,
     type Selection,
 } from './auditModel';
@@ -193,13 +191,6 @@ export function AuditPage() {
 
     const showMore = useCallback(() => setLimit((prev) => prev + RENDER_STEP), []);
 
-    // 팝업창의 이어 찾기 (팝업창이 닫힌 뒤 조건을 바꾼다)
-    const showRelated = (id: string) => {
-        setSelection({}); // 같은 질문의 질문·도구·변경 행이 거르기에 가려지지 않게
-        setQuery(id);
-    };
-    const onlyFacet = (id: FacetId, value: string) => setSelection((prev) => ({ ...prev, [id]: [value] }));
-
     // 필터 초기화(필터 창 안): 처음 열었을 때와 똑같은 화면으로 되돌린다.
     // 조건(거르기·검색어·기간 전체)뿐 아니라 화면 상태(그룹 기준, 열린 필터 창·거르기 목록의 접기·더 보기,
     // 목록 스크롤, 열린 팝업창)도 처음으로. 기간의 끝도 지금으로 맞춘다
@@ -337,8 +328,6 @@ export function AuditPage() {
                     record={filtered[openIndex]}
                     onMove={move}
                     onClose={closeDetail}
-                    onRelated={showRelated}
-                    onFacet={onlyFacet}
                 />
             ) : null}
         </section>
