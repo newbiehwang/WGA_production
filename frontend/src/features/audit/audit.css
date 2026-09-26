@@ -1094,7 +1094,7 @@
 
 .audit-cycle {
   display: grid;
-  grid-template-columns: 244px minmax(0, 1fr);
+  grid-template-columns: 260px minmax(0, 1fr);
   align-items: center;
   gap: 24px;
 }
@@ -1143,30 +1143,50 @@
   fill: #e3e9f1;
 }
 
-/* 고른 조각: 바깥으로 밀어내고 짙은 테두리. 색(성격)과 따로 보이게 */
+/* 고른 조각: 그림자와 함께 살짝 떠오른다 (색은 그대로: 색은 계층의 성격) */
 .audit-cycle-seg.is-selected {
   transform: translate(var(--dx), var(--dy));
 }
 
-/* 점선(판단·매개)·흔적의 테두리보다 앞서게 한 단계 더 구체적으로 */
-.audit-cycle-svg .audit-cycle-seg.is-selected .audit-cycle-shape {
-  stroke: #1f2933;
-  stroke-width: 2.5;
-  stroke-dasharray: none;
-  stroke-linejoin: round;
+.audit-cycle-seg.is-selected .audit-cycle-shape {
+  filter: drop-shadow(0 4px 8px rgba(31, 41, 51, 0.16));
 }
 
-/* 다른 계층을 고르면 나머지 조각은 옅게 (고른 조각이 눈에 띄게). 이 기록의 계층은 덜 옅게 */
+/* 다른 계층을 고르면 나머지 조각은 은은하게 옅게. 이 기록의 계층은 덜 옅게 (어디인지 계속 보이게) */
 .audit-cycle-svg.has-pick .audit-cycle-seg:not(.is-selected) {
-  opacity: 0.45;
+  opacity: 0.55;
 }
 
 .audit-cycle-svg.has-pick .audit-cycle-seg.is-here:not(.is-selected) {
-  opacity: 0.7;
+  opacity: 0.8;
 }
 
 .audit-cycle-svg.has-pick .audit-cycle-seg:not(.is-selected):hover {
-  opacity: 0.85;
+  opacity: 0.9;
+}
+
+/* 선택 표시: 고리 바깥의 둥근 호. 고른 조각으로 미끄러져 가고, 색은 그 계층의 성격을 따른다 */
+.audit-cycle-mark {
+  fill: none;
+  stroke: #5f6b7a;
+  stroke-width: 4;
+  stroke-linecap: round;
+  pointer-events: none;
+  transition: transform 460ms cubic-bezier(0.34, 1.2, 0.4, 1), stroke 240ms ease;
+  animation: audit-cycle-mark-in 420ms ease 280ms backwards;
+}
+
+.audit-cycle-mark.is-here {
+  stroke: var(--color-primary);
+}
+
+.audit-cycle-mark.is-marked {
+  stroke: #ff9900;
+}
+
+@keyframes audit-cycle-mark-in {
+  from { opacity: 0; stroke-dasharray: 0 200; }
+  to { opacity: 1; stroke-dasharray: 200 0; }
 }
 
 .audit-cycle-seg:focus-visible .audit-cycle-shape {
@@ -1180,7 +1200,7 @@
 }
 
 .audit-cycle-seg.is-here.is-selected .audit-cycle-shape {
-  filter: drop-shadow(0 3px 6px rgba(0, 123, 255, 0.28));
+  filter: drop-shadow(0 4px 9px rgba(0, 123, 255, 0.3));
 }
 
 .audit-cycle-seg.is-here .audit-cycle-label,
@@ -1366,7 +1386,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .audit-cycle-seg {
+  .audit-cycle-seg,
+  .audit-cycle-mark {
     animation: none;
     transition: none;
   }
@@ -1380,7 +1401,7 @@
   }
 
   .audit-cycle-svg {
-    max-width: 220px;
+    max-width: 240px;
     margin: 0 auto;
   }
 
