@@ -538,14 +538,17 @@
   margin-bottom: 10px;
 }
 
-/* 목록을 불러오는 동안: 표 머리 아래 남은 자리를 다 채우고(flex: 1) 그 가운데에 기다림 카드(.loading-card)를 띄운다.
+/* 목록을 불러오는 동안: 흰 박스(.plan-panel, position: relative) 전체를 덮는 투명한 층을 두고 그 정가운데에
+   기다림 카드(.loading-card)를 띄운다. 로그아웃 카드가 화면 전체의 가운데에 뜨는 것과 같은 방식이다.
+   층은 누름을 막지 않는다(pointer-events: none). 표 머리(z-index: 6)보다 위에 둔다.
    나타날 때는 로그아웃 중 화면(.logout-overlay, layout.css)과 같은 효과: 6px 위에서 내려오며 흐릿하게 나타난다 */
 .plan-panel-loading {
-  flex: 1;
-  min-height: 180px;
+  position: absolute;
+  inset: 0;
+  z-index: 10;
   display: grid;
   place-items: center;
-  padding: 20px;
+  pointer-events: none;
   animation: menu-in 160ms ease both;
 }
 

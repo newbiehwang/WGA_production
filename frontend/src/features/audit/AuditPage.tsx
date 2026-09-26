@@ -509,11 +509,8 @@ export function AuditPage() {
                         <span className="audit-col-flags">표시</span>
                     </div>
 
-                    {listLoading ? (
-                        <div className="plan-panel-loading">
-                            <LoadingCard text="감사 로그를 불러오는 중…" />
-                        </div>
-                    ) : items.length === 0 ? (
+                    {/* 불러오는 동안 목록은 비워 두고, 카드는 흰 박스 전체의 가운데에 띄운다 (아래 plan-panel-loading) */}
+                    {listLoading ? null : items.length === 0 ? (
                         error ? null : (
                             <div className="plan-panel-empty">
                                 <p>이 조건에 맞는 기록이 없습니다. 질문을 보내면 도구 호출마다 기록이 남습니다.</p>
@@ -548,6 +545,12 @@ export function AuditPage() {
                     )}
                 </div>
             </div>
+
+            {listLoading ? (
+                <div className="plan-panel-loading">
+                    <LoadingCard text="감사 로그를 불러오는 중…" />
+                </div>
+            ) : null}
         </section>
     );
 }

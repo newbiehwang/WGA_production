@@ -234,11 +234,8 @@ export function UsersPage() {
                         <span className="users-col-account">계정</span>
                     </div>
 
-                    {listLoading ? (
-                        <div className="plan-panel-loading">
-                            <LoadingCard text="사용자를 불러오는 중…" />
-                        </div>
-                    ) : users.length === 0 ? (
+                    {/* 불러오는 동안 목록은 비워 두고, 카드는 흰 박스 전체의 가운데에 띄운다 (아래 plan-panel-loading) */}
+                    {listLoading ? null : users.length === 0 ? (
                         error ? null : (
                             <div className="plan-panel-empty">
                                 <p>{search ? '이 검색어로 시작하는 이메일이 없습니다.' : '사용자가 없습니다.'}</p>
@@ -324,6 +321,12 @@ export function UsersPage() {
                     </div>
                 ) : null}
             </div>
+
+            {listLoading ? (
+                <div className="plan-panel-loading">
+                    <LoadingCard text="사용자를 불러오는 중…" />
+                </div>
+            ) : null}
         </section>
     );
 }
