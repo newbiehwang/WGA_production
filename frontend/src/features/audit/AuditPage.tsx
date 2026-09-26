@@ -290,7 +290,7 @@ export function AuditPage() {
                             {listLoading ? null : (
                                 <>
                                     <strong>{filtered.length.toLocaleString()}건</strong>
-                                    {conditions ? <span className="audit-muted"> / {inWindow.length.toLocaleString()}건 중</span> : null}
+                                    {conditions ? <span className="audit-muted"> / {inWindow.length.toLocaleString()}건</span> : null}
                                     {truncated ? (
                                         <span className="audit-truncated">
                                             최근 {MAX_RECORDS.toLocaleString()}건까지만 불러왔습니다. 기간을 줄이면 모두 봅니다
