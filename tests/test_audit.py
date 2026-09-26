@@ -443,10 +443,12 @@ def test_screen_shows_audit_only_to_admins():
     # 탭: 감사 로그는 관리자에게만 보인다
     navigation = (frontend / "components" / "layout" / "Navigation.tsx").read_text(encoding="utf-8")
     assert "{ label: '감사 로그', to: '/audit', adminOnly: true }" in navigation
+    assert "{ label: '사용자 관리', to: '/users', adminOnly: true }" in navigation
     assert "!item.adminOnly || isAdmin(user)" in navigation
     # 경로: 주소로 바로 들어와도 관리자가 아니면 홈으로
     app = (frontend / "App.tsx").read_text(encoding="utf-8")
     assert '<Route path="/audit" element={isAdmin(user) ? <AuditPage /> : <Navigate to="/" replace />} />' in app
+    assert '<Route path="/users" element={isAdmin(user) ? <UsersPage /> : <Navigate to="/" replace />} />' in app
     # 관리자 여부는 ID 토큰의 cognito:groups에서 읽고, 서버와 같은 그룹 이름을 쓴다
     auth = (frontend / "auth" / "authClient.ts").read_text(encoding="utf-8")
     assert "claims['cognito:groups']" in auth

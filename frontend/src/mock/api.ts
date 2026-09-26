@@ -14,7 +14,8 @@ import type {
 } from "axios";
 import type { PendingAction } from "../types/actions";
 import type { Artifact } from "../types/artifacts";
-import type { AuditQuery, AuditRecord, TraceStep } from "../types/audit";
+import type { AdminEvent, AuditQuery, AuditRecord, TraceStep } from "../types/audit";
+import type { ManagedGroup, ManagedUser } from "../types/users";
 
 interface MockMessage {
   id: string;
@@ -742,6 +743,83 @@ const actionAuditRecord = (
   };
 };
 
+// ---------------------------------------------------------------- 사용자 관리 (/users, services/llm/user_admin.py)
+// 서버와 같은 규칙: 자기 관리자 권한 빼기·자기 정지 금지, 마지막 관리자 보호, 관리하는 그룹은 admins·approvers뿐,
+// 바꾼 내용은 감사 로그('사용자 관리')에 남는다. mock 사용자(demo)는 관리자다
+
+const MANAGED_GROUPS: ManagedGroup[] = ["admins", "approvers"];
+const daysAgo = (days: number) => new Date(Date.now() - days * 86400000).toISOString();
+let mockUsers: ManagedUser[] = [
+  { username: MOCK_USER_ID, email: "demo@example.com", name: "Demo", status: "CONFIRMED", enabled: true,
+    createdAt: daysAgo(40), groups: ["admins", "approvers"], isSelf: true },
+  { username: "7c1e9a52-kim", email: "kim@example.com", status: "CONFIRMED", enabled: true,
+    createdAt: daysAgo(21), groups: ["approvers"], isSelf: false },
+  { username: "5b2d0c11-lee", email: "lee@example.com", status: "CONFIRMED", enabled: true,
+    createdAt: daysAgo(9), groups: [], isSelf: false },
+  { username: "e40f7a93-park", email: "park@example.com", status: "FORCE_CHANGE_PASSWORD", enabled: true,
+    createdAt: daysAgo(1), groups: [], isSelf: false },
+  { username: "90aa1d27-choi", email: "choi@example.com", status: "CONFIRMED", enabled: false,
+    createdAt: daysAgo(60), groups: [], isSelf: false },
+];
+
+const adminAuditRecord = (event: AdminEvent, target: ManagedUser, group?: ManagedGroup): AuditRecord => {
+  const time = new Date();
+  return {
+    userId: MOCK_USER_ID, email: "demo@example.com", source: "web",
+    at: auditAt(time, `admin#${newId().slice(0, 12)}#${event}`), day: time.toISOString().slice(0, 10),
+    kind: "admin", event, status: "ok", decidedBy: MOCK_USER_ID,
+    targetUser: target.username, ...(target.email && { targetEmail: target.email }), ...(group && { group }),
+  };
+};
+
+const usersRoute = (method: string, parts: string[], body: RequestBody, params: Record<string, string>): Result => {
+  if (!mockIsAdmin()) return [403, { error: "사용자 관리는 관리자(admins 그룹)만 할 수 있습니다" }];
+  if (parts.length === 1 && method === "get") {
+    const q = (params.q ?? "").toLowerCase();
+    return [200, { users: mockUsers.filter((u) => (u.email ?? "").toLowerCase().startsWith(q)), cursor: null,
+                   groups: MANAGED_GROUPS }];
+  }
+  if (parts.length === 1 && method === "post") {
+    const email = (body.email ?? "").trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return [400, { error: "올바른 이메일 주소가 아닙니다" }];
+    if (mockUsers.some((u) => u.email === email)) return [409, { error: "이미 있는 사용자입니다" }];
+    const created: ManagedUser = { username: newId(), email, status: "FORCE_CHANGE_PASSWORD", enabled: true,
+                                   createdAt: now(), groups: [], isSelf: false };
+    mockUsers = [created, ...mockUsers];
+    auditRecords = [adminAuditRecord("invited", created), ...auditRecords];
+    return [200, created];
+  }
+  const user = mockUsers.find((u) => u.username === decodeURIComponent(parts[1] ?? ""));
+  if (!user) return [404, { error: "사용자를 찾을 수 없습니다" }];
+  const enabledAdmins = mockUsers.filter((u) => u.enabled && u.groups.includes("admins"));
+  const update = (changed: ManagedUser, event: AdminEvent, group?: ManagedGroup): Result => {
+    mockUsers = mockUsers.map((u) => (u.username === changed.username ? changed : u));
+    auditRecords = [adminAuditRecord(event, changed, group), ...auditRecords];
+    return [200, changed];
+  };
+  if (parts.length === 4 && parts[2] === "groups" && (method === "post" || method === "delete")) {
+    const group = parts[3] as ManagedGroup;
+    if (!MANAGED_GROUPS.includes(group)) return [400, { error: "그룹은 admins, approvers 중 하나여야 합니다" }];
+    const add = method === "post";
+    if (!add && group === "admins") {
+      if (user.isSelf) return [409, { error: "자기 관리자 권한은 뺄 수 없습니다 (다른 관리자에게 부탁하세요)" }];
+      if (enabledAdmins.length <= 1 && enabledAdmins.includes(user))
+        return [409, { error: "마지막 관리자는 뺄 수 없습니다. 다른 관리자를 먼저 지정하세요" }];
+    }
+    const groups = add ? [...new Set([...user.groups, group])] : user.groups.filter((g) => g !== group);
+    return update({ ...user, groups: MANAGED_GROUPS.filter((g) => groups.includes(g)) },
+                  add ? "group_added" : "group_removed", group);
+  }
+  if (parts.length === 3 && (parts[2] === "disable" || parts[2] === "enable") && method === "post") {
+    const enabled = parts[2] === "enable";
+    if (!enabled && user.isSelf) return [409, { error: "자기 계정은 정지할 수 없습니다" }];
+    if (!enabled && enabledAdmins.length <= 1 && enabledAdmins.includes(user))
+      return [409, { error: "마지막 관리자는 정지할 수 없습니다. 다른 관리자를 먼저 지정하세요" }];
+    return update({ ...user, enabled }, enabled ? "enabled" : "disabled");
+  }
+  return [404, { error: "없는 경로입니다" }];
+};
+
 // 역추적 (GET /audit?trace=<actionId>, services/llm/audit_trace.py의 build와 같은 물음·같은 답)
 const traceAudit = (actionId: string): Result => {
   if (!mockIsAdmin()) {
@@ -870,6 +948,7 @@ interface RequestBody {
   requestId?: string; // /llm1: 진행 상황을 찾을 열쇠
   actionId?: string; // /llm1: 승인한 변경 작업의 결과 설명
   question?: string; // /llm1: 질문
+  email?: string; // POST /users: 초대할 이메일
 }
 
 // 요청 본문은 axios가 JSON 문자열로 바꿔서 넘겨준다
@@ -931,6 +1010,7 @@ const route = (
     return [200, { phase, steps, startedAt: run.started }];
   }
   if (method === "get" && path === "/audit" && params.trace) return traceAudit(params.trace);
+  if (first === "users") return usersRoute(method, path.split("/").filter(Boolean), body, params);
   if (method === "get" && path === "/audit") return queryAudit(params);
   if (method === "get" && path === "/health") {
     return [200, { status: "ok", models: MODELS, default_model: MODELS[0] }];

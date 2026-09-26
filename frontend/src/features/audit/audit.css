@@ -148,6 +148,10 @@
   color: #9a5b00;
 }
 
+.audit-kind-admin {
+  color: #007bff;
+}
+
 .audit-event-requested {
   background: rgba(255, 153, 0, 0.16);
   color: #9a5b00;

@@ -1,4 +1,4 @@
-// 위쪽 내비게이션: 로고 · 가운데 탭(홈, 대화, 관리자에게만 감사 로그) · 오른쪽 프로필 (AXPI Navigation.tsx)
+// 위쪽 내비게이션: 로고 · 가운데 탭(홈, 대화, 관리자에게만 감사 로그·사용자 관리) · 오른쪽 프로필 (AXPI Navigation.tsx)
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { type AuthUser, isAdmin } from '@/auth/authClient';
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
     { label: '홈', to: '/' },
     { label: '대화', to: '/chat' },
     { label: '감사 로그', to: '/audit', adminOnly: true },
+    { label: '사용자 관리', to: '/users', adminOnly: true },
 ];
 
 export function Navigation({
