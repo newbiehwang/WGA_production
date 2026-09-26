@@ -40,14 +40,11 @@ import { FacetSidebar } from './FacetSidebar';
 import { PeriodPicker } from './PeriodPicker';
 import {
     DEFAULT_PERIOD,
-    PRESETS,
     containsRange,
     fetchRangeOf,
-    formatWindow,
     isPreset,
     windowOf,
     type Period,
-    type TimeWindow,
 } from './timeWindow';
 import { MAX_RECORDS, useAuditRecords } from './useAuditRecords';
 import './audit.css';
@@ -116,7 +113,7 @@ function ResetButton({ onClick, disabled }: { onClick: () => void; disabled: boo
             className="audit-reset"
             onClick={onClick}
             disabled={disabled}
-            title="거르기·검색어를 지우고 기간을 최근 7일로 되돌립니다"
+            title="처음 화면으로 되돌립니다 (거르기·검색어를 지우고, 기간은 최근 7일, 나눠 보기는 결과)"
         >
             <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
                 <path
@@ -196,8 +193,12 @@ export function AuditPage() {
     const searched = useMemo(() => inWindow.filter((record) => matchesQuery(record, parsed)), [inWindow, parsed]);
     const filtered = useMemo(() => searched.filter((record) => matches(record, selection)), [searched, selection]);
     const conditions = activeCount(selection) + (query.trim() ? 1 : 0);
-    // 처음 화면(최근 7일, 거르기·검색어 없음)과 다른가: '필터 초기화'를 켠다
-    const customized = conditions > 0 || !isPreset(period) || period.preset !== (DEFAULT_PERIOD as { preset: string }).preset;
+    // 처음 화면(최근 7일, 거르기·검색어 없음, 결과로 나눠 보기)과 다른가: '필터 초기화'를 켠다
+    const customized =
+        conditions > 0 ||
+        !isPreset(period) ||
+        period.preset !== (DEFAULT_PERIOD as { preset: string }).preset ||
+        groupBy !== 'result';
 
     // 조건이나 기록이 바뀌면 목록을 처음 묶음부터 그린다
     useEffect(() => setLimit(RENDER_STEP), [filtered]);
@@ -232,34 +233,24 @@ export function AuditPage() {
         setQuery(id);
     };
     const onlyFacet = (id: FacetId, value: string) => setSelection((prev) => ({ ...prev, [id]: [value] }));
-    // 막대그래프로 좁히기: 좁히기 전 기간을 쌓아 두고 '이전 기간'으로 하나씩 돌아간다.
-    // 기간 고르기(1시간~30일·직접)나 필터 초기화로 기간을 새로 정하면 쌓은 것을 비운다
-    const [zoomStack, setZoomStack] = useState<Period[]>([]);
-    const zoomTo = (next: TimeWindow) => {
-        setZoomStack((prev) => [...prev, period]);
-        setPeriod(next);
-    };
-    const zoomBack = () => {
-        const last = zoomStack[zoomStack.length - 1];
-        if (!last) return;
-        setZoomStack(zoomStack.slice(0, -1));
-        setPeriod(last);
-    };
-    const choosePeriod = (next: Period) => {
-        setZoomStack([]);
-        setPeriod(next);
-    };
-    const periodText = (p: Period) =>
-        isPreset(p) ? `최근 ${PRESETS.find((preset) => preset.id === p.preset)?.label ?? ''}` : formatWindow(p);
-
     // 목록에서 마우스를 올린 기록의 시각 (막대그래프가 그 칸을 짚는다)
     const [pointAt, setPointAt] = useState<number | null>(null);
 
-    // 필터 초기화: 처음 화면으로 (거르기·검색어를 지우고 기간을 최근 7일로)
+    // 필터 초기화: 처음 열었을 때와 똑같은 화면으로 되돌린다.
+    // 조건(거르기·검색어·기간 최근 7일)뿐 아니라 화면 상태(나눠 보기, 거르기 목록의 접기·더 보기, 목록 스크롤,
+    // 열린 팝업창, 좁은 화면의 거르기 펼침)도 처음으로. '최근 7일'의 끝도 지금으로 맞춘다
+    const [resetNo, setResetNo] = useState(0); // 바뀌면 거르기 목록을 새로 그려 접기·더 보기를 처음으로
+    const listBody = useRef<HTMLUListElement>(null);
     const resetFilters = () => {
         setSelection({});
         setQuery('');
-        choosePeriod(DEFAULT_PERIOD);
+        setPeriod(DEFAULT_PERIOD);
+        setNow(Date.now());
+        setGroupBy('result');
+        setOpenKey(null);
+        setShowFacets(false);
+        setResetNo((n) => n + 1);
+        listBody.current?.scrollTo({ top: 0 });
     };
 
     return (
@@ -282,32 +273,12 @@ export function AuditPage() {
             ) : null}
 
             <div className={`audit-explorer${showFacets ? ' is-facets-open' : ''}`}>
-                <FacetSidebar records={searched} selection={selection} onChange={setSelection} />
+                <FacetSidebar key={resetNo} records={searched} selection={selection} onChange={setSelection} />
 
                 <div className="audit-results">
                     <AuditSearch value={query} onChange={setQuery} />
                     <div className="audit-toolbar">
-                        <PeriodPicker period={period} window={timeWindow} onChange={choosePeriod} />
-                        {zoomStack.length ? (
-                            <button
-                                type="button"
-                                className="audit-zoom-back"
-                                onClick={zoomBack}
-                                title={`돌아갈 기간: ${periodText(zoomStack[zoomStack.length - 1])}`}
-                            >
-                                <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
-                                    <path
-                                        d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                    />
-                                </svg>
-                                이전 기간
-                            </button>
-                        ) : null}
+                        <PeriodPicker period={period} window={timeWindow} onChange={setPeriod} />
                         <button
                             type="button"
                             className="audit-facets-button"
@@ -342,7 +313,7 @@ export function AuditPage() {
                             highlightAt={pointAt}
                             groupBy={groupBy}
                             onGroupBy={setGroupBy}
-                            onSelect={zoomTo}
+                            onSelect={setPeriod}
                             onFilter={(facet, values) => setSelection((prev) => ({ ...prev, [facet]: values }))}
                         />
                     )}
@@ -374,7 +345,7 @@ export function AuditPage() {
                                 )}
                             </div>
                         ) : (
-                            <ul className="audit-table-body" aria-label="감사 기록">
+                            <ul ref={listBody} className="audit-table-body" aria-label="감사 기록">
                                 {filtered.slice(0, limit).map((record) => {
                                     const key = keyOf(record);
                                     return (
