@@ -354,6 +354,8 @@ export function AuditHistogram({
             <div ref={wrap} className="audit-histogram-plot">
                 {width > 0 ? (
                     <svg
+                        // 커서: 평소에는 화살표, 기록이 있는 칸 위에서는 손가락(누르면 그 칸으로), 드래그 중에는 ↔
+                        className={drag ? 'is-dragging' : shown && shown.total > 0 ? 'is-over-bar' : undefined}
                         width={width}
                         height={TOP + PLOT_H + AXIS_H}
                         tabIndex={interactive ? 0 : -1}
