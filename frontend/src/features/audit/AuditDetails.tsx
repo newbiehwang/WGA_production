@@ -12,9 +12,13 @@ import {
     locusOf,
     redactedTotal,
     roleText,
+    TOKEN_LABELS,
     secondsOf,
     suspiciousOf,
+    tokenTotal,
+    tokensText,
     toolLabelOf,
+    usdText,
 } from './auditModel';
 
 export function Details({ record }: { record: AuditRecord }) {
@@ -85,6 +89,48 @@ export function Details({ record }: { record: AuditRecord }) {
     } else {
         // 질문과 답변은 표 위에 대화창 모양으로 보인다 (AuditConversation)
         if (record.model) rows.push(['모델', <code key="model">{record.model}</code>]);
+        // 쓴 토큰과 예상 비용 (services/llm/llm_cost.py). 토큰을 남기기 전의 질문에는 없다
+        if (record.tokens) {
+            rows.push([
+                '토큰',
+                <span key="tokens">
+                    {tokensText(record.tokens)}{' '}
+                    <span className="audit-muted">(합계 {tokenTotal(record.tokens).toLocaleString()})</span>
+                </span>,
+            ]);
+            if (record.modelCalls?.length)
+                rows.push([
+                    '모델 호출',
+                    <div key="calls">
+                        {record.modelCalls.length}번
+                        <ol className="audit-model-calls">
+                            {record.modelCalls.map((call, index) => (
+                                <li key={index}>{tokensText(call)}</li>
+                            ))}
+                        </ol>
+                    </div>,
+                ]);
+            const price = record.price;
+            rows.push([
+                '예상 비용',
+                record.costMicroUsd !== undefined ? (
+                    <span key="cost">
+                        {usdText(record.costMicroUsd)}
+                        {price ? (
+                            <span className="audit-muted">
+                                {' '}
+                                (단가, 백만 토큰당:{' '}
+                                {TOKEN_LABELS.map(([kind, label]) => `${label} $${price[kind]}`).join(' · ')})
+                            </span>
+                        ) : null}
+                    </span>
+                ) : (
+                    <span key="cost" className="audit-muted">
+                        단가표에 없는 모델이라 계산하지 않았습니다
+                    </span>
+                ),
+            ]);
+        }
         rows.push(['도구 호출', `${record.toolCount ?? 0}번`]);
         if (record.injectionSuspected) rows.push(['의심 문구가 든 도구 결과', `${record.injectionSuspected}건`]);
         const redacted = Object.entries(record.redacted ?? {});

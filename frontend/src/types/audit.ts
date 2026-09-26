@@ -9,6 +9,14 @@ export type AuditScope = 'mine' | 'all' | 'user';
 // 층: 도구 반복 위의 자리 (services/llm/audit.py 모듈 설명). residence는 조회 조건으로만 쓴다 (taintedBy가 있는 승인 요청)
 export type AuditLocus = 'interface' | 'ingress' | 'residence' | 'egress' | 'effect';
 
+// 토큰 네 종류 (입력에는 캐시에서 읽은·캐시에 쓴 입력이 들어 있지 않다)
+export interface TokenCounts {
+    input: number;
+    output: number;
+    cacheWrite: number;
+    cacheRead: number;
+}
+
 export interface AuditRecord {
     userId: string; // 웹은 Cognito sub, Slack은 'slack:<사용자 ID>'
     at: string; // 시각(UTC, 밀리초까지) + '#' + 도구 호출 ID 또는 'request#<질문 ID>'
@@ -37,6 +45,11 @@ export interface AuditRecord {
     // 사용자가 받은 답변: 목록에는 앞부분과 글자 수만 온다. 전체는 팝업창이 열 때 따로 받는다 (fetchAnswer)
     answerPreview?: string;
     answerChars?: number;
+    // 쓴 토큰과 예상 비용 (services/llm/llm_cost.py). 단가표에 없는 모델이면 costMicroUsd·price가 없다
+    tokens?: TokenCounts; // 네 종류의 합
+    modelCalls?: TokenCounts[]; // 모델을 부를 때마다의 토큰
+    costMicroUsd?: number; // 예상 비용 (마이크로달러 = 백만분의 1달러)
+    price?: Record<keyof TokenCounts, string>; // 계산에 쓴 단가 (USD / 백만 토큰)
     // 변경 작업의 사건 (kind: 'action', services/llm/approvals.py)
     event?: 'requested' | 'approved' | 'denied' | 'executed' | 'failed' | AdminEvent;
     actionId?: string;
