@@ -1,13 +1,16 @@
 // 답변을 만드는 과정 (Claude Code가 작업 과정을 보여 주는 모양을 따랐다).
 //
+// 답을 기다리는 동안 (LiveLine): 지금 단계만 한 줄로. 단계가 바뀌면 새 줄이 아래에서 올라오며 바뀐다
+//   ✶ 로그 그룹 조회 중… (12초)
+//
+// 답이 온 뒤 (ProgressTrace): 답변 아래 '사고 과정'을 펼치면 전체 과정이 보인다
 //   ▸ ✻ 생각  로그 그룹부터 찾아야 한다…          ← 사고 요약. 첫 줄만 보이고 누르면 펼쳐진다
 //   ● 로그 그룹 조회  /aws/lambda · 5
 //     ⎿ 1.2초                                      ← 도구 결과 (실패면 이유)
 //   ● 도구 찾기  lookup_events
 //     ⎿ CloudTrail 이벤트 조회                     ← 도구 검색: 모델이 필요한 도구를 찾아 불러왔다
-//   ✶ 생각하는 중… (12초)                          ← 답을 기다리는 동안만. 도는 별표와 지금 하는 일·지난 시간
 //
-// 답을 기다리는 동안에는 진행 상황(GET /llm1/progress)으로, 답이 온 뒤에는 답변의 inference.steps로 같은 목록을 그린다.
+// 기다리는 동안에는 진행 상황(GET /llm1/progress)으로, 답이 온 뒤에는 답변의 inference.steps로 단계를 읽는다.
 import { useEffect, useState } from 'react';
 import type { TraceStep } from '@/utils/toolTrace';
 
@@ -43,15 +46,24 @@ function useElapsedSeconds(since: string) {
     return Math.max(0, Math.floor((now - started) / 1000));
 }
 
-function LiveStatus({ steps, phase, since }: { steps: TraceStep[]; phase: string; since: string }) {
-    const seconds = useElapsedSeconds(since);
+// 지금 단계의 이름 (세부 내용 없이). 도구를 실행 중이면 그 도구, 아니면 모델이 생각하는 중이다
+function currentStep(steps: TraceStep[], phase: string): string {
     const running = [...steps].reverse().find((step) => step.kind === 'tool' && step.status === 'running');
-    // 도구를 실행 중이면 그 도구 이름을, 아니면 모델의 응답을 기다리는 중이다
-    const verb = phase === 'tool' && running?.kind === 'tool' ? `${running.label} 실행 중` : '생각하는 중';
+    if (phase === 'tool' && running?.kind === 'tool') return `${running.label.replace(/ 요청$/, '')} 중`;
+    return '생각하는 중';
+}
+
+// 답을 기다리는 동안의 한 줄: 도는 별표 · 지금 단계 · 지난 시간.
+// 단계 글자가 바뀌면 key가 바뀌어 새로 그려지며, 아래에서 올라오는 전환 효과(trace-line-in)가 난다
+export function LiveLine({ steps, phase, since }: { steps: TraceStep[]; phase: string; since: string }) {
+    const seconds = useElapsedSeconds(since);
+    const step = currentStep(steps, phase);
     return (
-        <div className="trace-status" role="status" aria-live="polite">
+        <div className="trace trace-live" role="status" aria-live="polite">
             <Spinner />
-            <span className="trace-verb">{verb}…</span>
+            <span key={step} className="trace-verb trace-line-in">
+                {step}…
+            </span>
             <span className="trace-time">({seconds}초)</span>
         </div>
     );
@@ -114,28 +126,20 @@ function ToolStepView({ step }: { step: Extract<TraceStep, { kind: 'tool' }> }) 
     );
 }
 
-export function ProgressTrace({
-    steps,
-    live,
-}: {
-    steps: TraceStep[];
-    live?: { phase: string; since: string }; // 답을 기다리는 중이면 지금 하는 일과 시작 시각
-}) {
-    if (!live && steps.length === 0) return null;
+// 답변을 만든 전체 과정 (답변 아래 '사고 과정'을 펼치면)
+export function ProgressTrace({ steps }: { steps: TraceStep[] }) {
+    if (steps.length === 0) return null;
     return (
         <div className="trace">
-            {steps.length > 0 ? (
-                <ol className="trace-steps" aria-label="답변을 만든 과정">
-                    {steps.map((step, index) =>
-                        step.kind === 'thinking' ? (
-                            <ThinkingStep key={index} step={step} />
-                        ) : (
-                            <ToolStepView key={index} step={step} />
-                        ),
-                    )}
-                </ol>
-            ) : null}
-            {live ? <LiveStatus steps={steps} phase={live.phase} since={live.since} /> : null}
+            <ol className="trace-steps" aria-label="답변을 만든 과정">
+                {steps.map((step, index) =>
+                    step.kind === 'thinking' ? (
+                        <ThinkingStep key={index} step={step} />
+                    ) : (
+                        <ToolStepView key={index} step={step} />
+                    ),
+                )}
+            </ol>
         </div>
     );
 }
