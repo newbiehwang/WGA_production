@@ -55,19 +55,20 @@
 .audit-facet-more:focus-visible,
 .audit-facet-clear:focus-visible,
 .audit-reset:focus-visible,
-.audit-facets-button:focus-visible {
+.audit-filter-button:focus-visible,
+.audit-filter-chips button:focus-visible,
+.audit-filter-panel-head button:focus-visible {
   outline: 2px solid rgba(0, 123, 255, 0.32);
   outline-offset: 2px;
 }
 
-/* ---------------------------------------------------------------- 틀: 왼쪽 거르기 목록 | 오른쪽 기간·건수·목록 */
+/* ---------------------------------------------------------------- 틀: 검색창 · 기간·필터·건수 줄 · 막대그래프 · 목록 (한 단) */
 
 .audit-explorer {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
-  gap: 20px;
+  display: flex;
+  flex-direction: column;
 }
 
 .audit-results {
@@ -77,18 +78,191 @@
   flex-direction: column;
 }
 
-/* ---------------------------------------------------------------- 왼쪽 거르기 목록 (FacetSidebar) */
+/* ---------------------------------------------------------------- 필터 버튼 · 고른 조건 칩 · 세부 선택 창 (FilterMenu) */
+
+.audit-filter-menu {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.audit-filter-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: #fff;
+  color: #3c4650;
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.audit-filter-button:hover,
+.audit-filter-button.is-open {
+  border-color: rgba(0, 123, 255, 0.4);
+  background: #f1f6fd;
+  color: var(--color-primary);
+}
+
+/* 고른 조건이 있으면 파랗게 */
+.audit-filter-button.is-active {
+  border-color: rgba(0, 123, 255, 0.4);
+  color: var(--color-primary);
+}
+
+.audit-filter-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.audit-filter-caret {
+  font-size: 10px;
+  transition: transform 140ms ease;
+}
+
+.audit-filter-button.is-open .audit-filter-caret {
+  transform: rotate(180deg);
+}
+
+/* 고른 조건: '종류: 질문 ✕' */
+.audit-filter-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.audit-filter-chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 260px;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border-radius: 999px;
+  background: #eaf3ff;
+  font-size: 12px;
+  color: #1f4f86;
+}
+
+.audit-filter-chip-facet {
+  color: #4a6f9a;
+}
+
+.audit-filter-chip-value {
+  font-family: var(--font-label);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-filter-chips button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #4a6f9a;
+  cursor: pointer;
+}
+
+.audit-filter-chips button:hover {
+  background: rgba(0, 123, 255, 0.14);
+  color: var(--color-primary);
+}
+
+/* 세부 선택 창: 기간·필터 줄(.audit-toolbar) 바로 아래, 왼쪽 끝에 맞춰 뜬다 (좁은 화면에서도 줄 폭을 넘지 않게).
+   거르기가 여러 단으로 놓이고, 길면 창 안에서 스크롤 */
+.audit-filter-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: min(880px, 100%);
+  max-height: min(60vh, 520px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.16);
+  animation: menu-in 140ms ease both;
+}
+
+.audit-filter-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid #edf1f6;
+}
+
+.audit-filter-panel-head strong {
+  font-family: var(--font-label);
+  font-size: 0.9rem;
+  color: #1f2933;
+}
+
+.audit-filter-panel-head div {
+  display: flex;
+  gap: 4px;
+}
+
+.audit-filter-panel-head button {
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  padding: 4px 8px;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.audit-filter-panel-head button:hover:not(:disabled) {
+  background: #f1f6fd;
+}
+
+.audit-filter-panel-head button:disabled {
+  cursor: default;
+  color: #9aa4ae;
+}
+
+/* ---------------------------------------------------------------- 거르기 목록 (FacetSidebar, 세부 선택 창 안) */
 
 .audit-facets {
   min-height: 0;
   overflow-y: auto;
-  padding-right: 12px;
-  border-right: 1px solid #edf1f6;
+  padding: 12px 16px 14px;
+  columns: 200px;
+  column-gap: 24px;
 }
 
 .audit-facet {
-  padding: 10px 0;
+  padding: 8px 0 10px;
   border-bottom: 1px solid #f0f3f7;
+  break-inside: avoid;
 }
 
 .audit-facet:first-child {
@@ -214,6 +388,7 @@
 /* ---------------------------------------------------------------- 기간 · 건수 줄 */
 
 .audit-toolbar {
+  position: relative; /* 필터 세부 선택 창의 기준 */
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -597,25 +772,6 @@
   margin-left: 0;
 }
 
-/* 좁은 화면에서만: 거르기 목록 열기 */
-.audit-facets-button {
-  display: none;
-  height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--color-line);
-  border-radius: 10px;
-  background: #fff;
-  color: #3c4650;
-  font-family: var(--font-label);
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.audit-facets-button[aria-expanded="true"] {
-  border-color: rgba(0, 123, 255, 0.4);
-  color: var(--color-primary);
-}
 
 /* ---------------------------------------------------------------- 목록: 머리와 행이 같은 열 너비를 쓴다.
    AXPI 목록 행(둥근 카드)보다 촘촘하게, 행 사이는 줄 하나로 나눈다 (Datadog 목록처럼 한눈에 많이 보이게) */
@@ -1081,43 +1237,7 @@
   font-weight: 700;
 }
 
-/* ---------------------------------------------------------------- 좁은 화면: 거르기 목록은 버튼으로 열고, 행은 두 줄로 */
-
-@media (max-width: 1100px) {
-  .audit-explorer {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
-    gap: 12px;
-  }
-
-  .audit-explorer.is-facets-open {
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .audit-facets {
-    display: none;
-    max-height: 40vh;
-    padding: 0 0 8px;
-    border-right: 0;
-    border-bottom: 1px solid #edf1f6;
-  }
-
-  /* 펼치면 여러 단으로 (세로로 길어지지 않게) */
-  .audit-explorer.is-facets-open .audit-facets {
-    display: block;
-    columns: 220px;
-    column-gap: 24px;
-  }
-
-  .audit-facet {
-    break-inside: avoid;
-  }
-
-  .audit-facets-button {
-    display: inline-flex;
-    align-items: center;
-  }
-}
+/* ---------------------------------------------------------------- 좁은 화면: 행은 두 줄로 */
 
 @media (max-width: 860px) {
   .audit-table-header {

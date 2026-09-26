@@ -1,13 +1,14 @@
 // 감사 로그 화면: 누가 언제 어떤 질문으로 어떤 도구를 불렀고 결과가 어땠는지 (GET /audit, services/llm/audit.py).
 // 관리자만 여는 화면이다. 구성은 Datadog Audit Trail을 따랐다 (패널·배지·버튼 모양은 이 앱의 것을 그대로 쓴다).
 //   머리: 제목 · 새로 고침(아이콘)
-//   왼쪽: 거르기 목록(FacetSidebar) — 종류·결과·층·요청자·도구·출처·표시. 값마다 건수, 여러 값을 함께 고른다
-//   오른쪽: 검색창(AuditSearch) · 기간(PeriodPicker) · 건수 · 시간대별 막대그래프(AuditHistogram, 드래그로 기간 좁히기)
-//           · 목록(시각 · 요청자 · 도구 · 요약 · 결과 · 표시). 내려가면 이어서 더 그린다
+//   검색창(AuditSearch)
+//   기간(PeriodPicker) · 필터(FilterMenu: 누르면 종류·결과·층·요청자·도구·출처·표시를 고르는 창, 고른 조건은 칩) · 건수 · 필터 초기화
+//   시간대별 막대그래프(AuditHistogram, 나눠 보기·드래그로 기간 좁히기)
+//   목록(시각 · 요청자 · 도구 · 요약 · 결과 · 표시). 내려가면 이어서 더 그린다
 //   행을 누르면 팝업창(AuditDetailModal, 이 앱의 다른 팝업창과 같은 모양)으로 자세히 보인다. ↑/↓로 앞뒤 기록, 변경 작업은 '층별로 따져 보기',
 //   '같은 질문의 기록'·'이 요청자만' 같은 버튼으로 이어 찾는다
 //
-// 거르는 순서: 기간 → 검색어 → 왼쪽 거르기. 거르기 목록의 건수는 검색어까지 적용한 기록에서 센다 (Datadog과 같다)
+// 거르는 순서: 기간 → 검색어 → 필터. 필터 창의 건수는 검색어까지 적용한 기록에서 센다 (Datadog과 같다)
 //
 // 기간 안의 기록을 모두 받아(useAuditRecords, 2,000건까지) 거르기·건수·막대는 브라우저에서 계산한다.
 // 기간과 거르기는 주소에 담는다(auditUrl.ts): 링크로 같은 화면을 나누고, 새로 고쳐도 남는다
@@ -36,7 +37,7 @@ import {
 } from './auditModel';
 import { AuditSearch } from './AuditSearch';
 import { readUrl, writeUrl } from './auditUrl';
-import { FacetSidebar } from './FacetSidebar';
+import { FilterMenu } from './FilterMenu';
 import { PeriodPicker } from './PeriodPicker';
 import {
     DEFAULT_PERIOD,
@@ -184,7 +185,6 @@ export function AuditPage() {
         [records, timeWindow.from, timeWindow.to],
     );
 
-    const [showFacets, setShowFacets] = useState(false); // 좁은 화면: 거르기 목록을 펼쳤는가
     const [openKey, setOpenKey] = useState<string | null>(null); // 팝업창으로 보고 있는 기록
     const [limit, setLimit] = useState(RENDER_STEP);
 
@@ -237,9 +237,9 @@ export function AuditPage() {
     const [pointAt, setPointAt] = useState<number | null>(null);
 
     // 필터 초기화: 처음 열었을 때와 똑같은 화면으로 되돌린다.
-    // 조건(거르기·검색어·기간 최근 7일)뿐 아니라 화면 상태(나눠 보기, 거르기 목록의 접기·더 보기, 목록 스크롤,
-    // 열린 팝업창, 좁은 화면의 거르기 펼침)도 처음으로. '최근 7일'의 끝도 지금으로 맞춘다
-    const [resetNo, setResetNo] = useState(0); // 바뀌면 거르기 목록을 새로 그려 접기·더 보기를 처음으로
+    // 조건(거르기·검색어·기간 최근 7일)뿐 아니라 화면 상태(나눠 보기, 열린 필터 창·거르기 목록의 접기·더 보기,
+    // 목록 스크롤, 열린 팝업창)도 처음으로. '최근 7일'의 끝도 지금으로 맞춘다
+    const [resetNo, setResetNo] = useState(0); // 바뀌면 필터 창을 닫고 거르기 목록을 새로 그린다
     const listBody = useRef<HTMLUListElement>(null);
     const resetFilters = () => {
         setSelection({});
@@ -248,7 +248,6 @@ export function AuditPage() {
         setNow(Date.now());
         setGroupBy('result');
         setOpenKey(null);
-        setShowFacets(false);
         setResetNo((n) => n + 1);
         listBody.current?.scrollTo({ top: 0 });
     };
@@ -272,21 +271,18 @@ export function AuditPage() {
                 </div>
             ) : null}
 
-            <div className={`audit-explorer${showFacets ? ' is-facets-open' : ''}`}>
-                <FacetSidebar key={resetNo} records={searched} selection={selection} onChange={setSelection} />
-
+            <div className="audit-explorer">
                 <div className="audit-results">
                     <AuditSearch value={query} onChange={setQuery} />
                     <div className="audit-toolbar">
                         <PeriodPicker period={period} window={timeWindow} onChange={setPeriod} />
-                        <button
-                            type="button"
-                            className="audit-facets-button"
-                            aria-expanded={showFacets}
-                            onClick={() => setShowFacets((prev) => !prev)}
-                        >
-                            거르기{conditions ? ` ${conditions}` : ''}
-                        </button>
+                        <FilterMenu
+                            records={searched}
+                            allRecords={records}
+                            selection={selection}
+                            onChange={setSelection}
+                            resetNo={resetNo}
+                        />
                         <p className="audit-count" role="status">
                             {listLoading ? null : (
                                 <>
