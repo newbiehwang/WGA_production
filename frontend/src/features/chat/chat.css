@@ -402,17 +402,37 @@
   color: #b02a37;
 }
 
-/* 기다리는 동안: 도는 별표 · 지금 하는 일 · 지난 시간 */
-.trace-status {
+/* 기다리는 동안의 한 줄 (LiveLine): 도는 별표 · 지금 단계 · 지난 시간 */
+.trace-live {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  margin-top: 6px;
   color: var(--color-primary);
 }
 
-.trace-steps + .trace-status {
-  margin-top: 10px;
+/* 단계가 바뀌면 새 글자가 아래에서 올라오며 나타난다 */
+.trace-line-in {
+  display: inline-block;
+  animation: trace-line-in 260ms ease-out both;
+}
+
+@keyframes trace-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trace-line-in {
+    animation: none;
+  }
 }
 
 .trace-spinner {
@@ -669,7 +689,7 @@
   display: block;
 }
 
-/* 실행 시간 · 자세히 보기 */
+/* 실행 시간 · 사고 과정 */
 .query-metadata {
   margin-top: 8px;
   display: flex;
@@ -685,6 +705,9 @@
 }
 
 .details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 0;
   background: transparent;
   padding: 0;
@@ -694,38 +717,53 @@
   cursor: pointer;
 }
 
-.query-details {
-  flex-basis: 100%;
-  margin-top: 8px;
+.details-caret {
+  display: inline-block;
+  transition: transform 200ms ease;
+}
+
+.details-caret.is-open {
+  transform: rotate(180deg);
+}
+
+/* 사고 과정 펼치기: 높이를 0fr ↔ 1fr로 바꿔 부드럽게 열고 닫는다.
+   닫힌 뒤에는 visibility: hidden (전환이 끝난 뒤에 바뀌도록 지연) */
+.trace-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 240ms ease, opacity 200ms ease;
+}
+
+.trace-reveal.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.trace-reveal-inner {
+  min-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition: visibility 0s linear 240ms;
+}
+
+.trace-reveal.is-open .trace-reveal-inner {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.trace-reveal .trace {
+  margin: 10px 0 0;
   padding-top: 10px;
   border-top: 1px solid #e8edf3;
 }
 
-.query-section h4 {
-  margin: 0 0 6px;
-  font-family: var(--font-label);
-  font-size: 12px;
-  color: #6c757d;
-}
-
-.query-section + .query-section {
-  margin-top: 12px;
-}
-
-.query-code {
-  margin: 0;
-  max-height: 360px;
-  overflow: auto;
-  background: #f7f9fc;
-  border: 1px solid #e1e7ef;
-  border-radius: 10px;
-  padding: 10px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #3c4650;
-  white-space: pre-wrap;
-  word-break: break-word;
+@media (prefers-reduced-motion: reduce) {
+  .trace-reveal,
+  .trace-reveal-inner,
+  .details-caret {
+    transition: none;
+  }
 }
 
 /* ---------------------------------------------------------------- 질문 입력칸 (홈과 함께 쓴다) */
