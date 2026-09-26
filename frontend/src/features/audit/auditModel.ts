@@ -249,3 +249,66 @@ export function toggleValue(selection: Selection, id: FacetId, value: string): S
 
 export const activeCount = (selection: Selection) =>
     Object.values(selection).reduce((sum, chosen) => sum + (chosen?.length ?? 0), 0);
+
+// ---------------------------------------------------------------- 검색창
+//
+// 낱말을 띄어 쓰면 모두 들어 있는 기록만(그리고), "따옴표"는 한 덩어리, 앞에 -를 붙이면 그 낱말이 없는 기록만.
+// 대소문자는 가리지 않는다. 찾는 곳: 요청자(이메일·ID), 도구(이름·이름표), 요약, 질문, 입력값(리소스 ID 등),
+// 오류·실행 결과, 결과·종류 이름, 각종 ID(질문·대화·도구 호출·작업·AWS 요청)
+//   예: kim i-0428 실패      "보존 기간" -slack      6e8b2fdf-3c15 (질문 ID로 같은 질문의 기록)
+
+export interface ParsedQuery {
+    include: string[];
+    exclude: string[];
+}
+
+export function parseQuery(text: string): ParsedQuery {
+    const include: string[] = [];
+    const exclude: string[] = [];
+    for (const match of text.matchAll(/(-?)(?:"([^"]*)"|(\S+))/g)) {
+        const word = (match[2] ?? match[3] ?? '').trim().toLowerCase();
+        if (!word || word === '-') continue;
+        (match[1] ? exclude : include).push(word);
+    }
+    return { include, exclude };
+}
+
+const searchCache = new WeakMap<AuditRecord, string>(); // 기록마다 한 번만 만든다 (2,000건을 글자마다 다시 만들지 않게)
+const searchTextOf = (record: AuditRecord) => {
+    let text = searchCache.get(record);
+    if (text === undefined) {
+        const input = typeof record.input === 'string' ? record.input : JSON.stringify(record.input ?? '');
+        text = [
+            requesterOf(record),
+            record.userId,
+            record.tool,
+            record.tool ? labelOf(record.tool) : '',
+            KIND_LABELS[record.kind],
+            RESULT_LABELS[resultOf(record)],
+            summaryOf(record),
+            record.question,
+            input,
+            record.error,
+            record.result,
+            record.requestId,
+            record.sessionId,
+            record.toolUseId,
+            record.actionId,
+            record.awsRequestId,
+            record.cloudTrailEvent,
+            record.targetEmail,
+            record.targetUser,
+        ]
+            .filter(Boolean)
+            .join('\n')
+            .toLowerCase();
+        searchCache.set(record, text);
+    }
+    return text;
+};
+
+export function matchesQuery(record: AuditRecord, query: ParsedQuery): boolean {
+    if (!query.include.length && !query.exclude.length) return true;
+    const text = searchTextOf(record);
+    return query.include.every((word) => text.includes(word)) && !query.exclude.some((word) => text.includes(word));
+}

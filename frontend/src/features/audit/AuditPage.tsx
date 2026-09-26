@@ -2,9 +2,12 @@
 // 관리자만 여는 화면이다. 구성은 Datadog Audit Trail을 따랐다 (패널·배지·버튼 모양은 이 앱의 것을 그대로 쓴다).
 //   머리: 제목 · 새로 고침(아이콘)
 //   왼쪽: 거르기 목록(FacetSidebar) — 종류·결과·층·요청자·도구·출처·표시. 값마다 건수, 여러 값을 함께 고른다
-//   오른쪽: 기간(PeriodPicker) · 건수 · 시간대별 막대그래프(AuditHistogram, 드래그로 기간 좁히기)
+//   오른쪽: 검색창(AuditSearch) · 기간(PeriodPicker) · 건수 · 시간대별 막대그래프(AuditHistogram, 드래그로 기간 좁히기)
 //           · 목록(시각 · 요청자 · 도구 · 요약 · 결과 · 표시). 내려가면 이어서 더 그린다
-//   행을 누르면 오른쪽에서 옆 패널(AuditSidePanel)이 나와 자세히 보인다. ↑/↓로 앞뒤 기록, 변경 작업은 '층별로 따져 보기'
+//   행을 누르면 오른쪽에서 옆 패널(AuditSidePanel)이 나와 자세히 보인다. ↑/↓로 앞뒤 기록, 변경 작업은 '층별로 따져 보기',
+//   '같은 질문의 기록'·'이 요청자만' 같은 버튼으로 이어 찾는다
+//
+// 거르는 순서: 기간 → 검색어 → 왼쪽 거르기. 거르기 목록의 건수는 검색어까지 적용한 기록에서 센다 (Datadog과 같다)
 //
 // 기간 안의 기록을 모두 받아(useAuditRecords, 2,000건까지) 거르기·건수·막대는 브라우저에서 계산한다.
 // 기간과 거르기는 주소에 담는다(auditUrl.ts): 링크로 같은 화면을 나누고, 새로 고쳐도 남는다
@@ -17,7 +20,20 @@ import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
 import { Flags, KindLabel, ResultBadge } from './AuditDetails';
 import { AuditHistogram } from './AuditHistogram';
 import { AuditSidePanel } from './AuditSidePanel';
-import { activeCount, keyOf, matches, requesterOf, secondsOf, summaryOf, timeOf, type Selection } from './auditModel';
+import {
+    activeCount,
+    keyOf,
+    matches,
+    matchesQuery,
+    parseQuery,
+    requesterOf,
+    secondsOf,
+    summaryOf,
+    timeOf,
+    type FacetId,
+    type Selection,
+} from './auditModel';
+import { AuditSearch } from './AuditSearch';
 import { readUrl, writeUrl } from './auditUrl';
 import { FacetSidebar } from './FacetSidebar';
 import { PeriodPicker } from './PeriodPicker';
@@ -87,6 +103,7 @@ export function AuditPage() {
     const [initial] = useState(() => readUrl(params)); // 처음 열 때만 주소에서 읽는다 (그 뒤로는 화면이 주소를 쓴다)
     const [period, setPeriod] = useState<Period>(initial.period);
     const [selection, setSelection] = useState<Selection>(initial.selection);
+    const [query, setQuery] = useState(initial.query);
     const [now, setNow] = useState(() => Date.now()); // '최근 n시간'의 끝. 새로 고침하면 지금으로
     const timeWindow = useMemo(() => windowOf(period, now), [period, now]);
 
@@ -104,9 +121,9 @@ export function AuditPage() {
 
     // 조건을 주소에 담는다 (뒤로 가기가 조건마다 쌓이지 않게 replace). 주소가 바뀌어도 다시 돌지 않게 조건만 지켜본다
     useEffect(() => {
-        const next = writeUrl(params, period, selection);
+        const next = writeUrl(params, period, selection, query);
         if (next.toString() !== params.toString()) setParams(next, { replace: true });
-    }, [period, selection]);
+    }, [period, selection, query]);
 
     // 기간 안의 기록 (받은 범위는 UTC 날짜 단위라 기간보다 넓다)
     const inWindow = useMemo(
@@ -122,8 +139,11 @@ export function AuditPage() {
     const [openKey, setOpenKey] = useState<string | null>(null); // 옆 패널로 보고 있는 기록
     const [limit, setLimit] = useState(RENDER_STEP);
 
-    const filtered = useMemo(() => inWindow.filter((record) => matches(record, selection)), [inWindow, selection]);
-    const conditions = activeCount(selection);
+    // 검색어에 맞는 기록 (거르기 목록의 건수도 여기서 센다)
+    const parsed = useMemo(() => parseQuery(query), [query]);
+    const searched = useMemo(() => inWindow.filter((record) => matchesQuery(record, parsed)), [inWindow, parsed]);
+    const filtered = useMemo(() => searched.filter((record) => matches(record, selection)), [searched, selection]);
+    const conditions = activeCount(selection) + (query.trim() ? 1 : 0);
 
     // 조건이나 기록이 바뀌면 목록을 처음 묶음부터 그린다
     useEffect(() => setLimit(RENDER_STEP), [filtered]);
@@ -152,6 +172,17 @@ export function AuditPage() {
 
     const showMore = useCallback(() => setLimit((prev) => prev + RENDER_STEP), []);
 
+    // 옆 패널의 이어 찾기
+    const showRelated = (id: string) => {
+        setSelection({}); // 같은 질문의 질문·도구·변경 행이 거르기에 가려지지 않게
+        setQuery(id);
+    };
+    const onlyFacet = (id: FacetId, value: string) => setSelection((prev) => ({ ...prev, [id]: [value] }));
+    const clearAll = () => {
+        setSelection({});
+        setQuery('');
+    };
+
     return (
         <section className="plan-panel audit-panel" aria-label="감사 로그">
             <div className="plan-panel-header">
@@ -172,9 +203,10 @@ export function AuditPage() {
             ) : null}
 
             <div className={`audit-explorer${showFacets ? ' is-facets-open' : ''}`}>
-                <FacetSidebar records={inWindow} selection={selection} onChange={setSelection} />
+                <FacetSidebar records={searched} selection={selection} onChange={setSelection} />
 
                 <div className="audit-results">
+                    <AuditSearch value={query} onChange={setQuery} />
                     <div className="audit-toolbar">
                         <PeriodPicker period={period} window={timeWindow} onChange={setPeriod} />
                         <button
@@ -199,7 +231,7 @@ export function AuditPage() {
                             )}
                         </p>
                         {conditions ? (
-                            <button type="button" className="audit-clear-all" onClick={() => setSelection({})}>
+                            <button type="button" className="audit-clear-all" onClick={clearAll}>
                                 조건 모두 지우기
                             </button>
                         ) : null}
@@ -224,6 +256,8 @@ export function AuditPage() {
                             <div className="plan-panel-empty">
                                 {inWindow.length === 0 ? (
                                     <p>이 기간에 기록이 없습니다. 질문을 보내면 도구 호출마다 기록이 남습니다.</p>
+                                ) : query.trim() ? (
+                                    <p>'{query.trim()}'에 맞는 기록이 없습니다.</p>
                                 ) : (
                                     <p>이 조건에 맞는 기록이 없습니다.</p>
                                 )}
@@ -263,6 +297,8 @@ export function AuditPage() {
                     total={filtered.length}
                     onMove={move}
                     onClose={closePanel}
+                    onRelated={showRelated}
+                    onFacet={onlyFacet}
                 />
             ) : null}
         </section>
