@@ -42,7 +42,7 @@ export interface AuditPage {
     items: AuditRecord[];
     cursor: string | null; // 더 있으면 다음 조회에 넘긴다
     scope: AuditScope;
-    isAdmin: boolean; // Cognito admins 그룹이면 모든 사용자의 기록을 볼 수 있다
+    isAdmin: boolean; // 항상 true (감사 로그는 admins 그룹만 조회할 수 있다. 화면은 토큰의 그룹으로 판단한다)
     from: string;
     to: string;
 }

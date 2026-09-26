@@ -269,10 +269,10 @@ function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boole
 }
 
 export function AuditPage() {
-    const [filters, setFilters] = useState<Filters>({ days: 7, scope: 'mine', status: '', kind: '', tool: '' });
+    // 관리자만 여는 화면이므로 처음부터 모든 사용자의 기록을 보인다
+    const [filters, setFilters] = useState<Filters>({ days: 7, scope: 'all', status: '', kind: '', tool: '' });
     const [items, setItems] = useState<AuditRecord[]>([]);
     const [cursor, setCursor] = useState<string | null>(null);
-    const [isAdmin, setIsAdmin] = useState(false);
     const [loading, setLoading] = useState<'list' | 'more' | null>('list');
     const [error, setError] = useState<string | null>(null);
     const [openKey, setOpenKey] = useState<string | null>(null);
@@ -299,7 +299,6 @@ export function AuditPage() {
                 if (no !== requestNo.current) return;
                 setItems((prev) => (next ? [...prev, ...page.items] : page.items));
                 setCursor(page.cursor);
-                setIsAdmin(page.isAdmin);
                 setToolNames((prev) => {
                     const found = page.items.map((item) => item.tool).filter((name): name is string => !!name);
                     return [...new Set([...prev, ...found])].sort((a, b) => labelOf(a).localeCompare(labelOf(b)));
@@ -350,17 +349,15 @@ export function AuditPage() {
                     value={filters.days}
                     onChange={(days) => update({ days })}
                 />
-                {isAdmin ? (
-                    <Segment
-                        label="대상"
-                        options={[
-                            { value: 'mine' as const, label: '내 기록' },
-                            { value: 'all' as const, label: '모든 사용자' },
-                        ]}
-                        value={filters.scope}
-                        onChange={(scope) => update({ scope })}
-                    />
-                ) : null}
+                <Segment
+                    label="대상"
+                    options={[
+                        { value: 'all' as const, label: '모든 사용자' },
+                        { value: 'mine' as const, label: '내 기록' },
+                    ]}
+                    value={filters.scope}
+                    onChange={(scope) => update({ scope })}
+                />
                 <Segment label="결과" options={STATUSES} value={filters.status} onChange={(status) => update({ status })} />
                 <Segment label="종류" options={KINDS} value={filters.kind} onChange={(kind) => update({ kind })} />
                 <label className="audit-filter">

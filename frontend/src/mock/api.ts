@@ -6,6 +6,7 @@
 // - 응답 모양은 백엔드(services/chat-history, services/llm)가 돌려주는 것과 맞춘다.
 // - main.ts가 mock 모드일 때만 동적으로 불러오므로 배포용 빌드(npm run build)에는 들어가지 않는다.
 import axios from "axios";
+import { mockIsAdmin } from "../auth/authClient";
 import type {
   AxiosAdapter,
   AxiosResponse,
@@ -529,6 +530,7 @@ let answerIndex = 1; // 0번은 예시 대화에 이미 나와 있으므로 다�
 
 // ---------------------------------------------------------------- 감사 로그 (GET /audit, services/llm/audit.py)
 // mock 사용자는 관리자(admins 그룹)로 둔다: '내 기록'과 '모든 사용자'를 모두 확인할 수 있다.
+// 주소에 ?mock-role=member를 붙이면 일반 사용자가 되어, 서버처럼 403을 돌려준다 (auth/authClient.ts).
 // 지난 30일 동안 세 사람(나, 다른 웹 사용자, Slack 사용자)의 예시 기록을 만들고,
 // 질문을 보내면 그 질문과 도구 호출이 맨 위에 바로 추가된다.
 
@@ -690,6 +692,9 @@ const actionAuditRecord = (
 };
 
 const queryAudit = (query: AuditQuery): Result => {
+  if (!mockIsAdmin()) {
+    return [403, { error: "감사 로그는 관리자(admins 그룹)만 볼 수 있습니다" }];
+  }
   const days = (value: string) => new Date(`${value}T00:00:00Z`).getTime();
   const to = query.to ?? new Date().toISOString().slice(0, 10);
   const from =

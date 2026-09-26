@@ -17,10 +17,30 @@ import { Hub } from 'aws-amplify/utils';
 export interface AuthUser {
     email: string;
     displayName: string; // 이름이 없으면 이메일 앞부분
+    groups: string[]; // Cognito 그룹 (ID 토큰의 cognito:groups). admins, approvers
+}
+
+// 관리자(admins 그룹)인가: 감사 로그·사용자 관리 탭을 보인다.
+// 화면에서 숨기는 것은 편의일 뿐이다. 실제로 막는 곳은 서버다 (GET /audit은 관리자가 아니면 403, services/llm/audit.py)
+export const ADMIN_GROUP = 'admins';
+export const isAdmin = (user: AuthUser | null) => !!user?.groups.includes(ADMIN_GROUP);
+
+// cognito:groups는 보통 문자열 배열이지만, 문자열 하나로 오는 경우도 받는다 (서버의 audit.groups_of와 같은 규칙)
+function groupsOf(value: unknown): string[] {
+    if (Array.isArray(value)) return value.map(String);
+    if (typeof value === 'string') return value.replace(/^\[|\]$/g, '').split(/[\s,]+/).filter(Boolean);
+    return [];
 }
 
 const MOCK = import.meta.env.MODE === 'mock';
-const MOCK_USER: AuthUser = { email: 'demo@example.com', displayName: 'Demo' };
+// mock 사용자는 관리자다. 주소에 ?mock-role=member를 붙여 열면 일반 사용자로 화면을 확인한다 (mock 모드에서만)
+const MOCK_MEMBER = MOCK && new URLSearchParams(window.location.search).get('mock-role') === 'member';
+const MOCK_USER: AuthUser = {
+    email: 'demo@example.com',
+    displayName: 'Demo',
+    groups: MOCK_MEMBER ? [] : [ADMIN_GROUP, 'approvers'],
+};
+export const mockIsAdmin = () => isAdmin(MOCK_USER); // mock API가 GET /audit에 403을 흉내 낼 때 쓴다
 let mockSignedIn = true; // mock 모드는 로그인된 상태로 시작한다 (화면만 고칠 때 바로 보이게)
 
 const USER_POOL_ID = import.meta.env.USER_POOL_ID;
@@ -104,6 +124,8 @@ export function onLoginResult(handler: (result: LoginResult) => void) {
 
 // 사용자 정보는 ID 토큰에서 읽는다. (fetchUserAttributes는 aws.cognito.signin.user.admin 범위가 필요한데
 // Hosted UI로 받은 토큰에는 openid·email·profile만 있다)
+// 그룹은 토큰을 받은 때의 것이다: 그룹을 바꿔도 ID 토큰이 갱신될 때까지(최대 1시간) 화면도 서버의 확인(토큰의 그룹)도
+// 예전 그룹을 따른다. 바로 적용하려면 다시 로그인한다
 export async function currentUser(): Promise<AuthUser | null> {
     if (MOCK) return mockSignedIn ? MOCK_USER : null;
     if (!configured) return null;
@@ -112,7 +134,7 @@ export async function currentUser(): Promise<AuthUser | null> {
         if (!claims) return null;
         const email = String(claims.email ?? '');
         const name = typeof claims.name === 'string' ? claims.name : '';
-        return { email, displayName: name || email.split('@')[0] };
+        return { email, displayName: name || email.split('@')[0], groups: groupsOf(claims['cognito:groups']) };
     } catch {
         return null; // 로그인하지 않았거나 세션이 만료됨
     }
