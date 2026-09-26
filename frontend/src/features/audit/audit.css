@@ -55,7 +55,7 @@
 .audit-facet-only:focus-visible,
 .audit-facet-more:focus-visible,
 .audit-facet-clear:focus-visible,
-.audit-clear-all:focus-visible,
+.audit-reset:focus-visible,
 .audit-facets-button:focus-visible {
   outline: 2px solid rgba(0, 123, 255, 0.32);
   outline-offset: 2px;
@@ -141,8 +141,7 @@
 }
 
 .audit-facet-clear,
-.audit-facet-more,
-.audit-clear-all {
+.audit-facet-more {
   border: 0;
   background: none;
   padding: 2px 4px;
@@ -154,8 +153,7 @@
 }
 
 .audit-facet-clear:hover,
-.audit-facet-more:hover,
-.audit-clear-all:hover {
+.audit-facet-more:hover {
   text-decoration: underline;
 }
 
@@ -491,6 +489,47 @@
   margin: 0 6px 3px 0;
   border-radius: 1px;
   vertical-align: middle;
+}
+
+/* 필터 초기화: 기간·건수 줄의 오른쪽 끝. 처음 화면이면 흐리게 꺼 둔다 */
+.audit-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  margin-left: auto;
+  padding: 0 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: #fff;
+  color: #3c4650;
+  font-family: var(--font-label);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.audit-reset:hover:not(:disabled) {
+  border-color: rgba(0, 123, 255, 0.4);
+  background: #f1f6fd;
+  color: var(--color-primary);
+}
+
+.audit-reset:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* 조건에 맞는 기록이 없을 때: 안내 아래에 필터 초기화 */
+.audit-empty-reset {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+
+.audit-empty-reset .audit-reset {
+  margin-left: 0;
 }
 
 /* 좁은 화면에서만: 거르기 목록 열기 */
