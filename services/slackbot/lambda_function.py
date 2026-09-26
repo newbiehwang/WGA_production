@@ -3,11 +3,11 @@ import urllib.parse
 import json
 from common.config import get_config
 from common.slackbot_session import get_session, save_session, send_slack_dm
-from slackbot_service import send_login_button, handle_models_command, handle_interaction, handle_req_command, handle_slack_events, handle_slack_events
+from slackbot_service import send_login_button, handle_interaction, handle_req_command, handle_slack_events
 from slack_security import get_raw_body, verify_slack_request, verify_cognito_id_token
 
 # Slack이 호출하는 경로: Signing Secret 서명 검증 대상 (/callback은 Cognito 리다이렉트라 제외)
-SLACK_SIGNED_PATHS = {"/login", "/models", "/slack-interactions", "/events"}
+SLACK_SIGNED_PATHS = {"/login", "/slack-interactions", "/events"}
 
 def lambda_handler(event, context):
     path = event.get("path", "")
@@ -92,31 +92,14 @@ def lambda_handler(event, context):
             "body": "<h3>Login Complete!!.</h3>",
             "headers": {"Content-Type": "text/html"}
         }
-    # Slack Slash Command 처리
-    elif path == "/models" and http_method == "POST":
-        body = urllib.parse.parse_qs(body)
-        slack_user_id = body.get("user_id", [""])[0]
-
-        try:
-            print("/models 진입\n")
-            handle_models_command(slack_user_id)
-            return {
-                "statusCode": 200,
-            }
-            
-        except Exception as e:
-            print(f"Error processing slash command: {e}")
-
+    # 모델 선택(/models)은 없앴다: 모델은 LLM 서비스가 정한 하나로 고정이다
     elif path == "/slack-interactions" and http_method == "POST":
         parsed_data = urllib.parse.parse_qs(body)
         payload_str = parsed_data.get('payload', [''])[0]
         payload = json.loads(payload_str)
 
         print(f"Interaction payload: {payload}")
-        
-        if payload.get('type') == 'block_actions':
-            handle_interaction(payload)
-            return handle_interaction(payload)
+        return handle_interaction(payload)
 
     elif path =="/events" and http_method == "POST":
         print("events 진입")

@@ -772,20 +772,6 @@
   flex-shrink: 0;
 }
 
-.composer-model {
-  height: 36px;
-  max-width: 180px;
-  border: 1px solid #e1e7ef;
-  border-radius: 10px;
-  background: #f7f9fc;
-  padding: 0 8px;
-  font-family: var(--font-label);
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #3c4650;
-  cursor: pointer;
-}
-
 /* 보내기·취소: 글씨 없이 아이콘만 있는 정사각형 버튼 */
 .composer-send {
   width: 36px;
@@ -948,11 +934,6 @@
   .composer-actions {
     width: 100%;
     justify-content: flex-end;
-  }
-
-  .composer-model {
-    margin-right: auto;
-    max-width: 60%;
   }
 
   .composer-suggestion {

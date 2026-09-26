@@ -39,21 +39,13 @@ def set_user_processing_status(user_id, status):
     """사용자 처리 상태 설정"""
     try:
         current_time = int(time.time())
-        
-        # 기존 설정이 있는지 확인
-        response = user_settings_table.get_item(Key={'user_id': user_id})
-        existing_item = response.get('Item', {})
-        
-        # 기존 설정 유지하면서 processing 상태만 업데이트
+        # 사용자 설정 테이블에는 처리 상태만 있다 (모델 선택은 없앴다)
         item = {
             'user_id': user_id,
             'processing_status': status,
             'processing_timestamp': current_time if status == 'processing' else 0,
             'updated_at': current_time
         }
-        # 사용자가 고른 모델만 유지한다. 고른 적이 없으면 비워 두고 LLM 서비스의 기본 모델을 쓴다
-        if existing_item.get('selected_model'):
-            item['selected_model'] = existing_item['selected_model']
         
         user_settings_table.put_item(Item=item)
         print(f"User {user_id} processing status set to: {status}")
@@ -88,7 +80,7 @@ def get_user_processing_status(user_id):
 def clear_user_processing_status(user_id):
     """사용자 처리 상태 초기화"""
     try:
-        # 기존 설정 유지하면서 processing 상태만 클리어
+        # 처리 중 기록이 있을 때만 idle로 바꾼다
         response = user_settings_table.get_item(Key={'user_id': user_id})
         existing_item = response.get('Item', {})
         
@@ -99,8 +91,6 @@ def clear_user_processing_status(user_id):
                 'processing_timestamp': 0,
                 'updated_at': int(time.time())
             }
-            if existing_item.get('selected_model'):
-                item['selected_model'] = existing_item['selected_model']
             
             user_settings_table.put_item(Item=item)
             print(f"User {user_id} processing status cleared")
@@ -137,300 +127,13 @@ def send_login_button(slack_user_id):
         ]
     )
 
-def get_models_from_api():
-    """
-    API에서 모델 목록을 가져오는 함수
-    """
-    try:
-        res = requests.get(
-            f"{CONFIG['api']['endpoint']}/health",
-            headers={"Content-Type": "application/x-www-form-urlencoded"}
-        )
-        print(f"res: {res}\n")
-        
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("status") == "ok" and "models" in data:
-                return data["models"]
-
-        return []
-
-    except Exception as e:
-        print(f"Error fetching models from API: {e}")
-        return []
-
-
-def get_default_model_from_api():
-    """
-    LLM 서비스가 정한 기본 모델 (지금 제공되는 최신 Sonnet). 모델 ID를 여기 고정하지 않는다:
-    고정한 모델이 퇴역하면 /req가 모두 실패한다. 받지 못하면 None (LLM 서비스가 다시 정한다)
-    """
-    try:
-        res = requests.get(
-            f"{CONFIG['api']['endpoint']}/health",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=10,
-        )
-        if res.status_code == 200:
-            return res.json().get("default_model")
-    except Exception as e:
-        print(f"Error fetching default model from API: {e}")
-    return None
-
-def convert_to_slack_options(models):
-    """
-    API 응답을 Slack Block Kit 옵션 형태로 변환
-    """
-    options = []
-    for model in models:
-        options.append({
-            "text": {
-                "type": "plain_text",
-                "text": model["display_name"]
-            },
-            "value": model["id"]
-        })
-    print(f"options: {options}\n")
-    return options
-
-def handle_models_command(slack_user_id):
-    """
-    /models 명령어 처리 - 모델 선택 드롭다운과 적용 버튼 제공
-    """
-    print("get_models_from_api 함수 실행\n")
-    models = get_models_from_api()
-    print(f"models: {models}\n")
-    if not models:
-        # Slack의 선택 목록은 항목이 하나도 없으면 보낼 수 없다
-        clear_user_processing_status(slack_user_id)
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
-                "text": "❌ 모델 목록을 가져오지 못했습니다. 잠시 뒤 다시 시도해 주세요.",
-                "response_type": "ephemeral"
-            })
-        }
-    print("convert_to_slack_options 함수 실행\n")
-    available_models = convert_to_slack_options(models)
-    print(f"available_models: {available_models}\n")
-
-    blocks = [
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "🤖 *AI 모델을 선택하세요*\n선택한 모델은 `/req` 명령어에서 사용됩니다."
-            }
-        },
-        {
-            "type": "section",
-            "block_id": "model_selection_block",  # block_id는 여기에만
-            "text": {
-                "type": "mrkdwn",
-                "text": "사용할 모델:"
-            },
-            "accessory": {
-                "type": "static_select",
-                "action_id": "model_select",
-                # block_id 제거 - accessory 내부에서는 사용 불가
-                "placeholder": {
-                    "type": "plain_text",
-                    "text": "모델을 선택하세요"
-                },
-                "options": available_models
-            }
-        },
-        {
-            "type": "actions",
-            "block_id": "model_actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "✅ 적용"
-                    },
-                    "style": "primary",
-                    "action_id": "apply_model_btn",
-                    "value": "apply_model"
-                },
-                {
-                    "type": "button",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "❌ 취소"
-                    },
-                    "action_id": "cancel_model_btn",
-                    "value": "cancel_model"
-                }
-            ]
-        }
-    ]
-
-    print(f"Slack에 메세지 전송\n")
-    client.chat_postMessage(
-        channel=slack_user_id,
-        blocks=blocks
-    )
-    clear_user_processing_status(slack_user_id)
-    
-    return {
-        "statusCode": 200,
-        "body": json.dumps({
-            "blocks": blocks,
-            "text": "AI 모델을 선택하세요",  # text 필드 추가 (경고 해결)
-            "response_type": "ephemeral"
-        })
-    }
-
-
-def get_selected_model_from_state(payload):
-    """
-    인터랙션 상태에서 선택된 모델 추출
-    """
-    try:
-        print("get_selected_model_from_state 함수 진입")
-        # state.values에서 선택된 값 찾기
-        state_values = payload.get('state', {}).get('values', {})
-        model_block = state_values.get('model_selection_block', {})
-        model_select = model_block.get('model_select', {})
-        
-        if 'selected_option' in model_select:
-            return model_select['selected_option']['value']
-            
-        # 현재 액션에서도 확인
-        for action in payload.get('actions', []):
-            if action.get('action_id') == 'model_select':
-                return action.get('selected_option', {}).get('value')
-                
-    except Exception as e:
-        print(f"Error extracting selected model: {e}")
-    
-    return None
-
 def handle_interaction(payload):
     """
-    Slack 인터랙션 처리 (드롭다운 선택, 버튼 클릭)
+    Slack 인터랙션 (버튼 클릭 등). 모델 선택 기능을 없애 처리할 동작이 없다.
+    로그인 버튼 같은 링크 버튼도 인터랙션을 보내므로, Slack이 경고를 띄우지 않게 200으로 받기만 한다.
     """
-    action_id = payload['actions'][0]['action_id']
-    user_id = payload['user']['id']
-    print(f"action_id: {action_id}\n")
-    print(f"user_id: {user_id}\n")
-    
-    if action_id == "apply_model_btn":
-        selected_model = get_selected_model_from_state(payload)
-        print(f"selected_model: {selected_model}\n")
-        if selected_model:
-            save_user_model_setting(user_id, selected_model)
-            model_name = get_model_display_name(selected_model)
-            
-            print(f"model_name: {model_name}\n")
+    return {"statusCode": 200}
 
-            print(f"Slack에 메세지 전송\n")
-            client.chat_postMessage(
-                channel=user_id,
-                blocks=[
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": (
-                                f"✅ 모델이 *{model_name}* 로 설정되었습니다!\n"
-                                "이제 `/req 질문내용` 으로 사용하세요."
-                            )
-                        }
-                    }
-                ]
-            )
-
-            return {
-                "statusCode": 200,
-                "body": json.dumps({
-                    "text": f"✅ 모델이 **{model_name}**로 설정되었습니다!\n이제 `/req 질문내용`으로 사용하세요.",
-                    "response_type": "ephemeral",
-                })
-            }
-        else:
-            print(f"Slack에 메세지 전송\n")
-            client.chat_postMessage(
-                channel=user_id,
-                text="❌ 모델을 먼저 선택해주세요."
-            )
-            return {
-                "statusCode": 200,
-                "body": json.dumps({
-                    "text": "❌ 모델을 먼저 선택해주세요.",
-                    "response_type": "ephemeral"
-                })
-            }
-    
-    elif action_id == "cancel_model_btn":
-        print(f"Slack에 메세지 전송\n")
-        client.chat_postMessage(
-            channel=user_id,
-            text="모델 선택이 취소되었습니다."
-        )
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
-                "text": "모델 선택이 취소되었습니다.",
-                "response_type": "ephemeral",
-                "replace_original": True
-            })
-        }
-    
-    elif action_id == "model_select":
-        # 드롭다운 선택 시 상태만 업데이트
-        return {"statusCode": 200}
-
-def save_user_model_setting(user_id, model_id):
-    """
-    사용자별 모델 설정을 DynamoDB에 저장
-    """
-    print(f"save_user_model_setting 함수 진입\n")
-    try:
-        # 기존 processing 상태 확인
-        response = user_settings_table.get_item(Key={'user_id': user_id})
-        existing_item = response.get('Item', {})
-        
-        item = {
-            'user_id': user_id,
-            'selected_model': model_id,
-            'processing_status': existing_item.get('processing_status', 'idle'),
-            'processing_timestamp': existing_item.get('processing_timestamp', 0),
-            'updated_at': int(time.time())
-        }
-        
-        user_settings_table.put_item(Item=item)
-    except Exception as e:
-        print(f"Error saving user setting: {e}")
-
-def get_user_model_setting(user_id):
-    """
-    사용자의 모델 설정을 DynamoDB에서 조회
-    """
-    try:
-        response = user_settings_table.get_item(
-            Key={'user_id': user_id}
-        )
-        return response.get('Item', {}).get('selected_model') or None   # 고른 적 없으면 None → 기본 모델
-    except Exception as e:
-        print(f"Error getting user setting: {e}")
-        return None
-
-def get_model_display_name(model_id):
-    """
-    모델 ID로 display_name 조회
-    """
-    try:
-        print(f"get_model_display_name 함수 진입\n")
-        models = get_models_from_api()
-        for model in models:
-            if model["id"] == model_id:
-                return model["display_name"]
-    except:
-        pass
-    return model_id
 
 def filter_analysis_results(history):
     """':brain: 분석 결과:'로 시작하는 메시지만 필터링"""
@@ -507,20 +210,9 @@ def handle_req_command(payload):
     
     set_user_processing_status(user_id, "processing")
 
-    model_id = get_user_model_setting(user_id)
     question = text.strip()
-
-    # 고른 모델이 없거나 지금 목록에 없으면(퇴역 등) 기본 모델로 안내한다. 실제 모델은 LLM 서비스가 한 번 더 확인한다
-    models = get_models_from_api()
-    if not model_id or (models and model_id not in {m["id"] for m in models}):
-        default = get_default_model_from_api()
-        model_id = default["id"] if default else None
-        model_name = default["display_name"] if default else "기본 모델"
-    else:
-        model_name = next((m["display_name"] for m in models if m["id"] == model_id), model_id)
-
-    print(f"User: {user_id}, Model: {model_id}, Question: {question}")
-    print(f"model_name: {model_name}\n")
+    # 모델은 LLM 서비스가 정한 하나로 고정이다 (llm_service.MODEL_ID). 고르는 기능은 없다
+    print(f"User: {user_id}, Question: {question}")
 
     client.chat_postMessage(
         channel=user_id,
@@ -530,7 +222,7 @@ def handle_req_command(payload):
                 "text": {
                     "type": "mrkdwn",
                     "text": (
-                        f"⏳ {model_name}를 사용하여 답변을 생성중입니다.....\n 답변이 올때까지 다른 요청을 보내지마세요‼"
+                        "⏳ 답변을 생성중입니다.....\n 답변이 올때까지 다른 요청을 보내지마세요‼"
                     )
                 }
             }
@@ -551,7 +243,6 @@ def handle_req_command(payload):
     try:
         status_code, response_data = invoke_llm({
             "question": question,
-            "modelId": model_id,
             "user_id": user_id,
             "previous_questions": analysis_messages,
         })
