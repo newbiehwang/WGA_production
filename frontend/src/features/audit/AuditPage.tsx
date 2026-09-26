@@ -136,7 +136,7 @@ export function AuditPage() {
     // 다만 2,000건 한도로 잘려 기간의 앞쪽이 비어 있으면 그 기간만 다시 받는다
     const wanted = fetchRangeOf(timeWindow);
     const [fetchRange, setFetchRange] = useState(wanted);
-    const { records, loading, received, truncated, error, reload } = useAuditRecords(fetchRange);
+    const { records, loading, truncated, error, reload } = useAuditRecords(fetchRange);
     const oldest = records.length ? Date.parse(timeOf(records[records.length - 1])) : Infinity;
     useEffect(() => {
         const missing = !containsRange(fetchRange, wanted) || (truncated && !loading && timeWindow.from < oldest);
@@ -314,17 +314,13 @@ export function AuditPage() {
 
             {listLoading ? (
                 <div className="plan-panel-loading">
-                    <LoadingCard
-                        text={received ? `감사 로그를 불러오는 중… ${received.toLocaleString()}건` : '감사 로그를 불러오는 중…'}
-                    />
+                    <LoadingCard text="감사 로그를 불러오는 중…" />
                 </div>
             ) : null}
 
             {openKey && openIndex >= 0 ? (
                 <AuditDetailModal
                     record={filtered[openIndex]}
-                    index={openIndex}
-                    total={filtered.length}
                     onMove={move}
                     onClose={closeDetail}
                     onRelated={showRelated}

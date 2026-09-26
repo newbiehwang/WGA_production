@@ -1,6 +1,6 @@
 // 감사 로그 왼쪽의 거르기 목록 (Datadog Audit Trail의 facet 목록을 따랐다).
 //   ▾ 결과                 지우기
-//     ☑ 성공          120   [만]      ← 체크: 고르기·풀기, [만]: 이 값만 고르기 (마우스를 올리면 보인다)
+//     ☑ 성공          120      ← 체크(또는 이름)를 누르면 고르거나 푼다
 //     ☐ 실패           12
 //   ▾ 요청자
 //     … 6개까지 보이고 '더 보기 (n)'
@@ -73,15 +73,6 @@ function FacetGroup({
                                 <span className="audit-facet-name">{item.label}</span>
                                 <span className="audit-facet-count">{item.count.toLocaleString()}</span>
                             </label>
-                            <button
-                                type="button"
-                                className="audit-facet-only"
-                                onClick={() => onChange({ ...selection, [facet.id]: [item.value] })}
-                                aria-label={`${item.label}만 보기`}
-                                title="이 값만 보기"
-                            >
-                                만
-                            </button>
                         </li>
                     ))}
                     {hidden > 0 || (showAll && values.length > TOP_N) ? (

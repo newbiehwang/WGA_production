@@ -52,7 +52,6 @@
 .audit-row-button:focus-visible,
 .audit-facet-toggle:focus-visible,
 .audit-facet-value input:focus-visible,
-.audit-facet-only:focus-visible,
 .audit-facet-more:focus-visible,
 .audit-facet-clear:focus-visible,
 .audit-reset:focus-visible,
@@ -210,33 +209,6 @@
 
 .audit-facet-value.is-empty .audit-facet-name {
   color: #9aa4ae;
-}
-
-/* '만': 이 값만 고르기. 마우스를 올렸을 때(또는 키보드로 왔을 때)만 보인다 */
-.audit-facet-only {
-  flex-shrink: 0;
-  height: 20px;
-  margin-right: 4px;
-  padding: 0 6px;
-  border: 1px solid var(--color-line);
-  border-radius: 5px;
-  background: #fff;
-  color: #4a5563;
-  font-family: var(--font-label);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  opacity: 0;
-}
-
-.audit-facet-value:hover .audit-facet-only,
-.audit-facet-only:focus-visible {
-  opacity: 1;
-}
-
-.audit-facet-only:hover {
-  border-color: rgba(0, 123, 255, 0.4);
-  color: var(--color-primary);
 }
 
 /* ---------------------------------------------------------------- 기간 · 건수 줄 */
@@ -717,35 +689,10 @@
 }
 
 .audit-detail-head {
-  padding: 16px 56px 14px 24px;
+  padding: 22px 56px 14px 24px;
   border-bottom: 1px solid #edf1f6;
   display: grid;
   gap: 10px;
-}
-
-/* 앞뒤 기록: [↑][↓] 3 / 132 */
-.audit-detail-nav {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.audit-detail-step {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-}
-
-.audit-detail-step:disabled {
-  cursor: default;
-  opacity: 0.4;
-}
-
-.audit-detail-position {
-  margin-left: 4px;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: #6c757d;
 }
 
 .audit-detail-meta {
