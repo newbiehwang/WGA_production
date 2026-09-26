@@ -629,9 +629,19 @@
 
 .audit-histogram-plot svg {
   display: block;
-  cursor: crosshair;
+  cursor: default; /* 십자 커서는 보기 불편해 쓰지 않는다. 막대 위·드래그 중은 아래 */
   touch-action: none; /* 드래그가 화면 스크롤로 새지 않게 */
   user-select: none;
+}
+
+/* 기록이 있는 칸 위: 누르면 그 칸으로 좁힌다 */
+.audit-histogram-plot svg.is-over-bar {
+  cursor: pointer;
+}
+
+/* 드래그로 구간을 고르는 중 */
+.audit-histogram-plot svg.is-dragging {
+  cursor: ew-resize;
 }
 
 .audit-histogram-plot svg:focus-visible {
