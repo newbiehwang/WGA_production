@@ -14,7 +14,7 @@
 //   기록으로 남지 않는 계층(판단: 모델 안, 매개: 앱 밖)은 점선 테두리. 색은 고르는 것과 상관없이 그대로다
 // - 고른 계층(처음에는 이 기록의 계층): 고리 바깥의 선택 표시(둥근 호)가 그 조각 위로 미끄러져 가고(가까운 쪽으로 돈다),
 //   조각은 그림자와 함께 살짝 떠오르며, 나머지 조각은 은은하게 옅어진다. 선택 표시의 색은 그 계층의 성격을 따른다.
-//   고리 가운데와 오른쪽 설명 칸도 고른 계층을 보인다. 색(성격)과 고름(표시·떠오름)을 나눠야
+//   마우스를 올리거나 고른 조각은 바탕이 조금 짙어진다. 고리 가운데(옅은 원판 위에 차례 '2 / 7'과 이름)와 오른쪽 설명 칸도 고른 계층을 보인다. 색(성격)과 고름(표시·떠오름)을 나눠야
 //   다른 계층을 골랐을 때 이 기록의 계층과 헷갈리지 않는다
 // - 조각을 누르면(키보드는 Enter·Space) 그 계층을 고르고, 고른 조각을 다시 누르면 이 기록의 계층으로 돌아온다
 // - 설명 칸: 계층의 설명 → 이 기록이 그 계층에서 한 일(파란 상자) → 그 계층의 흔적(주황 상자).
@@ -199,18 +199,17 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                             />
                         </g>
                     ) : null}
-                    {/* 가운데: 고른 계층의 이름 (색은 그 계층의 성격) */}
+                    {/* 가운데: 옅은 원판 위에 고른 계층의 차례(작은 회색)와 이름(색은 그 계층의 성격). 고르면 바뀌며 살짝 떠오른다 */}
+                    <circle className="audit-cycle-hub" cx={C} cy={C} r={R_IN - 9} aria-hidden="true" />
                     {selected ? (
-                        <text
-                            key={selected.id}
-                            x={C}
-                            y={C + 8}
-                            textAnchor="middle"
-                            className={`audit-cycle-name ${toneOf(selectedIndex)}`}
-                            aria-hidden="true"
-                        >
-                            {selected.label}
-                        </text>
+                        <g key={selected.id} className={`audit-cycle-center ${toneOf(selectedIndex)}`} aria-hidden="true">
+                            <text x={C} y={C - 9} textAnchor="middle" className="audit-cycle-step">
+                                {selectedIndex + 1} / {LAYERS.length}
+                            </text>
+                            <text x={C} y={C + 15} textAnchor="middle" className="audit-cycle-name">
+                                {selected.label}
+                            </text>
+                        </g>
                     ) : null}
                 </svg>
 
