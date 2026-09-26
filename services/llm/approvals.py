@@ -9,9 +9,10 @@
     ③ MCP에 작업 ID를 붙여 실행 ──▶ MCP Lambda가 승인 테이블을 직접 다시 확인하고 한 번만 실행 (mcp/lambda_mcp/approval.py)
     ④ 화면이 actionId로 /llm1을 부르면, 저장된 실행 결과를 모델에 넘겨 설명하게 한다 (llm_service)
 
-누가 승인하나 (APPROVAL_MODE). 어느 환경이든 approvers 그룹만 승인한다 (운영자가 그룹에 넣는다)
-- self (dev·test): approvers 그룹이면 자기가 요청한 작업도 승인할 수 있다 (혼자 개발·시험할 때)
-- strict (prod): approvers 그룹의 다른 사람만, 요청한 본인은 안 된다 (직무 분리)
+누가 승인하나 (APPROVAL_MODE). 어느 환경이든 결정자(approvers 그룹)와 관리자(admins 그룹)만 승인한다.
+관리자는 결정자의 일도 한다 (권한 세 단계, user_admin.py). 사용자 관리 탭이나 deploy.sh의 ADMIN_EMAIL로 정한다
+- self (dev·test): 결정자면 자기가 요청한 작업도 승인할 수 있다 (혼자 개발·시험할 때)
+- strict (prod): 다른 결정자만, 요청한 본인은 안 된다 (직무 분리)
 거절은 요청한 본인도 할 수 있다.
 예전에는 dev·test에서 그룹 없이도 본인 요청을 승인할 수 있었다. 로그인만 하면 누구나 EC2를 멈출 수 있어
 승인이 사람의 확인이 아니라 버튼 한 번이 되었다 (docs/threat-model.md R2).
@@ -21,7 +22,7 @@ Slack 봇·요청자를 모르는 경로는 승인 화면이 없어 변경 작�
 의심 결과 뒤의 요청 (taintedBy)
 같은 질문에서 모델이 이 변경을 요청하기 전에 읽은 도구 결과 중 지시문처럼 보이는 문구가 있던 것(injection.py)을
 승인 요청에 적는다 (mcp_anthropic_client). 판단은 바꾸지 않는다: 변경은 원래 모두 승인이 필요하다.
-승인자에게 "이 요청이 사용자의 뜻인지, 로그에 심긴 지시를 따른 것인지"를 확인하라고 알리는 신호다.
+결정자에게 "이 요청이 사용자의 뜻인지, 로그에 심긴 지시를 따른 것인지"를 확인하라고 알리는 신호다.
 """
 import hashlib
 import json
@@ -32,6 +33,7 @@ from typing import Any, Callable, Dict, List, Optional
 APPROVAL_TTL_SECONDS = 600  # 승인 요청은 10분 동안만 유효하다
 RECORD_TTL_DAYS = 30  # 결정이 끝난 요청을 테이블에서 지우는 때 (DynamoDB TTL). 오래 볼 기록은 감사 로그에 있다
 APPROVER_GROUP = "approvers"
+DECIDER_GROUPS = {APPROVER_GROUP, "admins"}  # 결정자 권한이 있는 그룹 (관리자는 결정자의 일도 한다)
 RESULT_LIMIT = 2000
 
 ACTION_ID_META = "wga/actionId"  # MCP tools/call params._meta (mcp/lambda_mcp/approval.py와 같은 이름)
@@ -179,7 +181,7 @@ class ApprovalStore:
 
 
 def can_view(item: Dict[str, Any], caller_id: str, groups: List[str]) -> bool:
-    return caller_id == item.get("requesterId") or APPROVER_GROUP in groups or "admins" in groups
+    return caller_id == item.get("requesterId") or bool(DECIDER_GROUPS & set(groups))
 
 
 def check_decision(item: Optional[Dict[str, Any]], caller_id: Optional[str], groups: List[str], approve: bool,
@@ -195,12 +197,12 @@ def check_decision(item: Optional[Dict[str, Any]], caller_id: Optional[str], gro
     if view["status"] != PENDING:
         raise ApprovalError(409, f"이미 결정된 요청입니다 (상태: {view['status']})")
     is_requester = caller_id == item.get("requesterId")
-    is_approver = APPROVER_GROUP in groups
+    is_approver = bool(DECIDER_GROUPS & set(groups))
     if approve:
         if not is_approver:
-            raise ApprovalError(403, "승인 권한이 없습니다 (approvers 그룹만 승인할 수 있습니다. 운영자에게 요청하세요)")
+            raise ApprovalError(403, "승인 권한이 없습니다 (결정자만 승인할 수 있습니다. 관리자에게 요청하세요)")
         if mode == "strict" and is_requester:
-            raise ApprovalError(403, "운영 환경에서는 요청한 본인이 승인할 수 없습니다 (다른 승인자가 승인해야 합니다)")
+            raise ApprovalError(403, "운영 환경에서는 요청한 본인이 승인할 수 없습니다 (다른 결정자가 승인해야 합니다)")
         # 저장된 인자가 요청 때와 같은지 (테이블이 바뀌었으면 실행하지 않는다)
         if args_hash(item["tool"], json.loads(item["args"])) != item.get("argsHash"):
             raise ApprovalError(409, "승인 요청의 내용이 바뀌었습니다. 실행하지 않습니다")

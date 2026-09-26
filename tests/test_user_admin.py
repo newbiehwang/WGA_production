@@ -89,13 +89,14 @@ def test_token_is_not_trusted_alone(pool):
 
 # ---------------------------------------------------------------- 조회
 
-def test_list_shows_groups_status_and_self(pool):
+def test_list_shows_roles_status_and_self(pool):
     status, body = call(pool, "GET", "/users")
     assert status == 200 and body["groups"] == ["admins", "approvers"]
     users = {user["email"]: user for user in body["users"]}
-    assert users["alice@example.com"]["groups"] == ["admins"] and users["alice@example.com"]["isSelf"] is True
-    assert users["bob@example.com"]["groups"] == ["approvers"] and users["bob@example.com"]["isSelf"] is False
-    assert users["carol@example.com"]["groups"] == [] and users["carol@example.com"]["enabled"] is True
+    # 권한 세 단계: 관리자(admins만 넣은 예전 계정도 관리자) · 결정자(approvers) · 일반 사용자(그룹 없음)
+    assert users["alice@example.com"]["role"] == "admin" and users["alice@example.com"]["isSelf"] is True
+    assert users["bob@example.com"]["role"] == "decider" and users["bob@example.com"]["isSelf"] is False
+    assert users["carol@example.com"]["role"] == "member" and users["carol@example.com"]["enabled"] is True
     assert users["carol@example.com"]["username"] == pool["users"]["carol"]
 
 
@@ -108,31 +109,40 @@ def test_search_by_email_prefix_and_reject_filter_injection(pool):
 
 # ---------------------------------------------------------------- 바꾸기
 
-def test_add_and_remove_groups_are_audited(pool):
-    carol = pool["users"]["carol"]
-    status, body = call(pool, "POST", f"/users/{carol}/groups/approvers")
-    assert status == 200 and body["groups"] == ["approvers"] and groups_of(pool, "carol") == ["approvers"]
-    status, body = call(pool, "DELETE", f"/users/{carol}/groups/approvers")
-    assert status == 200 and body["groups"] == [] and groups_of(pool, "carol") == []
+def role(pool, name, value, caller="alice"):
+    return call(pool, "PUT", f"/users/{pool['users'][name]}/role", name=caller, body={"role": value})
+
+
+def test_role_changes_are_audited(pool):
+    # 일반 사용자 → 결정자 → 관리자(결정자의 일도 한다) → 일반 사용자
+    for value, groups in (("decider", ["approvers"]), ("admin", ["admins", "approvers"]), ("member", [])):
+        status, body = role(pool, "carol", value)
+        assert status == 200 and body["role"] == value and groups_of(pool, "carol") == groups
+    # 같은 권한으로 바꾸면 아무것도 하지 않고 기록도 남기지 않는다
+    assert role(pool, "carol", "member")[0] == 200
 
     rows = sorted(admin_rows(pool), key=lambda row: row["at"])
-    assert [(r["event"], r["group"], r["targetEmail"], r["status"]) for r in rows] == [
-        ("group_added", "approvers", "carol@example.com", "ok"), ("group_removed", "approvers", "carol@example.com", "ok")]
+    assert [(r["event"], r["fromRole"], r["toRole"], r["targetEmail"], r["status"]) for r in rows] == [
+        ("role_changed", "member", "decider", "carol@example.com", "ok"),
+        ("role_changed", "decider", "admin", "carol@example.com", "ok"),
+        ("role_changed", "admin", "member", "carol@example.com", "ok")]
     assert all(r["decidedBy"] == pool["users"]["alice"] and r["userId"] == pool["users"]["alice"] for r in rows)
 
 
-def test_only_managed_groups_and_known_users(pool):
+def test_only_known_roles_and_users(pool):
     carol = pool["users"]["carol"]
-    assert call(pool, "POST", f"/users/{carol}/groups/superusers")[0] == 400
-    assert call(pool, "POST", "/users/no-such-user/groups/approvers")[0] == 404
+    assert role(pool, "carol", "superuser")[0] == 400
+    assert call(pool, "PUT", "/users/no-such-user/role", body={"role": "decider"})[0] == 404
     assert call(pool, "DELETE", f"/users/{carol}")[0] == 404  # 삭제 경로는 없다
+    assert call(pool, "POST", f"/users/{carol}/groups/admins")[0] == 404  # 그룹을 하나씩 넣는 경로도 없다
     assert admin_rows(pool) == []
 
 
 def test_admins_cannot_lock_themselves_out(pool):
     alice = pool["users"]["alice"]
-    status, body = call(pool, "DELETE", f"/users/{alice}/groups/admins")
-    assert status == 409 and "자기" in body["error"]
+    for value in ("decider", "member"):
+        status, body = role(pool, "alice", value)
+        assert status == 409 and "자기" in body["error"]
     assert call(pool, "POST", f"/users/{alice}/disable")[0] == 409
     assert groups_of(pool, "alice") == ["admins"] and admin_rows(pool) == []
 
@@ -146,14 +156,14 @@ def test_last_admin_cannot_be_removed_or_disabled(pool):
                          request_id="r-1", session_id=None, model_id=None, question="")
     admin = module.UserAdmin(pool["cognito"], "someone-else", {}, log)
     alice = pool["users"]["alice"]
-    for action in (lambda: admin.set_group(alice, "admins", add=False), lambda: admin.set_enabled(alice, False)):
+    for action in (lambda: admin.set_role(alice, "decider"), lambda: admin.set_enabled(alice, False)):
         with pytest.raises(module.UserAdminError) as error:
             action()
         assert error.value.status == 409 and "마지막 관리자" in str(error.value)
-    # 관리자가 둘이면 다른 관리자는 뺄 수 있다
-    pool["cognito"].admin_add_user_to_group(UserPoolId=pool["id"], Username=pool["users"]["bob"], GroupName="admins")
-    status, body = call(pool, "DELETE", f"/users/{pool['users']['bob']}/groups/admins")
-    assert status == 200 and body["groups"] == ["approvers"]
+    # 관리자가 둘이면 다른 관리자는 내릴 수 있다
+    assert role(pool, "bob", "admin")[1]["role"] == "admin"
+    status, body = role(pool, "bob", "decider")
+    assert status == 200 and body["role"] == "decider" and groups_of(pool, "bob") == ["approvers"]
 
 
 def test_disable_and_enable(pool):
@@ -169,7 +179,7 @@ def test_disable_and_enable(pool):
 def test_invite(pool):
     status, body = call(pool, "POST", "/users", body={"email": "dave@example.com"})
     assert status == 200 and body["email"] == "dave@example.com" and body["status"] == "FORCE_CHANGE_PASSWORD"
-    assert body["groups"] == []  # 초대만으로는 어느 그룹에도 들어가지 않는다
+    assert body["groups"] == [] and body["role"] == "member"  # 초대하면 일반 사용자로 시작한다
     assert [r["event"] for r in admin_rows(pool)] == ["invited"]
     # 이미 있는 사람·잘못된 주소는 기록 전에 거른다
     assert call(pool, "POST", "/users", body={"email": "dave@example.com"})[0] == 409
@@ -182,10 +192,10 @@ def test_cognito_failure_is_recorded_too(pool, monkeypatch):
         raise RuntimeError("TooManyRequestsException")
 
     monkeypatch.setattr(pool["cognito"], "admin_add_user_to_group", refuse)
-    status, body = call(pool, "POST", f"/users/{pool['users']['carol']}/groups/approvers")
+    status, body = role(pool, "carol", "decider")
     assert status == 502 and "TooManyRequests" in body["error"]
     rows = sorted(admin_rows(pool), key=lambda row: row["at"])
-    assert [(r["event"], r["status"]) for r in rows] == [("group_added", "ok"), ("group_added", "error")]
+    assert [(r["event"], r["status"]) for r in rows] == [("role_changed", "ok"), ("role_changed", "error")]
     assert "TooManyRequests" in rows[1]["error"]
 
 
@@ -196,7 +206,7 @@ def test_nothing_changes_without_an_audit_record(pool, monkeypatch):
         raise RuntimeError("DynamoDB unavailable")
 
     monkeypatch.setattr(audit.AuditLog, "admin_event", broken)
-    status, _ = call(pool, "POST", f"/users/{pool['users']['carol']}/groups/admins")
+    status, _ = role(pool, "carol", "admin")
     assert status == 503 and groups_of(pool, "carol") == []
 
 

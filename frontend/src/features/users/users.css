@@ -49,10 +49,10 @@
   font-weight: 600;
 }
 
-/* 표: 머리와 행이 같은 열 너비를 쓴다 (이메일 · 상태 · 권한 · 가입일 · 계정) */
+/* 표: 머리와 행이 같은 열 너비를 쓴다 (이메일 · 권한 · 가입일 · 계정) */
 .users-row-grid {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 110px 170px 150px 110px;
+  grid-template-columns: minmax(180px, 1fr) 250px 150px 110px;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -99,11 +99,6 @@
   color: #6c757d;
 }
 
-.users-col-groups {
-  display: inline-flex;
-  gap: 6px;
-}
-
 .users-col-date {
   color: #555;
 }
@@ -113,33 +108,66 @@
   justify-content: flex-end;
 }
 
-/* 권한 토글: 켜져 있으면 채운다 */
-.users-toggle {
-  height: 28px;
-  padding: 0 10px;
+/* 권한 고르기: 세 칸 중 고른 것만 채운다 (일반 사용자 · 결정자 · 관리자) */
+.users-roles {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
   border: 1px solid var(--color-line);
-  border-radius: 999px;
-  background: #fff;
+  border-radius: 10px;
+  background: #f5f8fc;
+}
+
+.users-role {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
   color: #6c757d;
   font-family: var(--font-label);
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+  transition: background-color 140ms ease, color 140ms ease;
 }
 
-.users-toggle.is-on {
-  border-color: rgba(0, 123, 255, 0.4);
-  background: rgba(0, 123, 255, 0.1);
+.users-role:hover:not(:disabled):not(.is-selected) {
+  background: #eaf2fc;
+}
+
+.users-role.is-selected {
+  background: #fff;
   color: #007bff;
+  box-shadow: 0 1px 3px rgba(35, 47, 62, 0.12);
 }
 
-.users-toggle:disabled {
+.users-role:disabled {
   cursor: not-allowed;
-  opacity: 0.6;
 }
 
-.users-toggle.is-armed,
+.users-role:disabled:not(.is-selected) {
+  opacity: 0.5;
+}
+
+/* 초대만 되고 아직 첫 로그인 전 */
+.users-invited {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(120, 120, 120, 0.12);
+  color: #6c757d;
+  font-size: 11px;
+}
+
+/* 정지된 계정은 흐리게 (정지 해제 버튼은 또렷하게 둔다) */
+.users-row.is-disabled .users-col-email,
+.users-row.is-disabled .users-roles,
+.users-row.is-disabled .users-col-date {
+  opacity: 0.45;
+}
+
+.users-role.is-armed,
 .users-account-button.is-armed {
   border-color: rgba(220, 53, 69, 0.6);
   background: rgba(220, 53, 69, 0.1);
@@ -168,7 +196,7 @@
   opacity: 0.5;
 }
 
-.users-toggle:focus-visible,
+.users-role:focus-visible,
 .users-account-button:focus-visible {
   outline: 2px solid rgba(0, 123, 255, 0.32);
   outline-offset: 2px;
@@ -183,17 +211,16 @@
   .users-row-grid {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
-      "email status"
-      "groups account"
+      "email account"
+      "roles roles"
       "date date";
     gap: 8px 10px;
   }
 
   .users-row-grid > span:nth-child(1) { grid-area: email; }
-  .users-row-grid > span:nth-child(2) { grid-area: status; justify-self: end; }
-  .users-row-grid > span:nth-child(3) { grid-area: groups; }
-  .users-row-grid > span:nth-child(4) { grid-area: date; font-size: 12px; }
-  .users-row-grid > span:nth-child(5) { grid-area: account; }
+  .users-row-grid > span:nth-child(2) { grid-area: roles; }
+  .users-row-grid > span:nth-child(3) { grid-area: date; font-size: 12px; }
+  .users-row-grid > span:nth-child(4) { grid-area: account; }
 
   .users-search,
   .users-invite {

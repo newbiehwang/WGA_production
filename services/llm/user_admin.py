@@ -1,13 +1,18 @@
-"""사용자 관리 (관리자 화면의 '사용자 관리' 탭): Cognito 사용자 목록 · 그룹 · 정지 · 초대
+"""사용자 관리 (관리자 화면의 '사용자 관리' 탭): Cognito 사용자 목록 · 권한 · 정지 · 초대
 
 이 파일은 LLM Lambda와 같은 코드 묶음에 들어 있지만 **다른 Lambda(wga-user-admin-<env>)가 다른 역할로** 실행한다.
 Cognito 사용자를 바꾸는 권한은 그 역할에만 있고, 모델을 돌리는 LLM Lambda 역할에는 없다 (cloudformation/llm.yaml).
 
+권한은 세 단계이고, 위 단계는 아래 단계를 모두 할 수 있다. Cognito 그룹 이름은 바꾸지 않는다
+(그룹 이름을 바꾸면 CloudFormation이 그룹을 새로 만들어 구성원이 빠진다)
+    member   일반 사용자  그룹 없음            질문·조회만 (스스로 가입하면 이 권한)
+    decider  결정자       approvers            위에 더해 AI가 요청한 변경 작업을 승인·거절
+    admin    관리자       admins + approvers   위에 더해 감사 로그·사용자 관리
+
 API (API Gateway, Cognito 권한 부여자)
-    GET    /users?q=<이메일 앞부분>&cursor=<다음 쪽>   목록 (그룹·상태 포함)
-    POST   /users                {"email": ...}          초대 (임시 비밀번호가 든 메일, 7일)
-    POST   /users/{username}/groups/{group}              그룹 넣기 (admins, approvers)
-    DELETE /users/{username}/groups/{group}              그룹 빼기
+    GET    /users?q=<이메일 앞부분>&cursor=<다음 쪽>   목록 (권한·상태 포함)
+    POST   /users                {"email": ...}          초대 (임시 비밀번호가 든 메일, 7일). 일반 사용자로 시작한다
+    PUT    /users/{username}/role  {"role": ...}         권한 바꾸기 (member, decider, admin)
     POST   /users/{username}/disable                     정지 (그 사용자의 갱신 토큰도 모두 무효로)
     POST   /users/{username}/enable                      정지 해제
 {username}은 Cognito 사용자 이름이다. 이메일로 로그인하는 풀이라 sub와 같은 UUID이고, 목록이 돌려준다.
@@ -18,13 +23,13 @@ API (API Gateway, Cognito 권한 부여자)
 - 삭제는 없다. 정지로 충분하고 되돌릴 수 없어서다 (deploy.sh도 사용자를 지우지 않는다).
 
 사고 막기
-- 자기 admins 권한을 빼거나 자기 계정을 정지할 수 없다 (실수로 잠기지 않게)
-- 마지막 관리자(정지되지 않은 admins)를 빼거나 정지할 수 없다 (아무도 관리할 수 없게 되지 않게)
+- 자기 권한을 관리자 아래로 내리거나 자기 계정을 정지할 수 없다 (실수로 잠기지 않게)
+- 마지막 관리자(정지되지 않은 admins)를 내리거나 정지할 수 없다 (아무도 관리할 수 없게 되지 않게)
 - 바꾸기 전에 감사 로그에 남긴다. 남기지 못하면 바꾸지 않는다. 바꾸다 실패하면 실패도 남긴다 (audit.admin_event)
 
 알아 둘 한계
 - 정지해도 이미 발급된 ID·액세스 토큰은 만료(최대 1시간)까지 쓸 수 있다. 갱신 토큰은 바로 무효가 된다.
-- 그룹을 바꾼 사람의 화면·권한은 그 사람이 다시 로그인하거나 토큰이 갱신된 뒤에 바뀐다.
+- 권한을 바꾼 사람의 화면·권한은 그 사람이 다시 로그인하거나 토큰이 갱신된 뒤에 바뀐다.
 """
 import json
 import os
@@ -38,7 +43,9 @@ from audit import AuditLog, CloudWatchSink, is_admin
 from redaction import Redactor
 
 ADMIN_GROUP = "admins"
-MANAGED_GROUPS = ("admins", "approvers")  # 이 화면에서 넣고 뺄 수 있는 그룹
+MANAGED_GROUPS = ("admins", "approvers")  # 이 화면이 다루는 그룹
+# 권한 → 그 권한이 속하는 그룹 (모듈 설명). 관리자는 결정자의 일도 한다
+ROLE_GROUPS = {"member": (), "decider": ("approvers",), "admin": ("admins", "approvers")}
 PAGE_SIZE = 50
 EMAIL = re.compile(r"^[^@\s\"\\]+@[^@\s\"\\]+\.[^@\s\"\\]+$")
 QUERY = re.compile(r"^[^\"\\]{0,100}$")  # Cognito ListUsers의 Filter 글자 안에 들어가므로 따옴표·역슬래시는 받지 않는다
@@ -93,6 +100,14 @@ def _enabled_admins(cognito) -> List[str]:
             return names
 
 
+def role_of(groups) -> str:
+    """그룹 → 권한. admins가 있으면 관리자 (예전에 admins만 넣은 계정도 관리자로 보인다)."""
+    names = set(groups or [])
+    if ADMIN_GROUP in names:
+        return "admin"
+    return "decider" if "approvers" in names else "member"
+
+
 def _view(user: Dict[str, Any], groups: List[str], caller: str) -> Dict[str, Any]:
     created = user.get("UserCreateDate")
     return {
@@ -103,6 +118,7 @@ def _view(user: Dict[str, Any], groups: List[str], caller: str) -> Dict[str, Any
         "enabled": bool(user.get("Enabled", True)),
         "createdAt": created.isoformat() if hasattr(created, "isoformat") else created,
         "groups": groups,
+        "role": role_of(groups),
         "isSelf": user["Username"] == caller,
     }
 
@@ -166,9 +182,10 @@ class UserAdmin:
         return _view(user, [g for g in MANAGED_GROUPS if g in names], self.caller)
 
     # ---------------------------------------------------------------- 바꾸기 (감사 로그 → 바꾸기 → 실패면 실패도 기록)
-    def _change(self, event: str, target: Dict[str, Any], apply, group: Optional[str] = None) -> None:
+    def _change(self, event: str, target: Dict[str, Any], apply, group: Optional[str] = None,
+                extra: Optional[Dict[str, Any]] = None) -> None:
         try:
-            self.audit.admin_event(event, target, group)
+            self.audit.admin_event(event, target, group, extra=extra)
         except Exception as error:
             print(f"감사 로그 저장 실패로 사용자 변경을 멈춤: {error}")
             raise UserAdminError(503, "감사 로그를 남기지 못해 바꾸지 않았습니다. 잠시 뒤 다시 시도해 주세요")
@@ -178,24 +195,34 @@ class UserAdmin:
             failure = error if isinstance(error, UserAdminError) else \
                 UserAdminError(502, f"Cognito가 요청을 처리하지 못했습니다: {error}")
             try:
-                self.audit.admin_event(event, target, group, ok=False, error=str(failure))
+                self.audit.admin_event(event, target, group, ok=False, error=str(failure), extra=extra)
             except Exception as audit_error:
                 print(f"실패 기록도 남기지 못함: {audit_error}")
             raise failure
 
-    def set_group(self, username: str, group: str, add: bool) -> Dict[str, Any]:
-        if group not in MANAGED_GROUPS:
-            raise UserAdminError(400, f"그룹은 {', '.join(MANAGED_GROUPS)} 중 하나여야 합니다")
+    def set_role(self, username: str, role: Any) -> Dict[str, Any]:
+        if role not in ROLE_GROUPS:
+            raise UserAdminError(400, f"권한은 {', '.join(ROLE_GROUPS)} 중 하나여야 합니다")
         target = self._get(username)
-        if not add and group == ADMIN_GROUP:
+        current = {g.get("GroupName") for g in self.cognito.admin_list_groups_for_user(
+            UserPoolId=_pool(), Username=username).get("Groups", [])} & set(MANAGED_GROUPS)
+        wanted = set(ROLE_GROUPS[role])
+        if current == wanted:
+            return self._view_of(username)  # 바뀌는 것이 없다 (기록하지 않는다)
+        if ADMIN_GROUP in current and ADMIN_GROUP not in wanted:
             if username == self.caller:
-                raise UserAdminError(409, "자기 관리자 권한은 뺄 수 없습니다 (다른 관리자에게 부탁하세요)")
+                raise UserAdminError(409, "자기 관리자 권한은 내릴 수 없습니다 (다른 관리자에게 부탁하세요)")
             admins = _enabled_admins(self.cognito)
             if username in admins and len(admins) <= 1:
-                raise UserAdminError(409, "마지막 관리자는 뺄 수 없습니다. 다른 관리자를 먼저 지정하세요")
-        call = self.cognito.admin_add_user_to_group if add else self.cognito.admin_remove_user_from_group
-        self._change("group_added" if add else "group_removed", target,
-                     lambda: call(UserPoolId=_pool(), Username=username, GroupName=group), group)
+                raise UserAdminError(409, "마지막 관리자는 내릴 수 없습니다. 다른 관리자를 먼저 지정하세요")
+
+        def apply():
+            for group in sorted(wanted - current):
+                self.cognito.admin_add_user_to_group(UserPoolId=_pool(), Username=username, GroupName=group)
+            for group in sorted(current - wanted):
+                self.cognito.admin_remove_user_from_group(UserPoolId=_pool(), Username=username, GroupName=group)
+
+        self._change("role_changed", target, apply, extra={"fromRole": role_of(current), "toRole": role})
         return self._view_of(username)
 
     def set_enabled(self, username: str, enabled: bool) -> Dict[str, Any]:
@@ -260,16 +287,20 @@ def route(event: Dict[str, Any], cognito=None, audit_table=None, audit_sink=None
         raise UserAdminError(404, "없는 경로입니다")
     admin = UserAdmin.authorize(claims, cognito, audit_table, audit_sink)
     params = event.get("queryStringParameters") or {}
+
+    def body() -> Dict[str, Any]:
+        try:
+            data = json.loads(event.get("body") or "{}")
+        except ValueError:
+            raise UserAdminError(400, "본문이 JSON이 아닙니다")
+        return data if isinstance(data, dict) else {}
+
     if len(parts) == 1 and method == "GET":
         return 200, admin.list(params.get("q") or "", params.get("cursor"))
     if len(parts) == 1 and method == "POST":
-        try:
-            body = json.loads(event.get("body") or "{}")
-        except ValueError:
-            raise UserAdminError(400, "본문이 JSON이 아닙니다")
-        return 200, admin.invite(body.get("email") if isinstance(body, dict) else None)
-    if len(parts) == 4 and parts[2] == "groups" and method in ("POST", "DELETE"):
-        return 200, admin.set_group(parts[1], parts[3], add=method == "POST")
+        return 200, admin.invite(body().get("email"))
+    if len(parts) == 3 and parts[2] == "role" and method == "PUT":
+        return 200, admin.set_role(parts[1], body().get("role"))
     if len(parts) == 3 and parts[2] in ("disable", "enable") and method == "POST":
         return 200, admin.set_enabled(parts[1], enabled=parts[2] == "enable")
     raise UserAdminError(404, "없는 경로입니다")

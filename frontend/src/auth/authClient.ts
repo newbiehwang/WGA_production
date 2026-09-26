@@ -25,6 +25,12 @@ export interface AuthUser {
 export const ADMIN_GROUP = 'admins';
 export const isAdmin = (user: AuthUser | null) => !!user?.groups.includes(ADMIN_GROUP);
 
+// 권한 세 단계 (services/llm/user_admin.py의 role_of와 같은 규칙): admins면 관리자, approvers면 결정자, 없으면 일반 사용자
+export type Role = 'member' | 'decider' | 'admin';
+export const ROLE_LABELS: Record<Role, string> = { member: '일반 사용자', decider: '결정자', admin: '관리자' };
+export const roleOf = (groups: string[]): Role =>
+    groups.includes(ADMIN_GROUP) ? 'admin' : groups.includes('approvers') ? 'decider' : 'member';
+
 // cognito:groups는 보통 문자열 배열이지만, 문자열 하나로 오는 경우도 받는다 (서버의 audit.groups_of와 같은 규칙)
 function groupsOf(value: unknown): string[] {
     if (Array.isArray(value)) return value.map(String);

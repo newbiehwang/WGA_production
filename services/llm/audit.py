@@ -9,7 +9,7 @@
 - 도구 호출 한 번 = 항목 하나 (kind "tool"): 도구, 입력, 성공·실패, 오류, 걸린 시간, 결과 크기
 - 질문 하나 = 항목 하나 (kind "request"): 질문, 모델, 성공·실패, 도구 호출 수, 가린 값의 수, 걸린 시간
 - 변경 작업의 사건 하나 = 항목 하나 (kind "action"): 요청·승인·거절·실행·실패, 작업 ID, 도구, 인자, 결정한 사람
-- 사용자 관리의 사건 하나 = 항목 하나 (kind "admin"): 초대·그룹 추가·그룹 제외·정지·정지 해제, 대상, 그룹, 한 사람
+- 사용자 관리의 사건 하나 = 항목 하나 (kind "admin"): 초대·권한 변경(전→후)·정지·정지 해제, 대상, 한 사람
 두 종류 모두 요청자(sub, 이메일, 웹·Slack), 질문 ID(requestId), 대화 ID(sessionId)를 함께 남긴다.
 
 층 (locus): 사고가 났을 때 "어디가 뚫렸나"를 층 하나씩 좁히려고, 기록마다 도구 반복 위의 자리를 적는다.
@@ -208,8 +208,8 @@ class AuditLog:
 
     # ---------------------------------------------------------------- 사용자 관리 (user_admin.py)
     def admin_event(self, event: str, target: Dict[str, Any], group: Optional[str] = None, ok: bool = True,
-                    error: Optional[str] = None) -> None:
-        """관리자가 사용자를 바꾼 사건 (invited · group_added · group_removed · disabled · enabled).
+                    error: Optional[str] = None, extra: Optional[Dict[str, Any]] = None) -> None:
+        """관리자가 사용자를 바꾼 사건 (invited · role_changed · disabled · enabled). extra: 권한 변경의 fromRole·toRole.
         바꾸기 전에 남기고, 저장하지 못하면 예외를 올려 바꾸지 않는다. 바꾸다 실패하면 ok=False로 한 번 더 남긴다."""
         record = {
             "kind": "admin",
@@ -219,6 +219,7 @@ class AuditLog:
             "group": group,
             "status": "ok" if ok else "error",
             "decidedBy": self._common["userId"],
+            **(extra or {}),
         }
         if error:
             record["error"] = _clip(self._redactor.secrets_only(str(error)), ERROR_LIMIT)
