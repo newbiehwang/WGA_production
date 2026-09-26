@@ -68,14 +68,14 @@ def test_approved_stop_then_start(write_env):
     env, ids = write_env
     llm = env["llm"]
     stop = make_action(env, tool="setEc2InstanceState", args={"instance_id": ids["web"], "action": "stop"})
-    view = json.loads(llm.handle_action(stop["actionId"], "approve", {"sub": "alice"}, ORIGIN)["body"])
+    view = json.loads(llm.handle_action(stop["actionId"], "approve", {"sub": "alice", "cognito:groups": "approvers"}, ORIGIN)["body"])
     assert view["status"] == "executed" and state_of(ids["web"]) == "stopped"
     assert view["cloudtrail"]["event_source"] == "ec2.amazonaws.com"
     assert view["cloudtrail"]["event_name"] == "StopInstances" and view["cloudtrail"]["request_id"]
     assert state_of(ids["other"]) == "running"  # 승인한 인스턴스만 바뀐다
 
     start = make_action(env, tool="setEc2InstanceState", args={"instance_id": ids["web"], "action": "start"})
-    view = json.loads(llm.handle_action(start["actionId"], "approve", {"sub": "alice"}, ORIGIN)["body"])
+    view = json.loads(llm.handle_action(start["actionId"], "approve", {"sub": "alice", "cognito:groups": "approvers"}, ORIGIN)["body"])
     assert view["status"] == "executed" and state_of(ids["web"]) == "running"
     assert view["cloudtrail"]["event_name"] == "StartInstances"
 
@@ -113,7 +113,7 @@ def test_enable_public_access_block_after_approval(write_env):
     assert not failed and data["before"].startswith("꺼진 항목 4개") and data["after"] == "4개 모두 켜짐"
 
     action = make_action(env, tool="enableS3PublicAccessBlock", args={"bucket_name": BUCKET})
-    view = json.loads(env["llm"].handle_action(action["actionId"], "approve", {"sub": "alice"}, ORIGIN)["body"])
+    view = json.loads(env["llm"].handle_action(action["actionId"], "approve", {"sub": "alice", "cognito:groups": "approvers"}, ORIGIN)["body"])
     assert view["status"] == "executed" and all(block_of(BUCKET).values()) and len(block_of(BUCKET)) == 4
     assert view["cloudtrail"]["event_name"] == "PutBucketPublicAccessBlock"
 

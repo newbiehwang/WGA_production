@@ -113,7 +113,8 @@ class AnthropicMCPClient:
             "status": "approval_required",
             "actionId": action["actionId"],
             "summary": action.get("summary"),
-            "message": ("아직 실행하지 않았습니다. 사용자가 화면의 승인 요청에서 승인해야 실행됩니다 (10분 안에). "
+            "message": ("아직 실행하지 않았습니다. approvers 그룹의 사용자가 화면의 승인 요청에서 승인해야 실행됩니다 "
+                        "(10분 안에). "
                         "무엇이 바뀌는지와 승인이 필요하다는 것을 사용자에게 알리고 답변을 마치세요. "
                         "같은 작업을 다시 요청하지 마세요."),
         }, ensure_ascii=False)}]}

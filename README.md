@@ -131,7 +131,7 @@ AI가 스스로 AWS를 바꾸지 못하게, 사람이 승인한 변경만 실행
   5. 화면이 `actionId`로 `/llm1`을 부르면, 서버가 저장된 실행 결과로 질문을 만들어 모델이 결과를 설명합니다.
 - **CloudTrail과 잇기**: 변경 도구는 AWS API 응답의 요청 ID를 돌려주고, 감사 로그의 실행 기록(`awsRequestId`)과 승인 카드에 남깁니다. CloudTrail 이벤트의 `requestID`와 같으므로 "앱에서 누가 승인했나 → AWS에서 무엇이 바뀌었나"를 한 번에 추적합니다(CloudTrail 조회에는 보통 몇 분 걸립니다).
 - **화면**: 답변 아래 승인 카드에 바뀔 내용(예: 30일 → 14일), 실제로 실행될 값, 남은 시간이 보이고 '승인하고 실행'·'거절' 버튼이 있습니다. 승인하면 '승인: …' 메시지와 함께 모델의 결과 설명이 이어집니다. 감사 로그 탭의 '변경 작업'에서 요청·승인·거절·실행 기록을 봅니다.
-- **승인자**: dev·test는 요청한 본인 또는 `approvers` 그룹, prod는 `approvers` 그룹의 다른 사람만 승인합니다(요청한 본인은 불가). 거절(`POST /actions/{id}/deny`)은 본인도 할 수 있습니다.
+- **승인자**: 어느 환경이든 `approvers` 그룹만 승인합니다. dev·test는 그룹에 속하면 자기가 요청한 작업도 승인할 수 있고(혼자 개발·시험할 때), prod는 그룹의 다른 사람만 승인합니다(직무 분리). 거절(`POST /actions/{id}/deny`)은 요청한 본인도 할 수 있습니다.
 - **Slack 봇**: 승인 화면이 없어 변경 작업을 요청할 수 없습니다(조회는 그대로).
 
 ```bash
@@ -146,7 +146,7 @@ aws cognito-idp admin-add-user-to-group --user-pool-id <UserPoolId> --username <
 - **지표**: `WGA/Governance` 네임스페이스에 EMF(로그 한 줄)로 발행합니다 (`services/llm/metrics.py`): 도구 호출·실패, 인젝션 의심, 가린 값, 승인 요청·승인·거절, 실행 실패. 서비스 대시보드 아래에 거버넌스 줄을 추가했습니다.
 - **알람**: 인젝션 의심 5분에 3건 이상, 승인 거절 15분에 3번 이상. 거버넌스 알람(`wga-<env>-governance-*`)은 AI가 요청하는 알람 알림 변경으로 끌 수 없습니다 (도구 코드 + IAM 명시적 Deny).
 
-7~10번 기능이 무엇을 막는지, 각각을 어떤 테스트로 확인하는지, 아직 막지 못한 위험(dev 환경의 자체 가입과 본인 승인 등)은 [위협 모델](docs/threat-model.md)에 정리했습니다.
+7~10번 기능이 무엇을 막는지, 각각을 어떤 테스트로 확인하는지, 아직 막지 못한 위험(가입한 누구나 계정 정보를 조회할 수 있음, 요청 수·비용 한도 없음 등)은 [위협 모델](docs/threat-model.md)에 정리했습니다.
 
 ### 11. 간편한 배포
 - **단일 스크립트 배포**: `deploy.sh` 하나로 전체 인프라와 프론트엔드 배포
@@ -283,6 +283,13 @@ ALARM_EMAIL=you@example.com ./deploy.sh dev
 - **MCP Function URL**: `https://xxxxxxxxxx.lambda-url.AWSREGION.on.aws/`
 
 추가로, SSM Parameter 정보도 제공됩니다.
+
+### 4단계: 승인자 지정
+사용자는 로그인 페이지에서 스스로 가입합니다. 가입한 사용자는 조회만 할 수 있고, AI가 요청한 변경 작업은 `approvers` 그룹만 승인합니다. 승인할 사람(dev에서 혼자 시험할 때는 본인)을 그룹에 넣습니다. User Pool ID는 SSM 파라미터 `/wga/<env>/UserPoolId` 또는 Cognito 콘솔에서 확인합니다.
+
+```bash
+aws cognito-idp admin-add-user-to-group --user-pool-id <UserPoolId> --username <이메일> --group-name approvers
+```
 
 ## 운영 및 모니터링
 
