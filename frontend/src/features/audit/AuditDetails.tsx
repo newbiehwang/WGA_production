@@ -142,6 +142,8 @@ export function Details({ record }: { record: AuditRecord }) {
 
     return (
         <>
+            {/* 층: 7계층에서 이 기록의 자리를 맨 위에 (도구 호출·변경 작업. 질문·사용자 관리 행에는 층이 없다) */}
+            {record.locus ? <AuditLayers record={record} /> : null}
             <dl className="audit-details">
                 {rows.map(([name, value]) => (
                     <Fragment key={name}>
@@ -150,8 +152,6 @@ export function Details({ record }: { record: AuditRecord }) {
                     </Fragment>
                 ))}
             </dl>
-            {/* 층: 7계층에서 이 기록의 자리 (도구 호출·변경 작업. 질문·사용자 관리 행에는 층이 없다) */}
-            {record.locus ? <AuditLayers record={record} /> : null}
             {record.kind === 'action' && record.actionId ? (
                 <TraceSection actionId={record.actionId} day={record.day} />
             ) : null}

@@ -1076,16 +1076,16 @@
 /* ---------------------------------------------------------------- 역추적 (AuditTrace) */
 
 /* ---------------------------------------------------------------- 층 다이어그램 (AuditLayers.tsx)
-   7계층을 위에서 아래로 쌓는다. 왼쪽 번호를 세로줄로 이어 한 덩어리로 보이게 하고,
-   이 기록의 층은 파랑, 흔적이 있는 층은 주황, 기록으로 남지 않는 층(판단·매개)은 점선 */
+   7계층을 원 위에 놓고 화살표로 한 바퀴 잇는다. 이 기록의 층은 파랑, 흔적은 주황, 기록으로 남지 않는 층(판단·매개)은 점선.
+   팝업창 본문 맨 위에 있고, 아래 항목 표와 줄로 나눈다 */
 .audit-layers {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid #edf1f6;
+  margin: 0 0 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #edf1f6;
 }
 
 .audit-layers-title {
-  margin: 0 0 10px;
+  margin: 0 0 4px;
   font-family: var(--font-label);
   font-size: 13px;
   font-weight: 700;
@@ -1097,152 +1097,226 @@
   font-weight: 500;
 }
 
-.audit-layer-stack {
+.audit-loop {
   position: relative;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 4px;
+  max-width: 600px;
+  margin: 0 auto;
 }
 
-/* 번호를 잇는 세로줄 (첫 번호 가운데부터 마지막 번호 가운데까지) */
-.audit-layer-stack::before {
-  content: "";
-  position: absolute;
-  left: 21px;
-  top: 18px;
-  bottom: 18px;
-  width: 2px;
-  background: #e3e9f1;
+.audit-loop-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
 }
 
-.audit-layer {
-  position: relative;
-  display: grid;
-  grid-template-columns: 22px 40px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  min-height: 36px;
-  padding: 6px 10px;
-  border: 1px solid #e8edf3;
-  border-radius: 8px;
-  background: #fff;
-  font-size: 13px;
-  transition: background-color 160ms ease, border-color 160ms ease;
+.audit-loop-track {
+  fill: #f7f9fc;
+  stroke: #d8e0ea;
+  stroke-width: 2;
 }
 
-.audit-layer-no {
-  position: relative; /* 세로줄 위에 */
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  background: #f0f3f7;
-  color: #5f6670;
+.audit-loop-arrow {
+  fill: #b3bfcd;
+}
+
+.audit-loop-node {
+  animation: audit-loop-node-in 320ms ease both;
+}
+
+.audit-loop-dot {
+  fill: #fff;
+  stroke: #c3cdd9;
+  stroke-width: 1.5;
+  transition: fill 160ms ease, stroke 160ms ease;
+}
+
+.audit-loop-no {
   font-family: var(--font-label);
   font-size: 12px;
   font-weight: 700;
+  fill: #5f6670;
+  pointer-events: none;
 }
 
-.audit-layer-name {
+.audit-loop-label {
   font-family: var(--font-label);
+  font-size: 13px;
+  font-weight: 600;
+  fill: #3c4650;
+}
+
+/* 이 기록의 층: 파랑으로 채우고 둘레에 옅은 고리 */
+.audit-loop-node.is-here .audit-loop-dot {
+  fill: var(--color-primary);
+  stroke: var(--color-primary);
+}
+
+.audit-loop-node.is-here .audit-loop-no {
+  fill: #fff;
+}
+
+.audit-loop-node.is-here .audit-loop-label {
+  fill: var(--color-primary);
   font-weight: 700;
-  color: #1f2933;
 }
 
-.audit-layer-text {
+.audit-loop-halo {
+  fill: rgba(0, 123, 255, 0.14);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: audit-loop-halo 1.6s ease-out 1 both;
+}
+
+/* 흔적: 주황으로 채운다 */
+.audit-loop-node.is-marked .audit-loop-dot {
+  fill: #ff9900;
+  stroke: #ff9900;
+}
+
+.audit-loop-node.is-marked .audit-loop-no {
+  fill: #fff;
+}
+
+.audit-loop-node.is-marked .audit-loop-label {
+  fill: #9a5b00;
+  font-weight: 700;
+}
+
+/* 기록으로 남지 않는 층: 점선 원, 옅은 이름 (흔적이 있으면 색은 흔적을 따른다) */
+.audit-loop-node.is-off-record .audit-loop-dot {
+  stroke-dasharray: 3 3;
+}
+
+.audit-loop-node.is-off-record:not(.is-marked):not(.is-here) .audit-loop-dot {
+  fill: #fafbfd;
+}
+
+.audit-loop-node.is-off-record:not(.is-marked):not(.is-here) .audit-loop-label {
+  fill: #8a939e;
+}
+
+/* 원 가운데: 이 기록의 층 이름 */
+.audit-loop-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   display: grid;
+  justify-items: center;
   gap: 2px;
-  min-width: 0;
+  pointer-events: none;
+  text-align: center;
 }
 
-.audit-layer-desc {
-  color: #6c757d;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.audit-layer-mark {
-  color: #9a5b00;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.audit-layer-tag {
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: rgba(0, 123, 255, 0.12);
-  color: var(--color-primary);
+.audit-loop-center-kicker {
   font-family: var(--font-label);
   font-size: 11px;
   font-weight: 700;
+  color: #6c757d;
+  letter-spacing: 0.02em;
+}
+
+.audit-loop-center-name {
+  font-family: var(--font-label);
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--color-primary);
+}
+
+/* 원 아래: 이 기록이 한 일과 흔적 */
+.audit-loop-notes {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.audit-loop-notes li {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  column-gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.audit-loop-notes li > :not(strong) {
+  grid-column: 2;
+}
+
+.audit-loop-notes strong {
+  font-family: var(--font-label);
   white-space: nowrap;
 }
 
-.audit-layer-tag.is-mark {
-  background: rgba(255, 153, 0, 0.16);
-  color: #9a5b00;
-}
-
-/* 이 기록의 층 */
-.audit-layer.is-here {
-  border-color: rgba(0, 123, 255, 0.35);
+.audit-loop-notes li.is-here {
   background: #f1f6fd;
-}
-
-.audit-layer.is-here .audit-layer-no {
-  background: var(--color-primary);
-  color: #fff;
-}
-
-.audit-layer.is-here .audit-layer-desc {
   color: #1f2933;
 }
 
-/* 흔적이 있는 층 */
-.audit-layer.is-marked {
-  border-color: rgba(255, 153, 0, 0.45);
+.audit-loop-notes li.is-here strong {
+  color: var(--color-primary);
+}
+
+.audit-loop-notes li.is-marked,
+.audit-loop-note-mark {
+  color: #9a5b00;
+}
+
+.audit-loop-notes li.is-marked {
   background: #fff8ec;
-}
-
-.audit-layer.is-marked .audit-layer-no {
-  background: #ff9900;
-  color: #fff;
-}
-
-/* 기록으로 남지 않는 층 (판단: 모델 안, 매개: 앱 밖). 흔적이 있으면(매개의 CloudTrail 요청 ID) 배경만 주황 */
-.audit-layer.is-off-record {
-  border-style: dashed;
-  border-color: #d3dbe5;
-}
-
-.audit-layer.is-off-record:not(.is-marked) {
-  background: #fafbfd;
-}
-
-.audit-layer.is-off-record.is-marked {
-  border-color: rgba(255, 153, 0, 0.55);
 }
 
 .audit-layers-legend {
   margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 14px;
   font-size: 12px;
   color: #6c757d;
 }
 
-.audit-layers-key {
+.audit-layers-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.audit-legend-dot {
   flex: none;
-  width: 18px;
+  width: 10px;
   height: 10px;
-  border: 1px dashed #b8c2ce;
-  border-radius: 3px;
-  background: #fafbfd;
+  border-radius: 999px;
+  border: 1.5px solid transparent;
+}
+
+.audit-legend-dot.is-here { background: var(--color-primary); }
+.audit-legend-dot.is-marked { background: #ff9900; }
+.audit-legend-dot.is-off-record { background: #fafbfd; border: 1.5px dashed #b3bfcd; }
+
+@keyframes audit-loop-node-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 이 기록의 층을 한 번 짚는다 (고리가 커졌다가 자리 잡는다) */
+@keyframes audit-loop-halo {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audit-loop-node,
+  .audit-loop-halo {
+    animation: none;
+  }
 }
 
 .audit-trace-section {
@@ -1462,22 +1536,6 @@
   .audit-details {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
-  }
-
-  /* 좁은 화면: 설명을 이름 아래로 내리고, 표시는 이름 옆에 */
-  .audit-layer {
-    grid-template-columns: 22px auto minmax(0, 1fr);
-    row-gap: 2px;
-  }
-
-  .audit-layer-text {
-    grid-column: 2 / -1;
-  }
-
-  .audit-layer-tag {
-    grid-row: 1;
-    grid-column: 3;
-    justify-self: start;
   }
 
   .audit-details dd {
