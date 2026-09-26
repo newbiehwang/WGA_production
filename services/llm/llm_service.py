@@ -530,7 +530,7 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
             "artifacts": artifacts.public(),
         })
         # 감사 로그에는 사용자가 받은 답변(가린 뒤의 글자) 그대로. Slack으로 보낼 때 바꾸는 주소는 곧 만료되므로 넣지 않는다
-        audit.request_finished(True, answer=response_text)
+        audit.request_finished(True, answer=response_text, usage=usage_of(client))
         emit_request_metrics(progress, redactor, approvals)
 
         # 응답 시간 기록 및 경과 시간 계산
@@ -571,7 +571,8 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
         if 'progress' in locals():
             progress.finished(False)
         if 'audit' in locals():
-            audit.request_finished(False, str(e))
+            # 실패해도 그때까지 쓴 토큰의 요금은 나가므로 남긴다
+            audit.request_finished(False, str(e), usage=usage_of(locals().get('client')))
         if 'progress' in locals() and 'redactor' in locals():
             emit_request_metrics(progress, redactor, locals().get('approvals'))
         return cors_response(500, {
@@ -606,6 +607,16 @@ def handle_audit(params, caller_id, claims, origin):
         return cors_response(200, query_audit(audit_table, caller_id, claims, params), origin)
     except AuditQueryError as error:
         return cors_response(error.status, {"error": str(error)}, origin)
+
+
+def usage_of(client):
+    """질문 하나에 쓴 토큰 (감사 로그용). usage_summary가 없는 클라이언트(Bedrock)나 클라이언트를 만들기 전이면 None."""
+    summary = getattr(client, "usage_summary", None)
+    try:
+        return summary() if callable(summary) else None
+    except Exception as error:
+        print(f"토큰 사용량을 읽지 못함 (감사 로그에 토큰 없이 남김): {error}")
+        return None
 
 
 def emit_request_metrics(progress, redactor, approvals):

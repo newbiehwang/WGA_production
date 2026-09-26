@@ -354,6 +354,79 @@ def test_answer_route(answered):
     assert response["statusCode"] == 200 and json.loads(response["body"])["answer"] == "오류가 없습니다."
 
 
+# ---------------------------------------------------------------- 토큰과 예상 비용 (질문 행, llm_cost.py)
+
+USAGE = {"tokens": {"input": 1000, "output": 500, "cacheWrite": 2000, "cacheRead": 10000},
+         "calls": [{"input": 600, "output": 200, "cacheWrite": 2000, "cacheRead": 0},
+                   {"input": 400, "output": 300, "cacheWrite": 0, "cacheRead": 10000}]}
+
+
+class CountingClient(FakeClient):
+    def usage_summary(self):
+        return copy.deepcopy(USAGE)
+
+
+def test_llm1_records_tokens_and_estimated_cost(audit_env, monkeypatch):
+    llm = load_service_module("services/llm", "llm_service")
+    monkeypatch.setattr(llm, "get_client", lambda: CountingClient())
+    llm.handle_llm1_with_mcp({"text": "알람", "requestId": REQUEST_ID}, ORIGIN, caller_id="alice")
+    request = next(i for i in items_of(audit_env, "alice") if i["kind"] == "request")
+    assert request["tokens"] == USAGE["tokens"] and request["modelCalls"] == USAGE["calls"]
+    # Sonnet 5: 1000×2 + 500×10 + 2000×2.5 + 10000×0.2 = 14,000 마이크로달러, 계산에 쓴 단가도 함께
+    assert request["costMicroUsd"] == 14000
+    assert request["price"] == {"input": "2", "output": "10", "cacheWrite": "2.50", "cacheRead": "0.20"}
+    # CloudWatch Logs에도 같은 값 (정수라 Logs Insights에서 바로 더할 수 있다)
+    logged = next(r for r in log_records() if r["kind"] == "request")
+    assert logged["costMicroUsd"] == 14000 and logged["tokens"]["cacheRead"] == 10000
+
+
+def test_unknown_model_keeps_tokens_without_cost(audit_env, monkeypatch):
+    llm = load_service_module("services/llm", "llm_service")
+
+    class NewModel(CountingClient):
+        model_id = "claude-sonnet-9"
+
+    monkeypatch.setattr(llm, "get_client", lambda: NewModel())
+    llm.handle_llm1_with_mcp({"text": "알람"}, ORIGIN, caller_id="alice")
+    request = next(i for i in items_of(audit_env, "alice") if i["kind"] == "request")
+    assert request["tokens"] == USAGE["tokens"]
+    assert "costMicroUsd" not in request and "price" not in request
+
+
+def test_failed_request_keeps_the_tokens_it_used(audit_env, monkeypatch):
+    llm = load_service_module("services/llm", "llm_service")
+
+    class Broken(CountingClient):
+        def process_user_input(self, text, system_prompt):
+            raise RuntimeError("Anthropic 오류")
+
+    monkeypatch.setattr(llm, "get_client", lambda: Broken())
+    llm.handle_llm1_with_mcp({"text": "알람"}, ORIGIN, caller_id="alice")
+    (request,) = items_of(audit_env, "alice")
+    assert request["status"] == "error" and request["costMicroUsd"] == 14000
+
+
+def test_clients_without_usage_leave_no_tokens(audit_env, monkeypatch):
+    # usage_summary가 없는 클라이언트(Bedrock)는 토큰·비용 없이 남긴다
+    llm = load_service_module("services/llm", "llm_service")
+    monkeypatch.setattr(llm, "get_client", lambda: FakeClient())
+    llm.handle_llm1_with_mcp({"text": "알람"}, ORIGIN, caller_id="alice")
+    request = next(i for i in items_of(audit_env, "alice") if i["kind"] == "request")
+    assert "tokens" not in request and "costMicroUsd" not in request
+
+
+def test_client_counts_tokens_per_model_call(client_run):
+    _, client = client_run
+    # 도구 반복의 모델 호출 세 번 (usage가 빈 응답은 0으로 센다)
+    summary = client.usage_summary()
+    assert len(summary["calls"]) == 3
+    client._add_usage({"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 7,
+                       "cache_creation_input_tokens": 3})
+    summary = client.usage_summary()
+    assert summary["calls"][-1] == {"input": 10, "output": 5, "cacheWrite": 3, "cacheRead": 7}
+    assert summary["tokens"] == {"input": 10, "output": 5, "cacheWrite": 3, "cacheRead": 7}
+
+
 # ---------------------------------------------------------------- 조회: GET /audit
 
 def put(table, user, at, tool="get_active_alarms", status="ok", kind="tool"):

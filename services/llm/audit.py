@@ -8,7 +8,7 @@
 기록 단위
 - 도구 호출 한 번 = 항목 하나 (kind "tool"): 도구, 입력, 성공·실패, 오류, 걸린 시간, 결과 크기
 - 질문 하나 = 항목 하나 (kind "request"): 질문, 모델, 성공·실패, 도구 호출 수, 가린 값의 수, 걸린 시간,
-  답변 미리보기(answerPreview)와 답변 글자 수(answerChars)
+  답변 미리보기(answerPreview)와 답변 글자 수(answerChars), 쓴 토큰(tokens·modelCalls)과 예상 비용(costMicroUsd·price)
 - 질문 하나의 답변 = 항목 하나 (kind "answer"): 사용자가 받은 답변 전체. 아래 '답변' 참고
 - 변경 작업의 사건 하나 = 항목 하나 (kind "action"): 요청·승인·거절·실행·실패, 작업 ID, 도구, 인자, 결정한 사람
 - 사용자 관리의 사건 하나 = 항목 하나 (kind "admin"): 초대·권한 변경(전→후)·정지·정지 해제, 대상, 한 사람
@@ -39,6 +39,14 @@ fingate-x의 '원인의 계층'(상태 변화에서 거꾸로 세운 층)을 이
 - 답변 길이는 모델의 출력 상한(MAX_TOKENS)으로 이미 묶여 있다. ANSWER_LIMIT은 그래도 넘칠 때를 위한 안전 상한이다
   (DynamoDB 항목 400KB, CloudWatch Logs 이벤트 256KB. 한글 한 글자는 UTF-8로 3바이트)
 
+토큰과 예상 비용 (llm_cost.py)
+- LLM 응답이 있는 행은 질문 행뿐이다 (도구 호출·변경 작업·사용자 관리 행은 서버·사람이 한 일). 그래서 질문 행에만 남긴다
+- tokens: 입력·출력·캐시 쓰기·캐시 읽기의 합. modelCalls: 모델을 부를 때마다의 토큰 (어느 단계에서 많이 썼나).
+  모델 한 번이 도구 여러 개를 함께 부르기도 하므로 도구 행마다 나누지 않는다
+- costMicroUsd: 예상 비용 (마이크로달러 정수). price: 계산에 쓴 단가 (USD / 백만 토큰). 단가가 나중에 바뀌어도
+  옛 기록의 비용이 바뀌지 않게 기록할 때의 단가를 같이 둔다. 단가표에 없는 모델이면 둘 다 없다 (토큰만)
+- 실패한 질문도 그때까지 쓴 토큰과 비용을 남긴다 (실패해도 요금은 나간다)
+
 추가만 한다: 이미 있는 항목을 덮어쓰지 않고(조건부 쓰기), LLM Lambda에는 수정·삭제 권한을 주지 않는다.
 
 기록에 실패해도 답변은 계속 만든다 (조회 도구). 변경 작업의 사건(action_event)은 기록하지 못하면 예외를 올려
@@ -55,6 +63,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from boto3.dynamodb.conditions import Attr, Key
 
 from approvals import tainted_view
+from llm_cost import cost_micro_usd, price_of
 from llm_progress import _plain
 
 # 층 (모듈 설명). residence는 조회 조건으로만 쓴다 (taintedBy가 있는 승인 요청 행)
@@ -75,6 +84,7 @@ DEFAULT_DAYS = 7  # 기간을 주지 않으면 최근 7일
 MAX_DAYS = 31  # 전체 사용자 조회는 날짜마다 따로 읽으므로 기간을 제한한다
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
+MAX_MODEL_CALLS = 50  # 질문 행에 남기는 모델 호출별 토큰의 최대 개수 (도구 반복 상한보다 넉넉하게)
 MAX_PAGES = 10  # 거르기(도구·결과) 때문에 빈 페이지가 이어져도 한 번의 조회는 여기서 끊고 cursor를 돌려준다
 DAY_INDEX = "by-day"
 
@@ -179,8 +189,10 @@ class AuditLog:
         self._write(started, tool_id, record)
 
     # ---------------------------------------------------------------- 요청이 끝날 때 (llm_service)
-    def request_finished(self, ok: bool, error: Optional[str] = None, answer: Optional[str] = None) -> None:
-        """answer: 사용자가 받은 답변 (실패한 요청은 없다). 질문 항목에는 미리보기, 답변 항목에는 전체를 남긴다."""
+    def request_finished(self, ok: bool, error: Optional[str] = None, answer: Optional[str] = None,
+                         usage: Optional[Dict[str, Any]] = None) -> None:
+        """answer: 사용자가 받은 답변 (실패한 요청은 없다). 질문 항목에는 미리보기, 답변 항목에는 전체를 남긴다.
+        usage: 쓴 토큰 (AnthropicMCPClient.usage_summary: tokens 합계와 calls 목록). 없으면 토큰·비용을 남기지 않는다."""
         record = {
             "kind": "request",
             "question": self._question,
@@ -194,6 +206,14 @@ class AuditLog:
         }
         if error:
             record["error"] = _clip(self._redactor.secrets_only(str(error)), ERROR_LIMIT)
+        if usage and usage.get("tokens"):
+            tokens = {kind: int(usage["tokens"].get(kind) or 0) for kind in ("input", "output", "cacheWrite", "cacheRead")}
+            record["tokens"] = tokens
+            record["modelCalls"] = [dict(call) for call in (usage.get("calls") or [])[:MAX_MODEL_CALLS]]
+            cost = cost_micro_usd(self.model_id, tokens)
+            if cost is not None:
+                record["costMicroUsd"] = cost
+                record["price"] = price_of(self.model_id)
         full = None
         if answer is not None:
             # 화면에 보인 답변은 이미 가렸지만, 다른 항목처럼 비밀 값을 한 번 더 가린다
