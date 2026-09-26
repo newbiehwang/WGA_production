@@ -9,7 +9,7 @@
 //        ╰────╯                      └──────────────────────────────┘
 //
 // - 고리는 조각 7개다. 조각 끝이 뾰족해(셰브런) 따로 화살표 없이 도는 방향이 보인다.
-//   차례는 역추적('층별로 따져 보기', services/llm/audit_trace.py)이 묻는 차례다 (맨 위 1 효과부터 시계 방향)
+//   차례는 역추적(services/llm/audit_trace.py)이 묻는 차례다 (맨 위 1 효과부터 시계 방향)
 // - 색은 계층의 성격: 이 기록의 계층(행의 locus)은 파랑, 흔적이 있는 계층은 옅은 주황,
 //   기록으로 남지 않는 계층(판단: 모델 안, 매개: 앱 밖)은 점선 테두리. 색은 고르는 것과 상관없이 그대로다
 // - 고른 계층(처음에는 이 기록의 계층): 고리 바깥의 선택 표시(둥근 호)가 그 조각 위로 미끄러져 가고(가까운 쪽으로 돈다),
@@ -21,9 +21,88 @@
 //   이 기록의 계층을 고르고 있으면 다른 계층에 남긴 흔적도 모아 보인다. 제목 옆에는 영어 이름을 회색으로 (고리 안은 한글만)
 // - 이 기록의 층: 도구 반복이 정한다 (등록부에 없으면 경계, 변경 도구면 유출, 나머지는 유입. 변경 작업은 요청이 유출, 결정·실행이 효과)
 // - 흔적: 체류(승인 요청 행의 taintedBy), 유입(도구 행의 의심 문구), 매개(실행한 AWS API의 요청 ID)
+// - 역추적 (변경 작업 행만, GET /audit?trace=, services/llm/audit_trace.py): 팝업창을 열면 바로 받아 이 그림에 얹는다 (누를 버튼이 없다)
+//     제목 줄   7계층 위치                      [⚠ 주의할 층이 있습니다 …]   ← 결론 (가장 나쁜 판정의 색)
+//               질문 "로그대로 보존 기간 줄여줘"                              ← 이 변경을 낳은 사용자의 질문
+//     고리      조각 안쪽 가장자리의 선 = 그 계층의 판정 (정상 초록 · 주의 주황 · 실패 빨강 · 참고 회색)
+//     설명 칸   그 계층의 물음 · 판정 · 답, 그 답의 근거가 된 기록(시각 · 무엇)
+//   작업의 사건은 요청·승인·실행 행이 모두 같은 역추적을 보인다 (같은 작업 ID)
 import { useEffect, useState, type CSSProperties } from 'react';
-import type { AuditRecord, TraceLayer } from '@/types/audit';
-import { LAYERS, requesterOf, toolLabelOf } from './auditModel';
+import { fetchTrace } from '@/api/audit';
+import type { AuditRecord, AuditTrace, TraceLayer, TraceStatus, TraceStep } from '@/types/audit';
+import { KST } from './timeWindow';
+import { ACTION_EVENTS, LAYERS, requesterOf, toolLabelOf } from './auditModel';
+
+// ---------------------------------------------------------------- 역추적
+const STATUS_LABELS: Record<TraceStatus, string> = { ok: '정상', warn: '주의', fail: '실패', info: '참고' };
+
+// 결론의 색: 가장 나쁜 판정 (참고는 세지 않는다)
+const worstOf = (trace: AuditTrace): TraceStatus =>
+    trace.steps.some((step) => step.status === 'fail')
+        ? 'fail'
+        : trace.steps.some((step) => step.status === 'warn')
+          ? 'warn'
+          : 'ok';
+
+// 근거가 된 기록 한 줄: 시각(한국 시간 시:분:초)과 무엇
+const clockOf = (record: AuditRecord) => new Date(Date.parse(record.at.split('#')[0]) + KST).toISOString().slice(11, 19);
+const whatOf = (record: AuditRecord) => {
+    if (record.kind === 'request') return `질문: ${record.question ?? ''}`;
+    if (record.kind === 'action') return `${ACTION_EVENTS[record.event ?? '']?.label ?? record.event}: ${record.summary ?? record.tool ?? ''}`;
+    return `${toolLabelOf(record.tool)} 호출`;
+};
+
+type TraceState = { status: 'none' } | { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; trace: AuditTrace };
+
+// 변경 작업 행이면 역추적을 받는다 (팝업창을 열 때 한 번. 기록이 바뀌면 부르는 쪽이 새로 그린다)
+function useTrace(record: AuditRecord): TraceState {
+    const actionId = record.kind === 'action' ? record.actionId : undefined;
+    const [state, setState] = useState<TraceState>(actionId ? { status: 'loading' } : { status: 'none' });
+    useEffect(() => {
+        if (!actionId) return;
+        let cancelled = false;
+        fetchTrace(actionId, record.day)
+            .then((trace) => !cancelled && setState({ status: 'ready', trace }))
+            .catch((error) => {
+                if (cancelled) return;
+                const message = (error as { response?: { data?: { error?: string } } })?.response?.data?.error;
+                setState({ status: 'error', message: message ?? '역추적을 불러오지 못했습니다' });
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [actionId, record.day]);
+    return state;
+}
+
+// 설명 칸의 역추적: 그 계층의 물음 · 판정 · 답과 근거가 된 기록
+function TraceAnswer({ step, trace }: { step: TraceStep; trace: AuditTrace }) {
+    const records = [...trace.events, ...trace.rows];
+    const cited = step.evidence
+        .map((at) => records.find((record) => record.at === at))
+        .filter((record): record is AuditRecord => Boolean(record))
+        .sort((a, b) => (a.at < b.at ? -1 : 1));
+    return (
+        <div className={`audit-trace-answer-box is-${step.status}`}>
+            <div className="audit-trace-answer-head">
+                <span className="audit-trace-answer-title">역추적</span>
+                <span className={`audit-trace-badge is-${step.status}`}>{STATUS_LABELS[step.status]}</span>
+            </div>
+            <p className="audit-trace-answer-q">{step.question}</p>
+            <p className="audit-trace-answer-a">{step.answer}</p>
+            {cited.length ? (
+                <ul className="audit-trace-cites" aria-label="근거가 된 기록">
+                    {cited.map((record) => (
+                        <li key={`${record.userId}|${record.at}`}>
+                            <time>{clockOf(record)}</time>
+                            <span>{whatOf(record)}</span>
+                        </li>
+                    ))}
+                </ul>
+            ) : null}
+        </div>
+    );
+}
 
 // 근거: 이 기록이 그 계층에 있는 까닭을 기록의 값으로 보인다. 문장 대신 흐름(단계 → 단계 → 단계)으로
 //   유입  [도구 비용 조회] › [결과 3,449자] › [받는 곳 모델]
@@ -222,6 +301,14 @@ const labelAt = (index: number) => {
     return { x: C + R_MID * Math.cos(rad(deg)), y: C + R_MID * Math.sin(rad(deg)) };
 };
 
+// 판정 선: 조각 안쪽 가장자리를 따라가는 짧은 호 (역추적이 있을 때만)
+const R_STATUS = R_IN + 4;
+function statusPath(index: number) {
+    const a0 = midOf(index) - SPAN / 2 + GAP / 2 + 5;
+    const a1 = midOf(index) + SPAN / 2 - GAP / 2 - 1;
+    return `M ${at(R_STATUS, a0)} A ${R_STATUS} ${R_STATUS} 0 0 1 ${at(R_STATUS, a1)}`;
+}
+
 export function AuditLayers({ record }: { record: AuditRecord }) {
     const hereIndex = LAYERS.findIndex((layer) => layer.id === record.locus);
     const here = LAYERS[hereIndex];
@@ -235,6 +322,10 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
     // 계층의 성격 (색): 이 기록 · 흔적 · 기록으로 남지 않음
     const toneOf = (index: number) =>
         index === hereIndex ? 'is-here' : marks[LAYERS[index].id] ? 'is-marked' : '';
+    // 역추적 (변경 작업 행): 계층마다의 판정
+    const traceState = useTrace(record);
+    const trace = traceState.status === 'ready' ? traceState.trace : null;
+    const stepOf = (id: TraceLayer) => trace?.steps.find((step) => step.layer === id);
 
     // 선택 표시의 회전각. 고른 조각이 바뀌면 가까운 쪽으로 돈다 (7 → 1은 한 칸 앞으로, 거꾸로 여섯 칸 돌지 않게)
     const [turn, setTurn] = useState(selectedIndex * SPAN);
@@ -245,11 +336,28 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
 
     return (
         <section className="audit-layers" aria-labelledby="audit-layers-title">
-            <h4 id="audit-layers-title" className="audit-layers-title">
-                7계층 위치
-            </h4>
+            <div className="audit-layers-head">
+                <h4 id="audit-layers-title" className="audit-layers-title">
+                    7계층 위치
+                </h4>
+                {/* 역추적의 결론 (변경 작업 행) */}
+                {trace ? (
+                    <span className={`audit-trace-verdict-pill is-${worstOf(trace)}`}>{trace.verdict}</span>
+                ) : traceState.status === 'loading' ? (
+                    <span className="audit-trace-verdict-pill is-loading" role="status">
+                        <span className="plan-inline-spinner" aria-hidden="true" />
+                        역추적 중…
+                    </span>
+                ) : traceState.status === 'error' ? (
+                    <span className="audit-trace-verdict-pill is-fail" role="alert">
+                        {traceState.message}
+                    </span>
+                ) : null}
+            </div>
+            {trace?.question ? <p className="audit-layers-question">질문 “{trace.question}”</p> : null}
 
             <div className="audit-cycle">
+                <div className="audit-cycle-figure">
                 <svg
                     className={`audit-cycle-svg${picked ? ' has-pick' : ''}`}
                     viewBox={`${-PAD} ${-PAD} ${SIZE + PAD * 2} ${SIZE + PAD * 2}`}
@@ -262,8 +370,13 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                         const isSelected = index === selectedIndex;
                         const mid = rad(midOf(index));
                         const label = labelAt(index);
-                        const state =
-                            tone === 'is-here' ? '이 기록의 계층' : tone === 'is-marked' ? '흔적' : offRecord ? '기록으로 남지 않음' : '';
+                        const step = stepOf(layer.id);
+                        const state = [
+                            tone === 'is-here' ? '이 기록의 계층' : tone === 'is-marked' ? '흔적' : offRecord ? '기록으로 남지 않음' : '',
+                            step ? `역추적 ${STATUS_LABELS[step.status]}` : '',
+                        ]
+                            .filter(Boolean)
+                            .join(', ');
                         // 누르면 그 계층을 고르고, 고른 조각을 다시 누르면 이 기록의 계층으로 돌아온다
                         const choose = () => setPicked(isSelected || index === hereIndex ? null : layer.id);
                         return (
@@ -292,6 +405,8 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                                 }}
                             >
                                 <path className="audit-cycle-shape" d={segmentPath(index)} />
+                                {/* 역추적 판정 선 (조각과 함께 떠오른다) */}
+                                {step ? <path className={`audit-cycle-status is-${step.status}`} d={statusPath(index)} /> : null}
                                 <text className="audit-cycle-no" x={label.x} y={label.y - 7} textAnchor="middle">
                                     {index + 1}
                                 </text>
@@ -321,6 +436,21 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                         </g>
                     ) : null}
                 </svg>
+                {/* 판정 선의 뜻 (역추적이 있을 때만) */}
+                {trace ? (
+                    <ul className="audit-trace-legend" aria-label="조각 안쪽 선: 역추적 판정">
+                        <li className="is-caption">역추적</li>
+                        {(['ok', 'warn', 'fail', 'info'] as TraceStatus[])
+                            .filter((status) => trace.steps.some((step) => step.status === status))
+                            .map((status) => (
+                                <li key={status}>
+                                    <span className={`audit-trace-legend-line is-${status}`} aria-hidden="true" />
+                                    {STATUS_LABELS[status]}
+                                </li>
+                            ))}
+                    </ul>
+                ) : null}
+                </div>
 
                 {/* 설명 칸 (aria-live: 다른 계층을 고르면 화면 읽기 프로그램이 새 설명을 읽는다) */}
                 {selected ? (
@@ -331,6 +461,8 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                             <span className="audit-cycle-en">{selected.en}</span>
                         </div>
                         <p className="audit-cycle-panel-text">{selected.description}</p>
+                        {/* 역추적: 이 계층의 물음과 답 (변경 작업 행) */}
+                        {trace && stepOf(selected.id) ? <TraceAnswer step={stepOf(selected.id)!} trace={trace} /> : null}
                         {selectedIsHere ? <Evidence title="근거" flows={[evidenceOf(record)]} variant="here" /> : null}
                         {/* 이 계층의 흔적 */}
                         {marks[selected.id] ? <Evidence title="흔적" flows={marks[selected.id]!} variant="mark" /> : null}

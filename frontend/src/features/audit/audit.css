@@ -1495,22 +1495,7 @@
   }
 }
 
-.audit-trace-section {
-  display: grid;
-  justify-items: start;
-  gap: 12px;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px dashed #e1e7ef;
-}
-
-.audit-trace {
-  display: grid;
-  gap: 12px;
-  width: 100%;
-  font-size: 13px;
-}
-
+/* 불러오는 중·오류 한 줄 (질문 기록의 답변 불러오기, AuditConversation) */
 .audit-trace-loading {
   display: inline-flex;
   align-items: center;
@@ -1523,98 +1508,137 @@
   color: #b02a37;
 }
 
-.audit-trace-verdict {
+/* ---------------------------------------------------------------- 역추적 (AuditLayers.tsx, 변경 작업 행)
+   제목 줄의 결론, 조각 안쪽의 판정 선, 설명 칸의 물음·판정·답·근거가 된 기록 */
+.audit-layers-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 4px;
+}
+
+.audit-layers-head .audit-layers-title {
   margin: 0;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-family: var(--font-label);
-  font-weight: 700;
 }
 
-.audit-trace-verdict.is-ok {
-  background: rgba(88, 167, 121, 0.12);
-  color: #3f8a61;
-}
-
-.audit-trace-verdict.is-warn {
-  background: rgba(255, 153, 0, 0.14);
-  color: #9a5b00;
-}
-
-.audit-trace-verdict.is-fail {
-  background: rgba(220, 53, 69, 0.12);
-  color: #b02a37;
-}
-
-.audit-trace-question {
-  margin: 0;
-  color: #3c4650;
+.audit-layers-question {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  color: #6c757d;
   overflow-wrap: anywhere;
 }
 
-.audit-trace-steps {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 6px;
-}
-
-.audit-trace-step {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: 10px;
-  padding: 8px 10px;
-  border: 1px solid #e8edf3;
-  border-left-width: 3px;
-  border-radius: 8px;
-  background: #fff;
-}
-
-.audit-trace-step.is-ok { border-left-color: rgba(88, 167, 121, 0.7); }
-.audit-trace-step.is-warn { border-left-color: rgba(255, 153, 0, 0.85); }
-.audit-trace-step.is-fail { border-left-color: rgba(220, 53, 69, 0.8); }
-.audit-trace-step.is-info { border-left-color: #c3cbd6; }
-
-.audit-trace-no {
+.audit-trace-verdict-pill {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
+  gap: 6px;
+  padding: 3px 10px;
   border-radius: 999px;
-  background: #f0f3f7;
-  color: #5f6670;
   font-family: var(--font-label);
   font-size: 12px;
   font-weight: 700;
 }
 
-.audit-trace-body {
+.audit-trace-verdict-pill.is-ok { background: rgba(88, 167, 121, 0.14); color: #3f8a61; }
+.audit-trace-verdict-pill.is-warn { background: rgba(255, 153, 0, 0.15); color: #9a5b00; }
+.audit-trace-verdict-pill.is-fail { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
+.audit-trace-verdict-pill.is-loading { background: #f0f3f7; color: #6c757d; font-weight: 600; }
+
+/* 조각 안쪽 가장자리의 판정 선 */
+.audit-cycle-status {
+  fill: none;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  pointer-events: none;
+  animation: audit-cycle-in 300ms ease 200ms backwards;
+}
+
+.audit-cycle-status.is-ok { stroke: #58a779; }
+.audit-cycle-status.is-warn { stroke: #ff9900; }
+.audit-cycle-status.is-fail { stroke: #dc3545; }
+.audit-cycle-status.is-info { stroke: #b8c2ce; }
+
+/* 파란 조각(이 기록) 위에서도 보이게 흰 테두리를 두른다 */
+.audit-cycle-seg.is-here .audit-cycle-status {
+  stroke-width: 3.5;
+  paint-order: stroke;
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.9));
+}
+
+/* 고리 아래: 판정 선의 뜻 */
+.audit-cycle-figure {
   display: grid;
-  gap: 2px;
+  gap: 6px;
   min-width: 0;
 }
 
-.audit-trace-head {
+.audit-trace-legend {
   margin: 0;
+  padding: 0;
+  list-style: none;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 12px;
+  font-size: 11.5px;
+  color: #6c757d;
+}
+
+.audit-trace-legend li {
+  display: inline-flex;
   align-items: center;
-  gap: 4px 8px;
+  gap: 5px;
 }
 
-.audit-trace-layer {
+.audit-trace-legend li.is-caption {
   font-family: var(--font-label);
-  color: #1f2933;
+  font-weight: 700;
+  color: #8a939e;
 }
 
-.audit-trace-q {
-  color: #3c4650;
+.audit-trace-legend-line {
+  width: 14px;
+  height: 3.5px;
+  border-radius: 999px;
+  background: #b8c2ce;
 }
 
-.audit-trace-status {
-  margin-left: auto;
+.audit-trace-legend-line.is-ok { background: #58a779; }
+.audit-trace-legend-line.is-warn { background: #ff9900; }
+.audit-trace-legend-line.is-fail { background: #dc3545; }
+
+/* 설명 칸의 역추적 */
+.audit-trace-answer-box {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #e3e9f1;
+  border-left: 3px solid #b8c2ce;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.audit-trace-answer-box.is-ok { border-left-color: #58a779; }
+.audit-trace-answer-box.is-warn { border-left-color: #ff9900; }
+.audit-trace-answer-box.is-fail { border-left-color: #dc3545; }
+
+.audit-trace-answer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-trace-answer-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #6c757d;
+}
+
+.audit-trace-badge {
   padding: 1px 8px;
   border-radius: 999px;
   font-family: var(--font-label);
@@ -1622,69 +1646,53 @@
   font-weight: 700;
 }
 
-.audit-trace-status.is-ok { background: rgba(88, 167, 121, 0.15); color: #3f8a61; }
-.audit-trace-status.is-warn { background: rgba(255, 153, 0, 0.16); color: #9a5b00; }
-.audit-trace-status.is-fail { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
-.audit-trace-status.is-info { background: rgba(120, 120, 120, 0.12); color: #5f6670; }
+.audit-trace-badge.is-ok { background: rgba(88, 167, 121, 0.15); color: #3f8a61; }
+.audit-trace-badge.is-warn { background: rgba(255, 153, 0, 0.16); color: #9a5b00; }
+.audit-trace-badge.is-fail { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
+.audit-trace-badge.is-info { background: rgba(120, 120, 120, 0.12); color: #5f6670; }
 
-.audit-trace-answer {
+.audit-trace-answer-q {
   margin: 0;
+  font-family: var(--font-label);
+  font-size: 13.5px;
+  font-weight: 700;
   color: #1f2933;
-  line-height: 1.5;
+}
+
+.audit-trace-answer-a {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #3c4650;
   overflow-wrap: anywhere;
 }
 
-.audit-trace-subtitle {
-  margin: 4px 0 0;
-  font-family: var(--font-label);
-  font-size: 12px;
-  font-weight: 700;
-  color: #6c757d;
-}
-
-.audit-trace-timeline {
-  margin: 0;
-  padding: 0;
+.audit-trace-cites {
+  margin: 2px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px dashed #e3e9f1;
   list-style: none;
   display: grid;
-  gap: 2px;
+  gap: 3px;
 }
 
-.audit-trace-timeline li {
+.audit-trace-cites li {
   display: grid;
-  grid-template-columns: 170px minmax(0, 160px) minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: baseline;
-  padding: 4px 8px;
-  border-radius: 6px;
-  color: #3c4650;
-}
-
-.audit-trace-timeline li.is-cited {
-  background: #f5f8fc;
-}
-
-.audit-trace-time,
-.audit-trace-who {
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 8px;
   font-size: 12px;
-  color: #6c757d;
+  color: #5f6670;
+}
+
+.audit-trace-cites time {
+  font-variant-numeric: tabular-nums;
+  color: #8a939e;
+}
+
+.audit-trace-cites span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.audit-trace-what {
-  overflow-wrap: anywhere;
-}
-
-.audit-trace-cited {
-  padding: 0 7px;
-  border-radius: 999px;
-  background: #e8eef6;
-  color: #4a5563;
-  font-family: var(--font-label);
-  font-size: 11px;
-  font-weight: 700;
 }
 
 /* ---------------------------------------------------------------- 좁은 화면: 행은 두 줄로 */
@@ -1717,18 +1725,4 @@
   .audit-details dd {
     margin-bottom: 8px;
   }
-
-  .audit-trace-timeline li {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "what cited"
-      "time time"
-      "who who";
-    gap: 0 8px;
-  }
-
-  .audit-trace-timeline .audit-trace-what { grid-area: what; }
-  .audit-trace-timeline .audit-trace-cited { grid-area: cited; }
-  .audit-trace-timeline .audit-trace-time { grid-area: time; }
-  .audit-trace-timeline .audit-trace-who { grid-area: who; }
 }
