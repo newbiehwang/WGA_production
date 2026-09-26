@@ -9,21 +9,11 @@ import agentLogo from '@/assets/agent-logo.png';
 import type { PendingAction } from '@/types/actions';
 import type { ChatMessageType } from '@/types/chat';
 import { artifactsOf, splitArtifacts } from '@/utils/artifacts';
-import { parseMarkdown } from '@/utils/markdown';
+import { escapeHtml, parseMarkdown } from '@/utils/markdown';
 import { fromProgressSteps, traceSteps } from '@/utils/toolTrace';
 import { ApprovalCard } from './ApprovalCard';
 import { ArtifactView } from './ArtifactView';
 import { LiveLine, ProgressTrace } from './ProgressTrace';
-
-// 마크다운 파서(utils/markdown.ts)는 HTML 특수 문자를 이미 escape한 글을 받는다.
-// 답변에 들어 있는 <script> 같은 글자가 HTML로 실행되지 않게 먼저 바꾼다
-const escapeHtml = (text: string) =>
-    text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
 
 // 답변의 승인 요청 (저장된 메시지에서는 inference가 JSON 문자열이다)
 const pendingActionsOf = (inference: unknown): PendingAction[] => {

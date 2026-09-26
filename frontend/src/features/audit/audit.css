@@ -988,6 +988,29 @@
   background: linear-gradient(180deg, #ffffff 0%, #f9fbfe 100%);
 }
 
+/* 질문 기록의 질문과 답변 (AuditConversation): 대화창(chat.css)의 모양 그대로, 아래 항목 표와 줄로 나눈다 */
+.audit-conversation {
+  margin: 0 0 16px;
+  padding: 4px 0 0;
+  border-bottom: 1px solid #edf1f6;
+}
+
+/* 대화창의 메시지 사이 여백은 그대로, 마지막 답변 아래만 줄인다 */
+.audit-conversation .message:last-child {
+  margin-bottom: 14px;
+}
+
+/* 답변이 없거나 불러오는 중일 때의 안내 (본문보다 작고 옅게) */
+.audit-answer-note {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #6c757d;
+}
+
+.audit-answer-note.is-error {
+  color: #b02a37;
+}
+
 .audit-details {
   margin: 0;
   display: grid;

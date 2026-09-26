@@ -34,6 +34,9 @@ export interface AuditRecord {
     model?: string;
     toolCount?: number;
     redacted?: Record<string, number>; // Claude로 보내기 전에 가린 값의 수 (종류별)
+    // 사용자가 받은 답변: 목록에는 앞부분과 글자 수만 온다. 전체는 팝업창이 열 때 따로 받는다 (fetchAnswer)
+    answerPreview?: string;
+    answerChars?: number;
     // 변경 작업의 사건 (kind: 'action', services/llm/approvals.py)
     event?: 'requested' | 'approved' | 'denied' | 'executed' | 'failed' | AdminEvent;
     actionId?: string;
@@ -92,4 +95,10 @@ export interface AuditQuery {
     locus?: AuditLocus;
     limit?: number;
     cursor?: string;
+}
+
+// 질문 하나의 답변 전체 (GET /audit?answer=<질문 행의 at>&user=<요청자>)
+export interface AuditAnswer {
+    answer: string;
+    answerChars?: number; // 잘리기 전의 전체 길이 (서버의 안전 상한을 넘으면 answer보다 길다)
 }

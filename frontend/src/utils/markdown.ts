@@ -85,6 +85,16 @@ function codeBlock(body: string): string {
     return `<pre><code${attr}>${code}</code></pre>`;
 }
 
+// 마크다운 파서(parseMarkdown)는 HTML 특수 문자를 이미 escape한 글을 받는다.
+// 답변에 들어 있는 <script> 같은 글자가 HTML로 실행되지 않게 먼저 바꾼다 (대화창 ChatMessage, 감사 로그 AuditConversation)
+export const escapeHtml = (text: string) =>
+    text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
 export function parseMarkdown(markdown: string): string {
     if (!markdown) return '';
 
