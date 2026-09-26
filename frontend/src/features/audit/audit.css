@@ -674,6 +674,25 @@
   stroke-linecap: round;
 }
 
+@keyframes audit-tip-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audit-histogram-bar,
+  .audit-histogram-tooltip {
+    animation: none;
+    transition: none;
+  }
+}
+
 /* 드래그하는 동안 고른 구간의 시각 */
 .audit-histogram-brush-label {
   position: absolute;
@@ -691,8 +710,31 @@
   pointer-events: none;
 }
 
-.audit-histogram-hover {
-  fill: #eef4fb;
+/* 막대: 처음 그릴 때(기간·조건·그룹 기준이 바뀔 때도) 바닥에서 자라 올라온다. 왼쪽부터 조금씩 늦게 (animation-delay는 AuditHistogram) */
+.audit-histogram-bar {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: audit-bar-grow 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: opacity 160ms ease, filter 160ms ease;
+}
+
+@keyframes audit-bar-grow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+/* 가리킨 막대만 또렷하게: 나머지는 흐리게, 가리킨 막대는 옅은 그림자로 살짝 떠오르게 */
+.audit-histogram-bars.has-focus .audit-histogram-bar {
+  opacity: 0.35;
+}
+
+.audit-histogram-bars.has-focus .audit-histogram-bar.is-focus {
+  opacity: 1;
+  filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.2));
 }
 
 .audit-histogram-brush {
@@ -700,7 +742,10 @@
 }
 
 .audit-histogram-tooltip {
-  position: absolute; /* 자리는 AuditHistogram이 정한다 (막대 오른쪽, 끝에 가까우면 왼쪽) */
+  position: absolute; /* 자리는 AuditHistogram이 정한다 (막대 머리 높이, 막대 오른쪽. 끝에 가까우면 왼쪽) */
+  /* 나타날 때는 살짝 올라오며 또렷해지고, 다른 막대로 옮기면 미끄러지듯 따라간다 */
+  animation: audit-tip-in 140ms ease both;
+  transition: left 140ms ease, top 140ms ease, transform 140ms ease;
   z-index: 5;
   min-width: 150px;
   padding: 8px 10px;

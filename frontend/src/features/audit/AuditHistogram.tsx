@@ -16,9 +16,13 @@
 // - 범례의 값을 누르면 왼쪽 거르기를 그 값 하나로 바꾼다 (기타·도구 없음은 누를 수 없다)
 // - 가로 눈금은 막대 수와 상관없이 '보기 좋은 시각'에 찍는다 (10분·3시간·하루·5일 등, timeWindow.ticksOf)
 // - 기록이 없으면 그래프 자리에 '이 기간에 기록이 없습니다'. 불러오는 동안에는 앞 그래프를 흐리게 남겨 둔다
-// - 마우스를 올리면 그 칸의 시각과 건수를 막대 옆 말풍선으로 보인다 (그래프 안에 두어 위의 버튼을 가리지 않게)
+// - 처음 그릴 때(기간·조건·그룹 기준이 바뀔 때도) 막대가 바닥에서 왼쪽부터 차례로 자라 올라온다
+// - 마우스를 올리면 그 막대만 또렷하게 두고 나머지 막대를 흐리게 한다 (기록이 없는 칸은 반응하지 않는다).
+//   그 칸의 시각과 건수는 막대 머리 옆 말풍선으로 보이고, 다른 막대로 옮기면 말풍선이 미끄러지듯 따라간다
+//   (그래프 안에 두어 위의 버튼을 가리지 않게)
 // - 드래그하면 그 구간으로, 한 칸을 누르면 그 칸으로 기간을 좁힌다. 드래그하는 동안 고른 구간의 시각을 위에 보인다
-// - 목록의 행에 마우스를 올리면(highlightAt) 그 기록이 든 칸을 옅게 칠하고 바닥선 바로 아래에 파란 줄을 긋는다
+// - 목록의 행에 마우스를 올리면(highlightAt) 그 기록이 든 막대만 또렷하게 두고, 바닥선 바로 아래에 파란 줄을 긋는다
+// - 움직임을 줄이는 설정이면 자라기·미끄러지기 효과를 끈다 (audit.css)
 // - 키보드: 그래프에 포커스를 두고 ←/→로 칸을 옮기고 Enter로 그 칸만 본다. 칸의 내용은 화면 읽기 프로그램에도 알린다
 // - 색: 결과는 성공 #4a8fe0·실패 #d03b3b, 나머지는 차례가 정해진 색 목록의 앞 다섯(CATEGORICAL)과 기타 회색.
 //   모두 흰 바탕에서 이웃한 색끼리의 색각 이상 구분 검사를 통과했다. 대비가 3:1보다 낮은 색(초록·노랑·분홍)이 있어
@@ -125,6 +129,7 @@ const GUTTER = 40; // 왼쪽 세로 눈금 글자 자리
 const GAP = 2; // 막대 사이·쌓은 조각 사이의 틈 (바탕색)
 const MAX_BAR = 24;
 const RADIUS = 4;
+const GROW_SPREAD_MS = 320; // 첫 막대와 끝 막대가 자라기 시작하는 때의 차이 (왼쪽부터 차례로)
 
 interface Bucket {
     start: number;
@@ -202,6 +207,10 @@ export function AuditHistogram({
         return list;
     }, [records, first, window.to, size, keyOf]);
 
+    // 자라기 효과를 다시 낼 때마다 바뀌는 번호 (기록·기간·칸 크기·그룹 기준이 바뀌면)
+    const growNo = useRef(0);
+    const growKey = useMemo(() => (growNo.current += 1), [records, first, size, groupBy]);
+
     const totals = useMemo(() => {
         const sums: Record<string, number> = {};
         for (const bucket of buckets) for (const [key, n] of Object.entries(bucket.counts)) sums[key] = (sums[key] ?? 0) + n;
@@ -242,7 +251,9 @@ export function AuditHistogram({
         if (!interactive) return;
         const x = pointerX(event);
         if (drag) setDrag({ ...drag, x1: x });
-        setActive(indexAt(x));
+        // 막대 단위로 반응한다: 기록이 없는 칸 위에서는 아무것도 가리키지 않는다
+        const index = indexAt(x);
+        setActive(buckets[index].total > 0 ? index : null);
     };
     const onPointerUp = (event: PointerEvent<SVGSVGElement>) => {
         if (!drag) return;
@@ -274,16 +285,22 @@ export function AuditHistogram({
         setActive(last >= 0 ? last : buckets.length - 1);
     };
 
+    // 목록에서 가리킨 기록이 든 칸
+    const marked = highlightAt !== null && total > 0 ? Math.floor((highlightAt - first) / size) : -1;
     const shown = active !== null && interactive ? buckets[active] : null;
     const rangeText = (bucket: Bucket) => `${formatShort(bucket.start)} ~ ${formatShort(bucket.start + size)}`;
-    // 말풍선: 막대 오른쪽에 붙인다. 오른쪽 끝에 가까우면 왼쪽으로 뒤집는다
+    // 말풍선: 막대 머리 높이에서 막대 오른쪽에 붙인다. 오른쪽 끝에 가까우면 왼쪽으로 뒤집는다
     const TOOLTIP_W = 180;
+    const tooltipTop = shown ? Math.max(0, yOf(shown.total) - 6) : 0;
     const tooltipStyle =
         active !== null
             ? xOf(active) + barW + 10 + TOOLTIP_W <= width
-                ? { left: xOf(active) + barW + 10, top: TOP + 4 }
-                : { left: xOf(active) - 10, top: TOP + 4, transform: 'translateX(-100%)' }
+                ? { left: xOf(active) + barW + 10, top: tooltipTop }
+                : { left: xOf(active) - 10, top: tooltipTop, transform: 'translateX(-100%)' }
             : undefined;
+
+    // 또렷하게 둘 막대: 마우스·키보드로 가리킨 막대, 없으면 목록에서 가리킨 기록의 막대
+    const focus = shown ? active : marked >= 0 && marked < buckets.length && buckets[marked].total > 0 ? marked : null;
 
     // 드래그하는 동안: 고를 구간(칸 단위로 맞춘 것)의 시각
     const dragRange = drag
@@ -299,9 +316,6 @@ export function AuditHistogram({
           })()
         : null;
 
-    // 목록에서 가리킨 기록이 든 칸
-    const marked =
-        highlightAt !== null && total > 0 ? Math.floor((highlightAt - first) / size) : -1;
     // 말풍선·알림에는 그 칸에 있는 계열만 (결과로 나눌 때는 0건도), 위에 쌓인 것부터
     const rowsOf = (bucket: Bucket) =>
         [...series].reverse().filter((s) => groupBy === 'result' || (bucket.counts[s.key] ?? 0) > 0);
@@ -406,10 +420,9 @@ export function AuditHistogram({
                             );
                         })}
 
-                        {/* 목록에서 가리킨 기록이 든 칸: 옅은 바탕 + 바닥의 파란 줄 */}
+                        {/* 목록에서 가리킨 기록이 든 칸: 바닥선 아래 파란 줄 (막대는 아래에서 또렷하게) */}
                         {marked >= 0 && marked < buckets.length && !shown ? (
                             <g>
-                                <rect x={GUTTER + marked * slot} y={TOP} width={slot} height={PLOT_H} className="audit-histogram-hover" />
                                 <line
                                     x1={GUTTER + marked * slot + 1}
                                     x2={GUTTER + (marked + 1) * slot - 1}
@@ -420,35 +433,31 @@ export function AuditHistogram({
                             </g>
                         ) : null}
 
-                        {/* 가리킨 칸의 옅은 바탕 */}
-                        {shown ? (
-                            <rect
-                                x={GUTTER + (active ?? 0) * slot}
-                                y={TOP}
-                                width={slot}
-                                height={PLOT_H}
-                                className="audit-histogram-hover"
-                            />
-                        ) : null}
-
-                        {/* 막대: 계열을 아래부터 쌓는다. 조각 사이에 틈, 맨 위 조각만 위 모서리가 둥글다 */}
-                        {buckets.map((bucket, index) => {
-                            if (!bucket.total) return null;
-                            const x = xOf(index);
-                            const parts = series.filter((s) => bucket.counts[s.key]);
-                            let y = baseY;
-                            return (
-                                <g key={bucket.start}>
-                                    {parts.map((s, i) => {
-                                        const h = ((bucket.counts[s.key] ?? 0) / top) * PLOT_H;
-                                        const gap = i > 0 ? GAP : 0;
-                                        const shape = barPath(x, y - gap - h, barW, h, i === parts.length - 1);
-                                        y -= gap + h;
-                                        return <path key={s.key} d={shape} fill={s.color} />;
-                                    })}
-                                </g>
-                            );
-                        })}
+                        {/* 막대: 계열을 아래부터 쌓는다. 조각 사이에 틈, 맨 위 조각만 위 모서리가 둥글다.
+                                묶음의 key가 바뀌면 새로 그려져 자라기 효과가 다시 난다 (막대마다 왼쪽부터 조금씩 늦게) */}
+                        <g key={growKey} className={`audit-histogram-bars${focus !== null ? ' has-focus' : ''}`}>
+                            {buckets.map((bucket, index) => {
+                                if (!bucket.total) return null;
+                                const x = xOf(index);
+                                const parts = series.filter((s) => bucket.counts[s.key]);
+                                let y = baseY;
+                                return (
+                                    <g
+                                        key={bucket.start}
+                                        className={`audit-histogram-bar${index === focus ? ' is-focus' : ''}`}
+                                        style={{ animationDelay: `${Math.round((index / buckets.length) * GROW_SPREAD_MS)}ms` }}
+                                    >
+                                        {parts.map((s, i) => {
+                                            const h = ((bucket.counts[s.key] ?? 0) / top) * PLOT_H;
+                                            const gap = i > 0 ? GAP : 0;
+                                            const shape = barPath(x, y - gap - h, barW, h, i === parts.length - 1);
+                                            y -= gap + h;
+                                            return <path key={s.key} d={shape} fill={s.color} />;
+                                        })}
+                                    </g>
+                                );
+                            })}
+                        </g>
 
                         {/* 기록이 없으면 그래프 자리에 안내 (불러오는 중이면 비워 둔다) */}
                         {total === 0 && !loading ? (
