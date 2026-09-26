@@ -4,7 +4,7 @@
 //   왼쪽: 거르기 목록(FacetSidebar) — 종류·결과·층·요청자·도구·출처·표시. 값마다 건수, 여러 값을 함께 고른다
 //   오른쪽: 검색창(AuditSearch) · 기간(PeriodPicker) · 건수 · 시간대별 막대그래프(AuditHistogram, 드래그로 기간 좁히기)
 //           · 목록(시각 · 요청자 · 도구 · 요약 · 결과 · 표시). 내려가면 이어서 더 그린다
-//   행을 누르면 오른쪽에서 옆 패널(AuditSidePanel)이 나와 자세히 보인다. ↑/↓로 앞뒤 기록, 변경 작업은 '층별로 따져 보기',
+//   행을 누르면 팝업창(AuditDetailModal, 이 앱의 다른 팝업창과 같은 모양)으로 자세히 보인다. ↑/↓로 앞뒤 기록, 변경 작업은 '층별로 따져 보기',
 //   '같은 질문의 기록'·'이 요청자만' 같은 버튼으로 이어 찾는다
 //
 // 거르는 순서: 기간 → 검색어 → 왼쪽 거르기. 거르기 목록의 건수는 검색어까지 적용한 기록에서 센다 (Datadog과 같다)
@@ -19,7 +19,7 @@ import type { AuditRecord } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
 import { Flags, KindLabel, ResultBadge } from './AuditDetails';
 import { AuditHistogram } from './AuditHistogram';
-import { AuditSidePanel } from './AuditSidePanel';
+import { AuditDetailModal } from './AuditDetailModal';
 import {
     activeCount,
     keyOf,
@@ -43,11 +43,11 @@ import './audit.css';
 
 const RENDER_STEP = 100; // 목록은 이만큼씩 그린다 (2,000행을 한 번에 그리지 않게). 끝에 닿으면 다음 묶음
 
-// 목록의 행 버튼 (옆 패널을 닫으면 여기로 포커스를 돌려준다). data-key로 찾는다
+// 목록의 행 버튼 (팝업창을 닫으면 여기로 포커스를 돌려준다). data-key로 찾는다
 const rowButtonOf = (key: string) =>
     document.querySelector<HTMLButtonElement>(`.audit-row-button[data-key="${CSS.escape(key)}"]`);
 
-// 목록 한 행. 누르면 옆 패널로 자세히 본다
+// 목록 한 행. 누르면 팝업창으로 자세히 본다
 function AuditRow({ record, selected, onOpen }: { record: AuditRecord; selected: boolean; onOpen: () => void }) {
     const summary = summaryOf(record);
     return (
@@ -161,7 +161,7 @@ export function AuditPage() {
     );
 
     const [showFacets, setShowFacets] = useState(false); // 좁은 화면: 거르기 목록을 펼쳤는가
-    const [openKey, setOpenKey] = useState<string | null>(null); // 옆 패널로 보고 있는 기록
+    const [openKey, setOpenKey] = useState<string | null>(null); // 팝업창으로 보고 있는 기록
     const [limit, setLimit] = useState(RENDER_STEP);
 
     // 검색어에 맞는 기록 (거르기 목록의 건수도 여기서 센다)
@@ -176,18 +176,18 @@ export function AuditPage() {
     useEffect(() => setLimit(RENDER_STEP), [filtered]);
 
     const openIndex = openKey ? filtered.findIndex((record) => keyOf(record) === openKey) : -1;
-    // 보고 있던 기록이 거르기로 목록에서 빠지면 패널을 닫는다
+    // 보고 있던 기록이 거르기로 목록에서 빠지면 팝업창을 닫는다
     useEffect(() => {
         if (openKey && openIndex < 0) setOpenKey(null);
     }, [openKey, openIndex]);
 
-    const closePanel = () => {
+    const closeDetail = () => {
         const key = openKey;
         setOpenKey(null);
         if (key) rowButtonOf(key)?.focus(); // 보던 기록의 행으로 포커스를 돌려준다 (키보드로 이어서 읽는다)
     };
 
-    // 옆 패널에서 ↑/↓: 거른 목록의 앞뒤 기록으로 옮기고, 그 행이 목록에서 보이게 스크롤한다
+    // 팝업창에서 ↑/↓: 거른 목록의 앞뒤 기록으로 옮기고, 뒤의 목록도 그 행이 보이게 스크롤한다
     const move = (step: -1 | 1) => {
         const next = filtered[openIndex + step];
         if (!next) return;
@@ -199,7 +199,7 @@ export function AuditPage() {
 
     const showMore = useCallback(() => setLimit((prev) => prev + RENDER_STEP), []);
 
-    // 옆 패널의 이어 찾기
+    // 팝업창의 이어 찾기 (팝업창이 닫힌 뒤 조건을 바꾼다)
     const showRelated = (id: string) => {
         setSelection({}); // 같은 질문의 질문·도구·변경 행이 거르기에 가려지지 않게
         setQuery(id);
@@ -321,12 +321,12 @@ export function AuditPage() {
             ) : null}
 
             {openKey && openIndex >= 0 ? (
-                <AuditSidePanel
+                <AuditDetailModal
                     record={filtered[openIndex]}
                     index={openIndex}
                     total={filtered.length}
                     onMove={move}
-                    onClose={closePanel}
+                    onClose={closeDetail}
                     onRelated={showRelated}
                     onFacet={onlyFacet}
                 />

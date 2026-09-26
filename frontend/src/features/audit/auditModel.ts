@@ -1,5 +1,5 @@
 // 감사 기록을 화면에 보이기 위한 이름표·요약과, 왼쪽 거르기 목록(facet)의 계산.
-// 화면(React)과 떨어진 순수 함수만 둔다. AuditPage·AuditDetails·FacetSidebar·AuditSidePanel이 같이 쓴다.
+// 화면(React)과 떨어진 순수 함수만 둔다. AuditPage·AuditDetails·FacetSidebar·AuditDetailModal이 같이 쓴다.
 import { ROLE_LABELS, type Role } from '@/auth/authClient';
 import type { AuditKind, AuditLocus, AuditRecord } from '@/types/audit';
 import { labelOf, summarize } from '@/utils/toolTrace';

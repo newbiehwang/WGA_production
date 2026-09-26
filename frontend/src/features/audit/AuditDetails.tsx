@@ -1,5 +1,5 @@
 // 감사 기록 한 건을 자세히 보이는 조각들: 항목 표(Details), 역추적 열기(TraceSection), 결과 배지, 종류 이름, 표시 배지.
-// 목록 행(AuditPage)과 옆 패널(AuditSidePanel)이 같이 쓴다
+// 목록 행(AuditPage)과 기록 팝업창(AuditDetailModal)이 같이 쓴다
 import { Fragment, useState, type ReactNode } from 'react';
 import type { AuditRecord } from '@/types/audit';
 import { labelOf } from '@/utils/toolTrace';
@@ -149,7 +149,7 @@ export function ResultBadge({ record }: { record: AuditRecord }) {
     );
 }
 
-// 도구 칸: 질문·변경 작업·사용자 관리는 종류를, 도구 호출은 도구 이름을 보인다 (목록 행과 옆 패널 제목이 같이 쓴다)
+// 도구 칸: 질문·변경 작업·사용자 관리는 종류를, 도구 호출은 도구 이름을 보인다 (목록 행과 기록 팝업창 제목이 같이 쓴다)
 export function KindLabel({ record }: { record: AuditRecord }) {
     if (record.kind === 'request') return <span className="audit-kind-request">질문</span>;
     if (record.kind === 'action') return <span className="audit-kind-action">{toolLabelOf(record.tool)}</span>;
@@ -157,7 +157,7 @@ export function KindLabel({ record }: { record: AuditRecord }) {
     return <>{labelOf(record.tool ?? '')}</>;
 }
 
-// 표시 칸: Slack · 의심 문구 · 의심 뒤 요청 · 미등록 도구 · 가림 (목록 행과 옆 패널 머리가 같이 쓴다)
+// 표시 칸: Slack · 의심 문구 · 의심 뒤 요청 · 미등록 도구 · 가림 (목록 행과 기록 팝업창 머리가 같이 쓴다)
 export function Flags({ record }: { record: AuditRecord }) {
     const redacted = redactedTotal(record);
     return (
