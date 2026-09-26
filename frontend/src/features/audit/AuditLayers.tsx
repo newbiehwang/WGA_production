@@ -1,21 +1,20 @@
-// 층 다이어그램: 7계층을 원 위에 놓고 화살표로 한 바퀴 잇는다 (루프). 도구 호출·변경 작업 행의 팝업창 맨 위에 보인다
+// 층 다이어그램: 7계층을 고리 모양의 순환 다이어그램으로 그린다. 도구 호출·변경 작업 행의 팝업창 맨 위에 보인다
 // (질문·사용자 관리 행에는 층이 없다).
 //
-//                 ① 효과
-//        ⑦ 매개 ╭───────╮ ② 유출 ●      ← 이 기록의 층: 파랑으로 채운 원
-//      ⑥ 경계  │  이 기록  │  ③ 체류 ●    ← 흔적: 주황으로 채운 원
-//        ⑤ 유입 ╰── ② 유출 ─╯ ④ 판단 ┄    ← 기록으로 남지 않는 층(판단·매개): 점선 원
-//   ▶ 유출 · 승인 요청을 만들었습니다. 아직 AWS는 바뀌지 않았습니다
-//   ● 체류 · 의심 문구가 든 결과를 읽은 뒤 요청한 변경입니다 (1건)
+//        ╭ 효과 ╮                     5 유입                         [이 기록]
+//     매개      유출 ▸               비용 조회의 결과가 모델에게 들어갔습니다
+//    경계   유입    체류              ─────────────
+//     ▸[유입]    판단                흔적
+//        ╰────╯                      ● 3 체류 · 의심 문구가 든 결과를 읽은 뒤 요청한 변경입니다 (1건)
 //
-// - 번호와 화살표의 차례는 역추적('층별로 따져 보기', services/llm/audit_trace.py)이 묻는 차례다 (① 효과부터)
-// - 이 기록의 층: 행의 locus (도구 반복이 정한다: 등록부에 없으면 경계, 변경 도구면 유출, 나머지는 유입.
-//   변경 작업은 요청이 유출, 결정·실행이 효과)
+// - 고리는 조각 7개다. 조각 끝이 뾰족해(셰브런) 따로 화살표 없이 도는 방향이 보인다.
+//   차례는 역추적('층별로 따져 보기', services/llm/audit_trace.py)이 묻는 차례다 (맨 위 1 효과부터 시계 방향)
+// - 이 기록의 층(행의 locus): 파랑으로 채우고 바깥으로 조금 밀어낸다. 흔적이 있는 층: 옅은 주황.
+//   기록으로 남지 않는 층(판단: 모델 안, 매개: 앱 밖): 점선 테두리
+// - 오른쪽 설명 칸: 평소에는 이 기록이 한 일과 흔적. 조각에 마우스를 올리거나 키보드로 옮겨 가면 그 층의 설명으로 바뀐다
+// - 이 기록의 층: 도구 반복이 정한다 (등록부에 없으면 경계, 변경 도구면 유출, 나머지는 유입. 변경 작업은 요청이 유출, 결정·실행이 효과)
 // - 흔적: 체류(승인 요청 행의 taintedBy), 유입(도구 행의 의심 문구), 매개(실행한 AWS API의 요청 ID)
-// - 원 가운데에는 이 기록의 층 이름만, 이 기록이 한 일과 흔적은 원 아래 줄로 (가운데는 좁아 긴 문장이 들어가지 않는다)
-// - 층에 마우스를 올리면 그 층의 설명이 뜬다 (<title>). 화면 읽기 프로그램에는 그림 대신 같은 내용을 목록으로 준다
-// - 폭이 좁으면(팝업창이 좁은 화면) 가로로 긴 타원 대신 원으로 그려 글자가 작아지지 않게 한다
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import type { AuditRecord, TraceLayer } from '@/types/audit';
 import { LAYERS, toolLabelOf } from './auditModel';
 
@@ -54,61 +53,61 @@ function marksOf(record: AuditRecord): Partial<Record<TraceLayer, string>> {
     return marks;
 }
 
-// 그림의 틀: 넓으면 가로로 긴 타원, 좁으면 원
-const WIDE = { width: 600, height: 244, rx: 206, ry: 90 };
-const NARROW = { width: 340, height: 296, rx: 104, ry: 104 };
-const NARROW_BELOW = 480; // 담는 상자의 폭(px)이 이보다 좁으면 원으로
-const NODE_R = 15;
+// 기록 방식 (설명 칸의 작은 글)
+const RECORDED_TEXT = {
+    row: '기록: 행으로 남는다',
+    flag: '기록: 행이 따로 없고, 승인 요청 행의 표시(의심 뒤 요청)로 남는다',
+    none: '기록: 남지 않는다 (모델 안)',
+    outside: '기록: 앱 밖 (AWS CloudTrail)',
+} as const;
 
-type Frame = typeof WIDE;
+// ---------------------------------------------------------------- 고리의 모양
+const SIZE = 240;
+const C = SIZE / 2; // 가운데
+const R_OUT = 112; // 바깥 반지름
+const R_IN = 72; // 안쪽 반지름
+const R_MID = (R_OUT + R_IN) / 2;
+const SPAN = 360 / LAYERS.length; // 조각 하나의 각 (도)
+const GAP = 2.2; // 조각 사이 틈 (도)
+const TIP = 5; // 셰브런의 뾰족한 끝이 나아가는 각 (도)
+const POP = 6; // 이 기록의 조각을 바깥으로 밀어내는 거리
 
-// 층 i의 자리: 맨 위(① 효과)에서 시작해 시계 방향으로 7등분
-const angleOf = (index: number) => -Math.PI / 2 + (index * 2 * Math.PI) / LAYERS.length;
-const pointOf = (frame: Frame, angle: number) => ({
-    x: frame.width / 2 + frame.rx * Math.cos(angle),
-    y: frame.height / 2 + frame.ry * Math.sin(angle),
-});
+const rad = (deg: number) => (deg * Math.PI) / 180;
+const at = (r: number, deg: number) => `${(C + r * Math.cos(rad(deg))).toFixed(2)} ${(C + r * Math.sin(rad(deg))).toFixed(2)}`;
+// 조각 i의 가운데 각: 맨 위(-90°)에서 시계 방향
+const midOf = (index: number) => -90 + index * SPAN;
 
-// 층 이름의 자리: 원 바깥쪽. 위·아래 끝은 가운데 맞춤, 오른쪽은 왼쪽 맞춤, 왼쪽은 오른쪽 맞춤
-function labelOf(frame: Frame, angle: number) {
-    const { x, y } = pointOf(frame, angle);
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    if (Math.abs(cos) < 0.2) return { x, y: y + (sin < 0 ? -NODE_R - 8 : NODE_R + 17), anchor: 'middle' as const };
-    return { x: x + (cos > 0 ? NODE_R + 7 : -NODE_R - 7), y: y + 4.5, anchor: cos > 0 ? ('start' as const) : ('end' as const) };
+// 셰브런 조각: 바깥 호 → 앞쪽 뾰족한 끝 → 안쪽 호 → 뒤쪽 오목한 홈
+function segmentPath(index: number) {
+    const a0 = midOf(index) - SPAN / 2 + GAP / 2;
+    const a1 = a0 + SPAN - GAP;
+    return [
+        `M ${at(R_OUT, a0)}`,
+        `A ${R_OUT} ${R_OUT} 0 0 1 ${at(R_OUT, a1)}`,
+        `L ${at(R_MID, a1 + TIP)}`,
+        `L ${at(R_IN, a1)}`,
+        `A ${R_IN} ${R_IN} 0 0 0 ${at(R_IN, a0)}`,
+        `L ${at(R_MID, a0 + TIP)}`,
+        'Z',
+    ].join(' ');
 }
 
-// 층 i에서 i+1로 가는 화살촉: 두 층 사이 가운데에서 타원을 따라 시계 방향을 가리킨다
-function arrowOf(frame: Frame, index: number) {
-    const angle = angleOf(index) + Math.PI / LAYERS.length;
-    const { x, y } = pointOf(frame, angle);
-    // 타원 위 점의 접선 (각이 커지는 쪽 = 화면에서 시계 방향)
-    const rotate = (Math.atan2(frame.ry * Math.cos(angle), -frame.rx * Math.sin(angle)) * 180) / Math.PI;
-    return { x, y, rotate };
-}
-
-// 담는 상자의 폭으로 틀을 고른다
-function useFrame() {
-    const box = useRef<HTMLDivElement>(null);
-    const [narrow, setNarrow] = useState(false);
-    useLayoutEffect(() => {
-        const element = box.current;
-        if (!element) return;
-        const measure = () => setNarrow(element.getBoundingClientRect().width < NARROW_BELOW);
-        measure();
-        const observer = new ResizeObserver(measure);
-        observer.observe(element);
-        return () => observer.disconnect();
-    }, []);
-    return { box, frame: narrow ? NARROW : WIDE };
-}
+// 조각 안 글자의 자리 (셰브런 끝만큼 앞으로 치우친 가운데)
+const labelAt = (index: number) => {
+    const deg = midOf(index) + TIP / 2;
+    return { x: C + R_MID * Math.cos(rad(deg)), y: C + R_MID * Math.sin(rad(deg)) };
+};
 
 export function AuditLayers({ record }: { record: AuditRecord }) {
-    const { box, frame } = useFrame();
+    const [focus, setFocus] = useState<TraceLayer | null>(null);
     const marks = marksOf(record);
     const hereIndex = LAYERS.findIndex((layer) => layer.id === record.locus);
     const here = LAYERS[hereIndex];
-    const markedLayers = LAYERS.filter((layer) => marks[layer.id] && layer.id !== record.locus);
+    // 설명 칸에 보일 층: 마우스·키보드로 짚은 층, 없으면 이 기록의 층
+    const shownIndex = focus ? LAYERS.findIndex((layer) => layer.id === focus) : hereIndex;
+    const shown = LAYERS[shownIndex];
+    const showingHere = shown?.id === here?.id;
+    const otherMarks = LAYERS.filter((layer) => marks[layer.id] && layer.id !== here?.id);
 
     return (
         <section className="audit-layers" aria-labelledby="audit-layers-title">
@@ -116,108 +115,105 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                 층 <span className="audit-muted">7계층에서 이 기록의 자리</span>
             </h4>
 
-            <div ref={box} className="audit-loop">
+            <div className="audit-cycle">
                 <svg
-                    className="audit-loop-svg"
-                    viewBox={`0 0 ${frame.width} ${frame.height}`}
-                    role="img"
-                    aria-labelledby="audit-loop-summary"
+                    className="audit-cycle-svg"
+                    viewBox={`${-POP} ${-POP} ${SIZE + POP * 2} ${SIZE + POP * 2}`}
+                    role="group"
+                    aria-label="7계층 순환 다이어그램. 층을 짚으면 오른쪽에 설명이 나옵니다"
+                    onMouseLeave={() => setFocus(null)}
                 >
-                    {/* 루프: 타원 하나와 층 사이의 화살촉 */}
-                    <ellipse
-                        className="audit-loop-track"
-                        cx={frame.width / 2}
-                        cy={frame.height / 2}
-                        rx={frame.rx}
-                        ry={frame.ry}
-                    />
                     {LAYERS.map((layer, index) => {
-                        const arrow = arrowOf(frame, index);
-                        return (
-                            <path
-                                key={`arrow-${layer.id}`}
-                                className="audit-loop-arrow"
-                                d="M -4 -4.5 L 4 0 L -4 4.5 Z"
-                                transform={`translate(${arrow.x} ${arrow.y}) rotate(${arrow.rotate})`}
-                            />
-                        );
-                    })}
-
-                    {LAYERS.map((layer, index) => {
-                        const angle = angleOf(index);
-                        const { x, y } = pointOf(frame, angle);
-                        const label = labelOf(frame, angle);
                         const isHere = index === hereIndex;
                         const isMarked = !isHere && Boolean(marks[layer.id]);
                         const offRecord = layer.recorded === 'none' || layer.recorded === 'outside';
+                        const mid = rad(midOf(index));
+                        const label = labelAt(index);
+                        const state = isHere ? '이 기록의 층' : isMarked ? '흔적' : offRecord ? '기록으로 남지 않음' : '';
                         return (
                             <g
                                 key={layer.id}
-                                className={`audit-loop-node${isHere ? ' is-here' : isMarked ? ' is-marked' : ''}${
+                                className={`audit-cycle-seg${isHere ? ' is-here' : isMarked ? ' is-marked' : ''}${
                                     offRecord ? ' is-off-record' : ''
-                                }`}
-                                style={{ animationDelay: `${index * 40}ms` }}
+                                }${focus === layer.id ? ' is-focus' : ''}`}
+                                // 이 기록의 조각은 가운데에서 바깥으로 밀어낸다 (--dx·--dy: CSS가 transform으로)
+                                style={
+                                    {
+                                        '--dx': `${(POP * Math.cos(mid)).toFixed(2)}px`,
+                                        '--dy': `${(POP * Math.sin(mid)).toFixed(2)}px`,
+                                        animationDelay: `${index * 45}ms`,
+                                    } as CSSProperties
+                                }
+                                tabIndex={0}
+                                aria-label={`${index + 1} ${layer.label}${state ? `, ${state}` : ''}`}
+                                onMouseEnter={() => setFocus(layer.id)}
+                                onFocus={() => setFocus(layer.id)}
+                                onBlur={() => setFocus(null)}
                             >
-                                <title>{`${index + 1} ${layer.label}: ${layer.description}`}</title>
-                                {isHere ? <circle className="audit-loop-halo" cx={x} cy={y} r={NODE_R + 7} /> : null}
-                                <circle className="audit-loop-dot" cx={x} cy={y} r={NODE_R} />
-                                <text className="audit-loop-no" x={x} y={y + 4.5} textAnchor="middle">
+                                <path className="audit-cycle-shape" d={segmentPath(index)} />
+                                <text className="audit-cycle-no" x={label.x} y={label.y - 7} textAnchor="middle">
                                     {index + 1}
                                 </text>
-                                <text className="audit-loop-label" x={label.x} y={label.y} textAnchor={label.anchor}>
+                                <text className="audit-cycle-label" x={label.x} y={label.y + 9} textAnchor="middle">
                                     {layer.label}
                                 </text>
                             </g>
                         );
                     })}
+                    {/* 가운데: 이 기록의 층 */}
+                    {here ? (
+                        <g className="audit-cycle-center" aria-hidden="true">
+                            <text x={C} y={C - 8} textAnchor="middle" className="audit-cycle-kicker">
+                                이 기록
+                            </text>
+                            <text x={C} y={C + 17} textAnchor="middle" className="audit-cycle-name">
+                                {here.label}
+                            </text>
+                        </g>
+                    ) : null}
                 </svg>
 
-                {/* 가운데: 이 기록의 층 */}
-                {here ? (
-                    <div className="audit-loop-center" aria-hidden="true">
-                        <span className="audit-loop-center-kicker">이 기록</span>
-                        <span className="audit-loop-center-name">
-                            {hereIndex + 1} {here.label}
-                        </span>
+                {/* 설명 칸 (aria-live: 층을 옮겨 짚으면 화면 읽기 프로그램이 새 설명을 읽는다) */}
+                {shown ? (
+                    <div className="audit-cycle-panel" aria-live="polite">
+                        <div className="audit-cycle-panel-head">
+                            <span className={`audit-cycle-panel-no${showingHere ? ' is-here' : marks[shown.id] ? ' is-marked' : ''}`}>
+                                {shownIndex + 1}
+                            </span>
+                            <strong>{shown.label}</strong>
+                            {showingHere ? (
+                                <span className="audit-cycle-tag">이 기록</span>
+                            ) : marks[shown.id] ? (
+                                <span className="audit-cycle-tag is-marked">흔적</span>
+                            ) : null}
+                        </div>
+                        <p className="audit-cycle-panel-text">{showingHere ? hereText(record) : shown.description}</p>
+                        {marks[shown.id] ? <p className="audit-cycle-panel-mark">{marks[shown.id]}</p> : null}
+                        {showingHere ? (
+                            otherMarks.length ? (
+                                <div className="audit-cycle-traces">
+                                    <span className="audit-cycle-traces-title">다른 층에 남긴 흔적</span>
+                                    <ul>
+                                        {otherMarks.map((layer) => (
+                                            <li key={layer.id}>
+                                                <strong>
+                                                    {LAYERS.indexOf(layer) + 1} {layer.label}
+                                                </strong>
+                                                <span>{marks[layer.id]}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            ) : null
+                        ) : (
+                            <p className="audit-cycle-panel-note">{RECORDED_TEXT[shown.recorded]}</p>
+                        )}
+                        <p className="audit-cycle-hint">
+                            {focus ? '마우스를 떼거나 다른 곳을 누르면 이 기록으로 돌아갑니다' : '층을 짚으면 그 층의 설명이 나옵니다 · 1 효과부터 역추적에서 따져 보는 차례'}
+                        </p>
                     </div>
                 ) : null}
             </div>
-
-            {/* 이 기록이 한 일과 흔적 (그림의 뜻을 글로도: 화면 읽기 프로그램은 이 요약을 그림의 이름으로 읽는다) */}
-            <ul id="audit-loop-summary" className="audit-loop-notes">
-                {here ? (
-                    <li className="is-here">
-                        <strong>
-                            {hereIndex + 1} {here.label}
-                        </strong>
-                        <span>{hereText(record)}</span>
-                        {marks[here.id] ? <span className="audit-loop-note-mark">{marks[here.id]}</span> : null}
-                    </li>
-                ) : null}
-                {markedLayers.map((layer) => (
-                    <li key={layer.id} className="is-marked">
-                        <strong>
-                            {LAYERS.indexOf(layer) + 1} {layer.label}
-                        </strong>
-                        <span>{marks[layer.id]}</span>
-                    </li>
-                ))}
-            </ul>
-
-            {/* 범례: 점과 글을 한 덩어리로 (좁은 화면에서 줄이 바뀌어도 떨어지지 않게) */}
-            <ul className="audit-layers-legend">
-                <li>
-                    <span className="audit-legend-dot is-here" aria-hidden="true" />이 기록
-                </li>
-                <li>
-                    <span className="audit-legend-dot is-marked" aria-hidden="true" />흔적
-                </li>
-                <li>
-                    <span className="audit-legend-dot is-off-record" aria-hidden="true" />
-                    기록으로 남지 않는 층 (판단: 모델 안, 매개: 앱 밖의 AWS 기록)
-                </li>
-                <li>화살표: 역추적에서 따져 보는 차례</li>
-            </ul>
         </section>
     );
 }

@@ -1076,16 +1076,16 @@
 /* ---------------------------------------------------------------- 역추적 (AuditTrace) */
 
 /* ---------------------------------------------------------------- 층 다이어그램 (AuditLayers.tsx)
-   7계층을 원 위에 놓고 화살표로 한 바퀴 잇는다. 이 기록의 층은 파랑, 흔적은 주황, 기록으로 남지 않는 층(판단·매개)은 점선.
-   팝업창 본문 맨 위에 있고, 아래 항목 표와 줄로 나눈다 */
+   7계층의 순환 다이어그램(셰브런 조각 7개의 고리)과 오른쪽 설명 칸. 팝업창 본문 맨 위에 있고, 아래 항목 표와 줄로 나눈다.
+   이 기록의 층은 파랑으로 채우고 바깥으로 밀어내며, 흔적은 옅은 주황, 기록으로 남지 않는 층(판단·매개)은 점선 */
 .audit-layers {
   margin: 0 0 16px;
-  padding-bottom: 14px;
+  padding-bottom: 16px;
   border-bottom: 1px solid #edf1f6;
 }
 
 .audit-layers-title {
-  margin: 0 0 4px;
+  margin: 0 0 10px;
   font-family: var(--font-label);
   font-size: 13px;
   font-weight: 700;
@@ -1097,225 +1097,279 @@
   font-weight: 500;
 }
 
-.audit-loop {
-  position: relative;
-  max-width: 600px;
-  margin: 0 auto;
+.audit-cycle {
+  display: grid;
+  grid-template-columns: 244px minmax(0, 1fr);
+  align-items: center;
+  gap: 24px;
 }
 
-.audit-loop-svg {
+.audit-cycle-svg {
   display: block;
   width: 100%;
   height: auto;
   overflow: visible;
 }
 
-.audit-loop-track {
-  fill: #f7f9fc;
-  stroke: #d8e0ea;
-  stroke-width: 2;
+/* 조각 */
+.audit-cycle-seg {
+  cursor: default;
+  outline: none;
+  animation: audit-cycle-in 360ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  transition: transform 200ms ease;
 }
 
-.audit-loop-arrow {
-  fill: #b3bfcd;
-}
-
-.audit-loop-node {
-  animation: audit-loop-node-in 320ms ease both;
-}
-
-.audit-loop-dot {
-  fill: #fff;
-  stroke: #c3cdd9;
-  stroke-width: 1.5;
+.audit-cycle-shape {
+  fill: #eef2f7;
+  stroke: #fff;
+  stroke-width: 1;
   transition: fill 160ms ease, stroke 160ms ease;
 }
 
-.audit-loop-no {
+.audit-cycle-no {
   font-family: var(--font-label);
-  font-size: 12px;
+  font-size: 9.5px;
   font-weight: 700;
-  fill: #5f6670;
+  fill: #8a939e;
   pointer-events: none;
 }
 
-.audit-loop-label {
+.audit-cycle-label {
   font-family: var(--font-label);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 700;
   fill: #3c4650;
+  pointer-events: none;
 }
 
-/* 이 기록의 층: 파랑으로 채우고 둘레에 옅은 고리 */
-.audit-loop-node.is-here .audit-loop-dot {
-  fill: var(--color-primary);
+/* 짚은 조각 (마우스·키보드): 조금 짙게, 살짝 바깥으로 */
+.audit-cycle-seg.is-focus:not(.is-here) {
+  transform: translate(calc(var(--dx) * 0.5), calc(var(--dy) * 0.5));
+}
+
+.audit-cycle-seg.is-focus:not(.is-here):not(.is-marked) .audit-cycle-shape {
+  fill: #e1e8f1;
+}
+
+.audit-cycle-seg:focus-visible .audit-cycle-shape {
   stroke: var(--color-primary);
+  stroke-width: 2;
 }
 
-.audit-loop-node.is-here .audit-loop-no {
-  fill: #fff;
+/* 이 기록의 층: 파랑으로 채우고 바깥으로 밀어낸다 */
+.audit-cycle-seg.is-here {
+  transform: translate(var(--dx), var(--dy));
 }
 
-.audit-loop-node.is-here .audit-loop-label {
+.audit-cycle-seg.is-here .audit-cycle-shape {
   fill: var(--color-primary);
-  font-weight: 700;
+  filter: drop-shadow(0 3px 6px rgba(0, 123, 255, 0.28));
 }
 
-.audit-loop-halo {
-  fill: rgba(0, 123, 255, 0.14);
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: audit-loop-halo 1.6s ease-out 1 both;
-}
-
-/* 흔적: 주황으로 채운다 */
-.audit-loop-node.is-marked .audit-loop-dot {
-  fill: #ff9900;
-  stroke: #ff9900;
-}
-
-.audit-loop-node.is-marked .audit-loop-no {
+.audit-cycle-seg.is-here .audit-cycle-label,
+.audit-cycle-seg.is-here .audit-cycle-no {
   fill: #fff;
 }
 
-.audit-loop-node.is-marked .audit-loop-label {
-  fill: #9a5b00;
-  font-weight: 700;
+/* 흔적 */
+.audit-cycle-seg.is-marked .audit-cycle-shape {
+  fill: #ffe7bf;
 }
 
-/* 기록으로 남지 않는 층: 점선 원, 옅은 이름 (흔적이 있으면 색은 흔적을 따른다) */
-.audit-loop-node.is-off-record .audit-loop-dot {
-  stroke-dasharray: 3 3;
+.audit-cycle-seg.is-marked .audit-cycle-label {
+  fill: #8a5200;
 }
 
-.audit-loop-node.is-off-record:not(.is-marked):not(.is-here) .audit-loop-dot {
-  fill: #fafbfd;
+.audit-cycle-seg.is-marked .audit-cycle-no {
+  fill: #b0741a;
 }
 
-.audit-loop-node.is-off-record:not(.is-marked):not(.is-here) .audit-loop-label {
+/* 기록으로 남지 않는 층: 흰 바탕에 점선 테두리, 옅은 글자 (흔적이 있으면 바탕은 흔적을 따른다) */
+.audit-cycle-seg.is-off-record .audit-cycle-shape {
+  stroke: #b8c2ce;
+  stroke-width: 1.2;
+  stroke-dasharray: 3 2.5;
+}
+
+.audit-cycle-seg.is-off-record:not(.is-marked):not(.is-here) .audit-cycle-shape {
+  fill: #fff;
+}
+
+.audit-cycle-seg.is-off-record:not(.is-marked):not(.is-here) .audit-cycle-label {
   fill: #8a939e;
 }
 
-/* 원 가운데: 이 기록의 층 이름 */
-.audit-loop-center {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  display: grid;
-  justify-items: center;
-  gap: 2px;
-  pointer-events: none;
-  text-align: center;
+.audit-cycle-seg.is-off-record.is-marked .audit-cycle-shape {
+  stroke: #e0a040;
 }
 
-.audit-loop-center-kicker {
+/* 가운데 */
+.audit-cycle-kicker {
   font-family: var(--font-label);
   font-size: 11px;
   font-weight: 700;
-  color: #6c757d;
-  letter-spacing: 0.02em;
+  fill: #8a939e;
 }
 
-.audit-loop-center-name {
+.audit-cycle-name {
   font-family: var(--font-label);
   font-size: 22px;
   font-weight: 800;
+  fill: var(--color-primary);
+}
+
+/* 설명 칸 */
+.audit-cycle-panel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  min-height: 150px;
+  align-content: center;
+}
+
+.audit-cycle-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-cycle-panel-head strong {
+  font-family: var(--font-label);
+  font-size: 17px;
+  color: #1f2933;
+}
+
+.audit-cycle-panel-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: #eef2f7;
+  color: #5f6670;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.audit-cycle-panel-no.is-here {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.audit-cycle-panel-no.is-marked {
+  background: #ffe7bf;
+  color: #8a5200;
+}
+
+.audit-cycle-tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(0, 123, 255, 0.12);
   color: var(--color-primary);
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
 }
 
-/* 원 아래: 이 기록이 한 일과 흔적 */
-.audit-loop-notes {
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 6px;
+.audit-cycle-tag.is-marked {
+  background: rgba(255, 153, 0, 0.16);
+  color: #9a5b00;
 }
 
-.audit-loop-notes li {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  column-gap: 10px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  font-size: 13px;
-  line-height: 1.5;
+.audit-cycle-panel-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #1f2933;
   overflow-wrap: anywhere;
 }
 
-.audit-loop-notes li > :not(strong) {
-  grid-column: 2;
+.audit-cycle-panel-mark {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #9a5b00;
+  overflow-wrap: anywhere;
 }
 
-.audit-loop-notes strong {
+.audit-cycle-panel-note {
+  margin: 0;
+  font-size: 12px;
+  color: #6c757d;
+}
+
+.audit-cycle-traces {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff8ec;
+}
+
+.audit-cycle-traces-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
+  color: #b0741a;
+}
+
+.audit-cycle-traces ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.audit-cycle-traces li {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #8a5200;
+  overflow-wrap: anywhere;
+}
+
+.audit-cycle-traces strong {
   font-family: var(--font-label);
   white-space: nowrap;
 }
 
-.audit-loop-notes li.is-here {
-  background: #f1f6fd;
-  color: #1f2933;
+.audit-cycle-hint {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: #9aa4ae;
 }
 
-.audit-loop-notes li.is-here strong {
-  color: var(--color-primary);
-}
-
-.audit-loop-notes li.is-marked,
-.audit-loop-note-mark {
-  color: #9a5b00;
-}
-
-.audit-loop-notes li.is-marked {
-  background: #fff8ec;
-}
-
-.audit-layers-legend {
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  font-size: 12px;
-  color: #6c757d;
-}
-
-.audit-layers-legend li {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.audit-legend-dot {
-  flex: none;
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  border: 1.5px solid transparent;
-}
-
-.audit-legend-dot.is-here { background: var(--color-primary); }
-.audit-legend-dot.is-marked { background: #ff9900; }
-.audit-legend-dot.is-off-record { background: #fafbfd; border: 1.5px dashed #b3bfcd; }
-
-@keyframes audit-loop-node-in {
+@keyframes audit-cycle-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
-/* 이 기록의 층을 한 번 짚는다 (고리가 커졌다가 자리 잡는다) */
-@keyframes audit-loop-halo {
-  0% { transform: scale(0.6); opacity: 0; }
-  60% { transform: scale(1.25); opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .audit-cycle-seg {
+    animation: none;
+    transition: none;
+  }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .audit-loop-node,
-  .audit-loop-halo {
-    animation: none;
+/* 좁은 팝업창: 고리 위, 설명 아래 */
+@media (max-width: 640px) {
+  .audit-cycle {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .audit-cycle-svg {
+    max-width: 220px;
+    margin: 0 auto;
+  }
+
+  .audit-cycle-panel {
+    min-height: 0;
   }
 }
 
