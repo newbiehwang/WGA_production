@@ -181,7 +181,7 @@ def test_chart_tools_get_pseudonyms_but_lookups_get_real_values(env, monkeypatch
                                                      model_id="claude-sonnet-5")
     client.tools = json.loads(env["mcp"]._rpc("tools/list")["body"])["result"]["tools"]
     monkeypatch.setattr(client.mcp_client, "call_tool", call_tool)
-    monkeypatch.setattr(llm, "get_client", lambda model_id: client)
+    monkeypatch.setattr(llm, "get_client", lambda: client)
 
     llm.handle_llm1_with_mcp({"text": f"{ARN} 역할 정책을 차트로 그려줘"}, ORIGIN, caller_id="alice")
 

@@ -92,7 +92,7 @@ def lambda_handler(event, context):
             "body": "<h3>Login Complete!!.</h3>",
             "headers": {"Content-Type": "text/html"}
         }
-    # 모델 선택(/models)은 없앴다: 모델은 LLM 서비스가 정한 하나로 고정이다
+    # 모델 선택(/models)은 없앴다: 모델은 LLM 서비스가 요청할 때의 최신 Sonnet으로 정한다
     elif path == "/slack-interactions" and http_method == "POST":
         parsed_data = urllib.parse.parse_qs(body)
         payload_str = parsed_data.get('payload', [''])[0]

@@ -5,7 +5,7 @@
 // 입력칸과 예시 목록 밖으로 포커스가 나가면 접히는 효과를 보여 준 뒤 사라진다.
 //
 // 홈(variant="home")은 FinGate-X 첫 화면의 입력창 모양이다: 2줄 입력칸, 아래 줄 왼쪽에 키 안내
-// (빈칸이면 'Tab 예시 넣기', 글이 있으면 'Enter 보내기'), 오른쪽에 보내기. 모델은 고정이라 고르는 칸이 없다.
+// (빈칸이면 'Tab 예시 넣기', 글이 있으면 'Enter 보내기'), 오른쪽에 보내기. 모델은 서버가 최신 Sonnet으로 정하므로 고르는 칸이 없다.
 import { type FocusEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 

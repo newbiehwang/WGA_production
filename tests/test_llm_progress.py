@@ -1,6 +1,6 @@
 """답변을 만드는 동안의 진행 상황과 사고 과정 (llm_progress.py, mcp_anthropic_client.py, llm_service.py)
 
-- 사고 설정은 고정한 모델에 맞춘다 (tests/test_fixed_model.py)
+- 사고 설정은 고른 모델(최신 Sonnet)이 지원하는 방식을 따른다 (tests/test_latest_model.py)
 - 도구를 쓰는 반복에서 사고 블록을 받은 그대로 다시 보낸다
 - 진행 상황은 요청한 사람만 쓰고 읽는다
 """
@@ -186,7 +186,7 @@ class FakeClient:
 
 def test_llm1_records_progress_and_returns_steps(progress_env, monkeypatch):
     llm = load_service_module("services/llm", "llm_service")
-    monkeypatch.setattr(llm, "get_client", lambda model_id: FakeClient())
+    monkeypatch.setattr(llm, "get_client", lambda: FakeClient())
 
     body = {"text": "알람 알려줘", "requestId": REQUEST_ID}
     response = llm.handle_llm1_with_mcp(body, "https://test.abc.amplifyapp.com", caller_id="alice")
@@ -201,7 +201,7 @@ def test_llm1_records_progress_and_returns_steps(progress_env, monkeypatch):
 def test_llm1_without_request_id_does_not_save_progress(progress_env, monkeypatch):
     # Slack 봇이나 예전 화면은 requestId를 보내지 않는다: 저장하지 않고 단계만 답변에 넣는다
     llm = load_service_module("services/llm", "llm_service")
-    monkeypatch.setattr(llm, "get_client", lambda model_id: FakeClient())
+    monkeypatch.setattr(llm, "get_client", lambda: FakeClient())
 
     response = llm.handle_llm1_with_mcp({"text": "알람 알려줘"}, "https://test.abc.amplifyapp.com", caller_id="alice")
     assert [s["type"] for s in json.loads(response["body"])["inference"]["steps"]] == ["thinking", "tool"]

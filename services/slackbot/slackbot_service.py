@@ -211,7 +211,7 @@ def handle_req_command(payload):
     set_user_processing_status(user_id, "processing")
 
     question = text.strip()
-    # 모델은 LLM 서비스가 정한 하나로 고정이다 (llm_service.MODEL_ID). 고르는 기능은 없다
+    # 모델은 LLM 서비스가 요청할 때의 최신 Sonnet으로 정한다 (llm_service.current_model). 고르는 기능은 없다
     print(f"User: {user_id}, Question: {question}")
 
     client.chat_postMessage(

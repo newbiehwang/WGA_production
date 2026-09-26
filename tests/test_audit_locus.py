@@ -50,7 +50,7 @@ def run(env, monkeypatch, replies, log_text=ATTACK_KO):
                                                      model_id="claude-sonnet-5")
     client.tools = json.loads(env["mcp"]._rpc("tools/list")["body"])["result"]["tools"]
     monkeypatch.setattr(client.mcp_client, "call_tool", call_tool)
-    monkeypatch.setattr(llm, "get_client", lambda model_id: client)
+    monkeypatch.setattr(llm, "get_client", lambda: client)
     return json.loads(llm.handle_llm1_with_mcp({"text": "최근 오류 로그 보여줘"}, ORIGIN, caller_id="alice")["body"])
 
 

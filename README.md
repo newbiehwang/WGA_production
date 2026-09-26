@@ -459,7 +459,7 @@ uv run --no-project --python 3.12 --with-requirements requirements-dev.txt pytho
 
 - 화면이 요청마다 `requestId`를 만들어 `/llm1`에 함께 보내고, 답을 기다리는 동안 `GET /llm1/progress/{requestId}`를 1초마다 부릅니다.
 - LLM Lambda는 모델 요청·사고 요약·도구 시작과 끝마다 진행 상황 테이블(`wga-llm-progress-{env}`)에 기록합니다(`services/llm/llm_progress.py`). 요청한 사람만 쓰고 읽을 수 있고, 한 시간 뒤 TTL로 지워집니다.
-- 사고 과정(extended thinking)은 고정한 모델(Claude Sonnet 5)이 받는 adaptive 방식으로 켜고, 사고 요약을 요청합니다(`display: summarized`). 도구를 쓰는 반복에서는 받은 사고 블록을 고치지 않고 다음 요청에 그대로 보냅니다.
+- 사고 과정(extended thinking)은 모델마다 받는 설정이 달라, Anthropic Models API가 알려 주는 그 모델의 지원 방식(adaptive / enabled)에 맞춰 켭니다. adaptive면 사고 요약을 요청합니다(`display: summarized`). 도구를 쓰는 반복에서는 받은 사고 블록을 고치지 않고 다음 요청에 그대로 보냅니다.
 - 같은 단계 목록을 답변의 `inference.steps`에도 넣어, 다시 불러온 대화에서도 순서대로 볼 수 있습니다.
 
 ### Lambda 기반 서버리스 백엔드 아키텍처
@@ -503,7 +503,7 @@ pytest
 | `test_mcp_client.py` | MCP Function URL 호출 시 SigV4 서명 |
 | `test_slack_security.py` | Slack 요청 서명(위조·변조·재전송), Cognito ID 토큰(aud·iss·만료·서명) 검증 |
 | `test_mcp_tools.py` | MCP 도구: 공식 서버 도구가 목록에 합쳐지는지(`$ref` 없이), 공식 CloudWatch·Cost Explorer·문서 검색 호출, 도구 오류를 `isError` 결과로 돌려주는지, 대시보드 도구와 세션 저장소 |
-| `test_fixed_model.py` | 모델 고정(최신 Sonnet): 요청의 modelId 무시, 모델 목록을 조회하지 않음, `/health`, 화면·Slack에 모델 선택이 없음 |
+| `test_latest_model.py` | 요청할 때 최신 Sonnet 자동 선택(출시일 비교, 새 Sonnet으로 저절로 넘어감), 목록 캐시·오류 시 마지막 목록·한 번도 못 받았을 때의 예비 모델, 모델별 사고 설정, 요청의 modelId 무시, 화면·Slack에 모델 선택이 없음 |
 
 ### CI (`.github/workflows/ci.yml`)
 PR과 `main` 푸시마다 세 작업이 병렬로 실행됩니다. AWS 자격 증명은 사용하지 않습니다.
@@ -559,7 +559,7 @@ A: 서버리스 구성이라 고정 비용은 낮고, 대부분 LLM 호출(토�
 A: 현재는 AWS 클라우드 전용입니다.
 
 ### Q: 다른 AI 모델을 사용할 수 있나요?
-A: 아니요. 모든 요청(웹·Slack)이 최신 Sonnet(Claude Sonnet 5) 하나를 쓰고, 화면이나 Slack에서 고르는 기능은 없습니다. 모델은 `services/llm/llm_service.py`의 `MODEL_ID`에 고정되어 있어, 새 Sonnet이 나오거나 퇴역 예고가 오면 이 값을 바꿔 배포합니다.
+A: 아니요. 모든 요청(웹·Slack)이 요청할 때의 최신 Sonnet을 쓰고, 화면이나 Slack에서 고르는 기능은 없습니다. 모델 ID를 코드에 고정하지 않고 Anthropic Models API 목록에서 가장 최근에 나온 Sonnet을 고르므로(한 시간 캐시), 새 Sonnet이 나오면 배포 없이 넘어가고 모델이 퇴역해도 요청이 실패하지 않습니다. 목록을 한 번도 받지 못했을 때만 `FALLBACK_MODEL`(`claude-sonnet-5`)을 씁니다 (`services/llm/llm_service.py`).
 
 ## 지원 및 문의
 

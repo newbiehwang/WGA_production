@@ -56,16 +56,134 @@ PENDING_ACTIONS_TABLE = os.environ.get("PENDING_ACTIONS_TABLE")
 approval_store = ApprovalStore(boto3.resource("dynamodb").Table(PENDING_ACTIONS_TABLE)) if PENDING_ACTIONS_TABLE else None
 
 
-# ---------------------------------------------------------------- 모델 (고정)
-# 모든 요청(웹·Slack)이 한 모델을 쓴다. 사용자가 모델을 고르는 기능은 없다.
-# 최신 Sonnet으로 고정한다 (Sonnet 5 $2/$10 per MTok로 이전 Sonnet보다 싸다).
-# 고정한 모델이 퇴역하면 그날부터 모든 요청이 실패하므로, 새 Sonnet이 나오거나 퇴역 예고가 오면 이 값을 바꾼다
+# ---------------------------------------------------------------- 모델: 요청할 때 최신 Sonnet
+# 모든 요청(웹·Slack)이 같은 모델을 쓰고, 사용자가 모델을 고르는 기능은 없다.
+# 모델 ID를 코드에 고정하지 않고, 요청할 때 Anthropic이 지금 제공하는 모델 목록(Models API)에서 가장 최근에 나온
+# Sonnet을 고른다. 새 Sonnet이 나오면 배포 없이 저절로 넘어가고, 고정한 모델이 퇴역해 모든 요청이 실패하는 일이 없다
 # (예전 기본값 claude-3-5-sonnet-20241022는 2025-10-28, claude-3-7-sonnet-20250219는 2026-02-19에 퇴역했다).
-MODEL_ID = "claude-sonnet-5"
-MODEL_NAME = "Claude Sonnet 5"
-# 사고 설정. Sonnet 5는 adaptive만 받는다(budget_tokens를 보내면 400). 화면에 사고 과정을 보여 주려면
-# 사고 요약을 요청해야 한다(display: summarized. 없으면 빈 사고 블록이 온다)
-THINKING = {"type": "adaptive", "display": "summarized"}
+MODEL_FAMILY = "sonnet"
+MODELS_CACHE_SECONDS = 3600  # 모델 목록은 자주 바뀌지 않는다. Lambda 컨테이너마다 한 시간 재사용
+# 목록을 한 번도 받지 못했을 때만 쓰는 모델 (Models API 장애 등). 평소에는 쓰이지 않는다
+FALLBACK_MODEL = {"id": "claude-sonnet-5", "display_name": "Claude Sonnet 5", "thinking": "adaptive"}
+_models_cache = {"at": 0.0, "models": []}
+
+
+def get_anthropic_models():
+    """
+    Anthropic Models API(GET /v1/models)에서 지금 사용할 수 있는 모델 목록을 끝까지 조회한다.
+
+    Returns:
+        list: [{"id", "display_name", "created_at", "thinking"}] (실패하면 빈 목록)
+    """
+    try:
+        CONFIG = get_config()
+        anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY') or CONFIG.get('anthropic', {}).get('api_key')
+
+        if not anthropic_api_key:
+            print("Anthropic API 키가 설정되지 않았습니다.")
+            return []
+
+        headers = {
+            "x-api-key": anthropic_api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }
+
+        # 목록 순서(최신부터)에 기대지 않도록 마지막 페이지까지 받는다
+        model_list = []
+        params = {"limit": 1000}
+        while True:
+            response = requests.get("https://api.anthropic.com/v1/models", headers=headers, params=params,
+                                    timeout=10)
+            if response.status_code != 200:
+                print(f"Anthropic Models API 오류: {response.status_code} - {response.text}")
+                return []
+            page = response.json()
+            for model in page.get('data', []):
+                model_list.append({
+                    "id": model.get("id", ""),
+                    "display_name": model.get("display_name", model.get("id", "")),
+                    "created_at": model.get("created_at", ""),   # 출시일 (RFC 3339). 최신 Sonnet을 고르는 데 쓴다
+                    "thinking": thinking_mode(model),             # 지원하는 사고 방식 (thinking_config에 쓴다)
+                })
+            if not page.get('has_more') or not page.get('last_id'):
+                break
+            params = {"limit": 1000, "after_id": page['last_id']}
+
+        print(f"Anthropic 모델 {len(model_list)}개 조회 완료")
+        return model_list
+
+    except Exception as e:
+        print(f"Anthropic 모델 조회 중 오류: {str(e)}")
+        return []
+
+
+def thinking_mode(model):
+    """
+    Models API가 알려 주는 모델의 사고(extended thinking) 지원 방식: "adaptive" | "enabled" | None.
+
+    모델마다 받는 설정이 다르다. 최신 모델(Sonnet 5, Opus 4.6 이후 등)은 adaptive만 받고 budget_tokens를
+    보내면 400이다. 예전 모델(Haiku 4.5 등)은 enabled + budget_tokens만 받는다. 모델 ID로 나누면 새 모델이
+    나올 때마다 고쳐야 하므로, Models API의 capabilities를 그대로 따른다.
+    """
+    types = (((model.get("capabilities") or {}).get("thinking") or {}).get("types")) or {}
+    if (types.get("adaptive") or {}).get("supported"):
+        return "adaptive"
+    if (types.get("enabled") or {}).get("supported"):
+        return "enabled"
+    return None
+
+
+THINKING_BUDGET_TOKENS = 4000  # enabled 방식(예전 모델)의 사고 예산. MAX_TOKENS(16000)보다 작아야 한다
+
+
+def thinking_config(model):
+    """
+    요청에 넣을 사고 설정 (고른 모델이 지원하는 방식을 따른다). 화면에 사고 과정을 보여 주려면 사고 요약을 받아야 한다.
+    - adaptive: 사고 요약은 요청해야 온다(display: summarized). 없으면 최신 모델은 빈 사고 블록을 준다
+    - enabled: 예전 모델은 사고 요약을 기본으로 준다
+    - 모델이 사고를 지원하지 않으면 넣지 않는다
+    """
+    mode = (model or {}).get("thinking")
+    if mode == "adaptive":
+        return {"type": "adaptive", "display": "summarized"}
+    if mode == "enabled":
+        return {"type": "enabled", "budget_tokens": THINKING_BUDGET_TOKENS}
+    return None
+
+
+def available_models():
+    """모델 목록 (캐시). 새로 받지 못하면 마지막으로 받은 목록을 계속 쓴다 (일시적인 오류로 채팅이 멈추지 않게)."""
+    now = time.time()
+    if _models_cache["models"] and now - _models_cache["at"] < MODELS_CACHE_SECONDS:
+        return _models_cache["models"]
+    models = get_anthropic_models()
+    if models:
+        _models_cache.update(at=now, models=models)
+    return _models_cache["models"]
+
+
+def latest_sonnet(models):
+    """
+    Sonnet 계열 중 가장 최근에 나온 모델 (없으면 None).
+
+    출시일(created_at)로 비교한다. 모델 ID 형식이 세대마다 달라서(claude-3-5-sonnet-20241022,
+    claude-sonnet-4-5-20250929, claude-sonnet-5 …) ID를 잘라 버전을 비교하면 틀리기 쉽다.
+    """
+    candidates = [m for m in models if MODEL_FAMILY in m.get("id", "")]
+    if not candidates:
+        return None
+    # 출시일이 없는 항목은 고르지 않도록 가장 이른 값("")으로 둔다. 같은 날이면 ID 순으로 정해 결과가 매번 같게 한다
+    return max(candidates, key=lambda m: (m.get("created_at") or "", m["id"]))
+
+
+def current_model():
+    """이번 요청에 쓸 모델: 지금 목록의 최신 Sonnet. 목록을 한 번도 받지 못했으면 FALLBACK_MODEL."""
+    model = latest_sonnet(available_models())
+    if model is None:
+        print(f"모델 목록이 없어 {FALLBACK_MODEL['id']}을(를) 씁니다")
+        return FALLBACK_MODEL
+    return model
 
 
 def tool_step(entry):
@@ -147,17 +265,18 @@ def get_session_messages_as_array(session_id: str, user_id: str) -> list:
         return []
 
 
-def get_client(model_id: str = MODEL_ID):
+def get_client():
     """
-    MCP 클라이언트 인스턴스를 가져오거나 생성 (모델 ID별로 캐시. 모델은 MODEL_ID 하나로 고정)
+    MCP 클라이언트 인스턴스를 가져오거나 생성. 요청할 때의 최신 Sonnet을 쓰고, 모델 ID별로 캐시한다
+    (새 Sonnet이 나오면 새 클라이언트가 만들어진다)
     """
     global client_cache
 
     # 사용할 클라이언트 유형 결정 (Bedrock 또는 Anthropic)
     use_anthropic = os.environ.get('USE_ANTHROPIC_API', 'true').lower() == 'true'
-    # Bedrock은 모델 ID 형식이 달라(anthropic.claude-…) BedrockMCPClient의 기본값을 쓴다
-    if not use_anthropic:
-        model_id = None
+    # Bedrock은 모델 ID 형식이 달라(anthropic.claude-…) Anthropic 목록으로 고르지 않고 BedrockMCPClient의 기본값을 쓴다
+    model = current_model() if use_anthropic else None
+    model_id = model["id"] if model else None
 
     # 캐시에 해당 모델 ID의 클라이언트가 없으면 생성
     if model_id not in client_cache:
@@ -175,7 +294,7 @@ def get_client(model_id: str = MODEL_ID):
                 mcp_url=mcp_url,
                 api_key=anthropic_api_key,
                 model_id=model_id,
-                thinking=THINKING,
+                thinking=thinking_config(model),
             )
         else:
             # Bedrock 설정
@@ -218,7 +337,7 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
         user_input = body.get('question') or body.get('text') or body.get('input', {}).get('text', '')
         session_id = body.get('sessionId')
         is_cached = body.get('isCached', False)
-        model_id = MODEL_ID  # 모델은 고정이다. 예전 화면·Slack이 보내던 modelId는 무시한다
+        model_id = None  # 모델은 get_client가 정한다 (최신 Sonnet). 예전 화면·Slack이 보내던 modelId는 무시한다
         slack_user_id = body.get("user_id")
         slack_previous_questions = body.get("previous_questions")
         # 현재시간(한국)
@@ -269,7 +388,7 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
                          request_id=request_id, session_id=session_id, model_id=model_id, question=user_input)
 
         # MCP 클라이언트 가져오기
-        client = get_client(model_id)
+        client = get_client()
         client.progress = progress
         client.redactor = redactor
         client.audit = audit

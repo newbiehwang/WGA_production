@@ -41,7 +41,7 @@ const FIRST_THINKING_AT = 600; // 첫 사고 요약이 나오는 때
 const TOOL_MS = 1400; // 도구 하나가 도는 시간
 const STEP_GAP_MS = 400; // 단계 사이
 
-// 모델은 고정이다 (services/llm/llm_service.py의 MODEL_ID)
+// 지금 쓰는 모델 (실제로는 요청할 때의 최신 Sonnet, services/llm/llm_service.py의 current_model)
 const MODEL = { id: "claude-sonnet-5", display_name: "Claude Sonnet 5" };
 
 interface MockTool {

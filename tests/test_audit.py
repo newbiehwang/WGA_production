@@ -174,7 +174,7 @@ def items_of(table, user_id):
 
 def test_llm1_records_the_request(audit_env, monkeypatch):
     llm = load_service_module("services/llm", "llm_service")
-    monkeypatch.setattr(llm, "get_client", lambda model_id: FakeClient())
+    monkeypatch.setattr(llm, "get_client", lambda: FakeClient())
 
     body = {"text": f"계정 {ACCOUNT}의 키 {ACCESS_KEY} 확인", "requestId": REQUEST_ID, "sessionId": "s1"}
     llm.handle_llm1_with_mcp(body, ORIGIN, caller_id="alice", caller_email="alice@example.com")
@@ -190,7 +190,7 @@ def test_llm1_records_the_request(audit_env, monkeypatch):
 
 def test_slack_requests_are_recorded_by_slack_user(audit_env, monkeypatch):
     llm = load_service_module("services/llm", "llm_service")
-    monkeypatch.setattr(llm, "get_client", lambda model_id: FakeClient())
+    monkeypatch.setattr(llm, "get_client", lambda: FakeClient())
     monkeypatch.setattr(llm, "send_slack_dm", lambda user, text: None)
 
     body = {"text": "알람", "user_id": "U123", "previous_questions": [{"role": "user", "content": "x"}]}
@@ -206,7 +206,7 @@ def test_failed_request_is_recorded(audit_env, monkeypatch):
         def process_user_input(self, text, system_prompt):
             raise RuntimeError(f"Anthropic 오류 {ACCESS_KEY}")
 
-    monkeypatch.setattr(llm, "get_client", lambda model_id: Broken())
+    monkeypatch.setattr(llm, "get_client", lambda: Broken())
     response = llm.handle_llm1_with_mcp({"text": "알람"}, ORIGIN, caller_id="alice")
     assert response["statusCode"] == 500
     request = items_of(audit_env, "alice")[0]
@@ -218,7 +218,7 @@ def test_audit_failure_does_not_stop_the_answer(aws, monkeypatch):
     monkeypatch.setenv("AUDIT_TABLE", "missing-table")
     monkeypatch.setenv("AUDIT_LOG_GROUP", "/missing/group")
     llm = load_service_module("services/llm", "llm_service")
-    monkeypatch.setattr(llm, "get_client", lambda model_id: FakeClient())
+    monkeypatch.setattr(llm, "get_client", lambda: FakeClient())
     response = llm.handle_llm1_with_mcp({"text": "알람"}, ORIGIN, caller_id="alice")
     assert response["statusCode"] == 200 and json.loads(response["body"])["answer"] == "답변"
 

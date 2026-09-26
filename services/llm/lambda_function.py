@@ -1,6 +1,6 @@
 # llm/lambda_function.py
 import requests
-from llm_service import (MODEL_ID, MODEL_NAME, parse_body, handle_llm1_with_mcp, handle_progress, handle_audit,
+from llm_service import (current_model, parse_body, handle_llm1_with_mcp, handle_progress, handle_audit,
                          handle_action)
 from common.config import get_config
 from common.utils import cors_response
@@ -19,8 +19,10 @@ def lambda_handler(event, context):
     try:
         body = parse_body(event) or {}
         if path == "/health" and http_method == "GET":
-            # 상태와 쓰는 모델 (모델은 고정이다. 고르는 기능은 없다)
-            return cors_response(200, {"status": "ok", "model": {"id": MODEL_ID, "display_name": MODEL_NAME}}, origin)
+            # 상태와 지금 쓰는 모델 (최신 Sonnet. 고르는 기능은 없다)
+            model = current_model()
+            return cors_response(200, {"status": "ok", "model": {"id": model["id"],
+                                                                "display_name": model.get("display_name")}}, origin)
 
         elif path == "/llm1" and http_method == "POST":
             claims = (event.get("requestContext") or {}).get("authorizer", {}).get("claims") or {}

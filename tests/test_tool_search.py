@@ -44,7 +44,7 @@ def make_client(monkeypatch, env, replies, calls=None):  # noqa: F811
                                                      model_id="claude-sonnet-5")
     client.tools = real_tools(env)
     monkeypatch.setattr(client.mcp_client, "call_tool", call_tool)
-    monkeypatch.setattr(llm, "get_client", lambda model_id: client)
+    monkeypatch.setattr(llm, "get_client", lambda: client)
     return llm, client, sent
 
 
