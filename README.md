@@ -272,6 +272,8 @@ ALARM_EMAIL=you@example.com ./deploy.sh dev
 ADMIN_EMAIL=admin@example.com ./deploy.sh dev
 ```
 
+`ADMIN_EMAIL`·`ALARM_EMAIL`은 저장소 루트 `.env`에 적어 두어도 됩니다(`.env.example` 참고). 명령 앞에 붙인 값이 있으면 그것을 먼저 씁니다.
+
 재배포 동작:
 - **코드 버전**: Lambda zip의 S3 키와 MCP 이미지 태그에 git 커밋 SHA를 붙여, 코드를 바꾸면 CloudFormation이 변경을 감지해 새 코드를 배포합니다. 커밋하지 않은 변경이 있으면 `-dirty-<시각>`이 붙습니다.
 - **데이터 보존**: 버킷 내용을 지우지 않습니다. 모든 버킷이 `DeletionPolicy: Retain`이라 내용물이 있어도 스택 업데이트·롤백에 영향이 없습니다. 배포 버킷의 오래된 빌드 산출물은 수명 주기 규칙(90일)으로 정리됩니다.
@@ -288,7 +290,7 @@ ADMIN_EMAIL=admin@example.com ./deploy.sh dev
 추가로, SSM Parameter 정보도 제공됩니다.
 
 ### 4단계: 관리자 계정
-일반 사용자는 로그인 페이지에서 스스로 가입하고, 어느 그룹에도 속하지 않습니다(질문·조회만). 관리자는 배포할 때 `ADMIN_EMAIL`로 정합니다.
+일반 사용자는 로그인 페이지에서 스스로 가입하고, 어느 그룹에도 속하지 않습니다(질문·조회만). 관리자는 배포할 때 `ADMIN_EMAIL`(명령 앞에 붙이거나 `.env`에 적음)로 정합니다.
 
 | 계정 | 만드는 방법 | 할 수 있는 것 |
 |:--|:--|:--|

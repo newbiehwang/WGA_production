@@ -315,7 +315,8 @@ def test_deploy_syncs_key_before_stacks_and_fills_root_env():
     written = set(re.findall(r'dotenv_set "\$ROOT_ENV_FILE" (\w+)', DEPLOY_SH))
     example = set(re.findall(r"^(\w+)=", (ROOT / ".env.example").read_text(), re.M))
     assert written == {"VITE_API_DEST", "AWS_REGION", "USER_POOL_ID", "COGNITO_CLIENT_ID", "COGNITO_DOMAIN"}
-    assert example == written | {"ANTHROPIC_API_KEY"}
+    # 직접 적는 값: API 키와 (선택) 이메일 두 개. 나머지는 deploy.sh가 채운다
+    assert example == written | {"ANTHROPIC_API_KEY", "ADMIN_EMAIL", "ALARM_EMAIL"}
 
 
 def test_root_env_is_ignored_but_example_is_committed():
@@ -453,3 +454,59 @@ def test_self_signup_stays_open_and_invite_has_the_required_placeholders():
     assert pool["AllowAdminCreateUserOnly"] is False  # 일반 사용자는 스스로 가입한다
     message = pool["InviteMessageTemplate"]["EmailMessage"]  # 관리자 초대 메일. Cognito는 두 자리가 모두 있어야 받는다
     assert "{username}" in message and "{####}" in message
+
+
+# ---------------------------------------------------------------- .env의 이메일 (ADMIN_EMAIL, ALARM_EMAIL)
+
+def run_copied_deploy(tmp_path, dotenv_text, environ=None):
+    """deploy.sh를 임시 폴더로 복사해 그 옆의 .env로 실행한다 (저장소의 진짜 .env는 건드리지 않는다).
+    잘못된 이메일이면 맨 앞에서 멈추므로, 멈출 때 찍는 값으로 어느 값을 읽었는지 본다."""
+    (tmp_path / "deploy.sh").write_text(DEPLOY_SH)
+    if dotenv_text is not None:
+        (tmp_path / ".env").write_text(dotenv_text, encoding="utf-8")
+    script = tmp_path / "aws"
+    script.write_text("#!/bin/bash\necho 123456789012\n")
+    script.chmod(0o755)
+    return subprocess.run(["bash", str(tmp_path / "deploy.sh"), "dev"], capture_output=True, text=True, cwd=tmp_path,
+                          env={"PATH": f"{tmp_path}:/usr/bin:/bin", **(environ or {})})
+
+
+def test_admin_email_is_read_from_dotenv(tmp_path):
+    result = run_copied_deploy(tmp_path, "ANTHROPIC_API_KEY=\nADMIN_EMAIL=from-dotenv\n")
+    assert result.returncode == 1 and "'from-dotenv'" in result.stdout
+
+
+def test_command_line_value_wins_over_dotenv(tmp_path):
+    result = run_copied_deploy(tmp_path, "ADMIN_EMAIL=admin@example.com\n", {"ADMIN_EMAIL": "from-command"})
+    assert result.returncode == 1 and "'from-command'" in result.stdout
+
+
+@pytest.mark.parametrize("dotenv_text, expected", [
+    ('ADMIN_EMAIL="quoted"\n', "quoted"),                      # 감싼 따옴표를 벗긴다
+    ("  ADMIN_EMAIL = spaced  \n", "spaced"),                  # 앞뒤 공백
+    ("ADMIN_EMAIL=first\nADMIN_EMAIL=last\n", "last"),         # 같은 키는 마지막 줄 (설치 도구와 같다)
+    ("# ADMIN_EMAIL=commented\nADMIN_EMAIL=real\n", "real"),   # 주석 줄은 키가 다르다
+    ("ADMIN_EMAIL=$(touch pwned)\n", "$(touch pwned)"),        # 셸로 실행하지 않고 글자 그대로
+])
+def test_dotenv_values_follow_the_installer_rules(tmp_path, dotenv_text, expected):
+    result = run_copied_deploy(tmp_path, dotenv_text)
+    assert result.returncode == 1 and f"'{expected}'" in result.stdout
+    assert not (tmp_path / "pwned").exists()
+
+
+@pytest.mark.parametrize("dotenv_text", [None, "ANTHROPIC_API_KEY=\n", "ADMIN_EMAIL=\n", b"\xff\xfe broken"])
+def test_missing_or_unreadable_dotenv_means_no_admin_email(tmp_path, dotenv_text):
+    # .env가 없거나 값이 비었거나 읽지 못해도 멈추지 않는다 (그다음 단계까지 간다)
+    body = "set -e\n" + f'ROOT_ENV_FILE="{tmp_path}/.env"\n' + extract_function("dotenv_get") + \
+        'echo "[$(dotenv_get ADMIN_EMAIL)]"\n'
+    if isinstance(dotenv_text, bytes):
+        (tmp_path / ".env").write_bytes(dotenv_text)
+    elif dotenv_text is not None:
+        (tmp_path / ".env").write_text(dotenv_text)
+    result = subprocess.run(["bash", "-c", body], capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"})
+    assert result.returncode == 0 and result.stdout.strip() == "[]"
+
+
+def test_dotenv_example_lists_the_emails():
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "\nADMIN_EMAIL=\n" in example and "\nALARM_EMAIL=\n" in example

@@ -93,12 +93,13 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
     if ctx.alarm_email:
         extra_env["ALARM_EMAIL"] = ctx.alarm_email
     else:
-        emitter.log("알람 이메일 없음 (--alarm-email로 지정하면 CloudWatch 알람을 메일로 받습니다)",
+        emitter.log("알람 이메일 없음 (--alarm-email 또는 .env의 ALARM_EMAIL로 지정하면 CloudWatch 알람을 메일로 받습니다)",
                     stream="info")
     if ctx.admin_email:
         extra_env["ADMIN_EMAIL"] = ctx.admin_email
     else:
-        emitter.log("관리자 이메일 없음 (--admin-email로 지정하면 그 사용자가 변경 작업을 승인하고 모든 감사 로그를 봅니다)",
+        emitter.log("관리자 이메일 없음 (--admin-email 또는 .env의 ADMIN_EMAIL로 지정하면 그 사용자가 변경 작업을 승인하고 "
+                    "모든 감사 로그를 봅니다)",
                     stream="info")
 
     parser = ProgressParser(emitter)

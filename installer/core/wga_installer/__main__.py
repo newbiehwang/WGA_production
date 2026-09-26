@@ -31,12 +31,13 @@ from .steps import check, deploy, oidc, setup, teardown, verify
 
 
 def _alarm_email(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--alarm-email", help="CloudWatch 알람을 받을 이메일 (deploy.sh의 ALARM_EMAIL)")
+    parser.add_argument("--alarm-email", help="CloudWatch 알람을 받을 이메일 (deploy.sh의 ALARM_EMAIL). 없으면 .env의 ALARM_EMAIL")
 
 
 def _admin_email(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--admin-email",
-                        help="관리자 계정 이메일 (deploy.sh의 ADMIN_EMAIL). admins·approvers 그룹에 넣고, 없으면 만들어 초대 메일을 보낸다")
+                        help="관리자 계정 이메일 (deploy.sh의 ADMIN_EMAIL). admins·approvers 그룹에 넣고, 없으면 만들어 초대 메일을 "
+                             "보낸다. 없으면 .env의 ADMIN_EMAIL")
 
 
 def _github_repo(parser: argparse.ArgumentParser) -> None:

@@ -6,10 +6,38 @@ set -e
 
 # 환경 변수 설정
 ENV=${1:-dev}  # 기본값: dev
-ALARM_EMAIL=${ALARM_EMAIL:-}  # CloudWatch 알람 수신 이메일 (선택, 예: ALARM_EMAIL=me@example.com ./deploy.sh dev)
+
+# 저장소 루트 .env (아래 '루트 .env' 참고)
+ROOT_ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.env"
+
+# .env에서 값 하나를 읽는다 ($1: 키). 셸로 source하지 않고 글자로만 읽는다.
+# 규칙은 설치 도구(installer/core/wga_installer/dotenv.py)·sync_anthropic_key와 같다: 앞뒤 공백과 감싼 따옴표를 벗기고,
+# 같은 키가 여러 번 나오면 마지막 줄을 쓴다. 파일·키가 없거나 읽지 못하면 빈 글자.
+# 값이 셸 변수로 들어오므로 비밀이 아닌 값에만 쓴다 (ANTHROPIC_API_KEY는 sync_anthropic_key가 따로 다룬다)
+dotenv_get() {
+    [ -f "$ROOT_ENV_FILE" ] || return 0
+    python3 - "$ROOT_ENV_FILE" "$1" <<'PY'
+import sys
+path, wanted = sys.argv[1:3]
+value = ""
+try:
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            name, sep, rest = line.strip().partition("=")
+            if sep and name.strip() == wanted:
+                value = rest.strip().strip('"').strip("'")
+except (OSError, UnicodeDecodeError):
+    value = ""
+print(value)
+PY
+}
+
+# 이메일은 명령 앞의 환경 변수가 먼저이고, 없으면 .env 값을 쓴다 (GitHub Actions는 .env 없이 저장소 변수로 넘긴다)
+# CloudWatch 알람 수신 이메일 (선택, 예: ALARM_EMAIL=me@example.com ./deploy.sh dev 또는 .env의 ALARM_EMAIL=)
+ALARM_EMAIL=${ALARM_EMAIL:-$(dotenv_get ALARM_EMAIL)}
 # 관리자 계정 이메일 (선택). 이 이메일의 사용자를 admins·approvers 그룹에 넣는다. 없으면 만들고 초대 메일을 보낸다
-# (예: ADMIN_EMAIL=admin@example.com ./deploy.sh dev). 일반 사용자는 로그인 페이지에서 스스로 가입한다
-ADMIN_EMAIL=${ADMIN_EMAIL:-}
+# (예: ADMIN_EMAIL=admin@example.com ./deploy.sh dev 또는 .env의 ADMIN_EMAIL=). 일반 사용자는 스스로 가입한다
+ADMIN_EMAIL=${ADMIN_EMAIL:-$(dotenv_get ADMIN_EMAIL)}
 ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
 # 리전 우선순위: AWS_REGION 환경 변수(CI의 OIDC 포함) → CLI 프로필 설정 → 기본값 서울(ap-northeast-2)
 REGION=${AWS_REGION:-$(aws configure get region || true)}
@@ -197,8 +225,9 @@ PY
 # 저장소 루트의 .env 하나에 환경 값을 모은다 (.env.example 참고, git에는 올리지 않는다).
 # - 직접 적는 값: ANTHROPIC_API_KEY. 배포할 때 SSM Parameter Store(SecureString)로 올린다 (Lambda는 SSM에서 읽는다)
 # - deploy.sh가 채우는 값: 프론트엔드 빌드에 들어가는 API 주소·Cognito 설정 (frontend/vite.config.ts가 읽는다)
+# - 직접 적는 값(선택): ALARM_EMAIL, ADMIN_EMAIL. 명령 앞의 환경 변수가 없을 때 쓴다 (맨 위 dotenv_get)
 # .env는 셸로 source하지 않는다: 값 안의 글자가 명령으로 실행될 수 있고, 비밀 값이 셸 변수로 퍼진다.
-ROOT_ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.env"
+# (ROOT_ENV_FILE은 이메일을 읽으려고 맨 위에서 정한다)
 
 # .env의 KEY=VALUE 한 줄을 바꾸거나(없으면 끝에 더한다) 다른 줄은 그대로 둔다 ($1: 파일, $2: 키, $3: 값).
 # 직접 적어 둔 ANTHROPIC_API_KEY와 주석을 지우지 않으려고 파일을 새로 쓰지 않고 줄 단위로 고친다

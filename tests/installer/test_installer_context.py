@@ -86,3 +86,18 @@ def test_real_repository_is_detected():
     assert find_repo_root(ROOT / "installer" / "core") == ROOT
     ctx = build_context(env="dev", region="ap-northeast-2", profile=None, repo=None, environ={}, cwd=ROOT)
     assert ctx.repo_root == ROOT and ctx.ssm_prefix == "/wga/dev"
+
+
+def test_emails_come_from_dotenv_when_options_are_missing(tmp_path):
+    # deploy.sh와 같은 순서: 명령줄 옵션이 없으면 저장소 루트 .env의 값을 쓴다
+    (tmp_path / ".env").write_text('ADMIN_EMAIL="admin@example.com"\nALARM_EMAIL=alarm@example.com\n')
+    (tmp_path / "deploy.sh").write_text("#!/bin/bash\n")
+    (tmp_path / "cloudformation").mkdir()
+    ctx = build_context(env="dev", region="ap-northeast-2", profile=None, repo=str(tmp_path), environ={},
+                        cwd=tmp_path)
+    assert ctx.repo_root == tmp_path.resolve()
+    assert (ctx.admin_email, ctx.alarm_email) == ("admin@example.com", "alarm@example.com")
+    # 명령줄 옵션이 먼저다
+    ctx = build_context(env="dev", region="ap-northeast-2", profile=None, repo=str(tmp_path), environ={},
+                        cwd=tmp_path, admin_email="cli@example.com")
+    assert ctx.admin_email == "cli@example.com"

@@ -14,6 +14,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import dotenv
+
 ENVIRONMENTS = ("dev", "test", "prod")   # deploy.sh가 허용하는 값과 같다
 DEFAULT_ENV = "dev"
 DEFAULT_REGION = "ap-northeast-2"
@@ -131,6 +133,9 @@ def build_context(*, env: str, region: str | None, profile: str | None, repo: st
     else:
         repo_root = find_repo_root(cwd.resolve())
     region_value, region_source = resolve_region(region, environ, profile)
+    # 이메일은 명령줄 옵션이 먼저이고, 없으면 저장소 루트 .env 값을 쓴다 (deploy.sh와 같은 순서)
+    alarm_email = alarm_email or dotenv.read_value(repo_root, "ALARM_EMAIL")
+    admin_email = admin_email or dotenv.read_value(repo_root, "ADMIN_EMAIL")
     return Context(env=env, region=region_value, region_source=region_source, repo_root=repo_root,
                    repo_requested=requested, aws_profile=profile, base_environ=dict(environ),
                    alarm_email=alarm_email, admin_email=admin_email, github_repo=github_repo, allow_prod=allow_prod,
