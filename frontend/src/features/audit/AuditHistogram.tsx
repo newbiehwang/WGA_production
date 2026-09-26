@@ -21,7 +21,6 @@
 //   그 칸의 시각과 건수는 막대 머리 옆 말풍선으로 보이고, 다른 막대로 옮기면 말풍선이 미끄러지듯 따라간다
 //   (그래프 안에 두어 위의 버튼을 가리지 않게)
 // - 드래그하면 그 구간으로, 한 칸을 누르면 그 칸으로 기간을 좁힌다. 드래그하는 동안 고른 구간의 시각을 위에 보인다
-// - 목록의 행에 마우스를 올리면(highlightAt) 그 기록이 든 막대만 또렷하게 두고, 바닥선 바로 아래에 파란 줄을 긋는다
 // - 움직임을 줄이는 설정이면 자라기·미끄러지기 효과를 끈다 (audit.css)
 // - 키보드: 그래프에 포커스를 두고 ←/→로 칸을 옮기고 Enter로 그 칸만 본다. 칸의 내용은 화면 읽기 프로그램에도 알린다
 // - 색: 결과는 성공 #4a8fe0·실패 #d03b3b, 나머지는 차례가 정해진 색 목록의 앞 다섯(CATEGORICAL)과 기타 회색.
@@ -160,7 +159,6 @@ export function AuditHistogram({
     rankRecords,
     window,
     loading,
-    highlightAt,
     groupBy,
     onSelect,
     onFilter,
@@ -169,7 +167,6 @@ export function AuditHistogram({
     rankRecords: AuditRecord[]; // 요청자·도구의 많은 순을 정할 기록 (받은 기록 전체)
     window: TimeWindow;
     loading: boolean; // 다시 불러오는 중: 앞 그래프를 흐리게 남겨 둔다
-    highlightAt: number | null; // 목록에서 마우스를 올린 기록의 시각
     groupBy: GroupBy;
     onSelect: (window: TimeWindow) => void;
     onFilter: (facet: FacetId, values: string[]) => void; // 범례를 눌렀다
@@ -285,8 +282,6 @@ export function AuditHistogram({
         setActive(last >= 0 ? last : buckets.length - 1);
     };
 
-    // 목록에서 가리킨 기록이 든 칸
-    const marked = highlightAt !== null && total > 0 ? Math.floor((highlightAt - first) / size) : -1;
     const shown = active !== null && interactive ? buckets[active] : null;
     const rangeText = (bucket: Bucket) => `${formatShort(bucket.start)} ~ ${formatShort(bucket.start + size)}`;
     // 말풍선: 막대 머리 높이에서 막대 오른쪽에 붙인다. 오른쪽 끝에 가까우면 왼쪽으로 뒤집는다
@@ -299,8 +294,8 @@ export function AuditHistogram({
                 : { left: xOf(active) - 10, top: tooltipTop, transform: 'translateX(-100%)' }
             : undefined;
 
-    // 또렷하게 둘 막대: 마우스·키보드로 가리킨 막대, 없으면 목록에서 가리킨 기록의 막대
-    const focus = shown ? active : marked >= 0 && marked < buckets.length && buckets[marked].total > 0 ? marked : null;
+    // 또렷하게 둘 막대: 마우스·키보드로 가리킨 막대
+    const focus = shown ? active : null;
 
     // 드래그하는 동안: 고를 구간(칸 단위로 맞춘 것)의 시각
     const dragRange = drag
@@ -419,19 +414,6 @@ export function AuditHistogram({
                                 </g>
                             );
                         })}
-
-                        {/* 목록에서 가리킨 기록이 든 칸: 바닥선 아래 파란 줄 (막대는 아래에서 또렷하게) */}
-                        {marked >= 0 && marked < buckets.length && !shown ? (
-                            <g>
-                                <line
-                                    x1={GUTTER + marked * slot + 1}
-                                    x2={GUTTER + (marked + 1) * slot - 1}
-                                    y1={baseY + 3}
-                                    y2={baseY + 3}
-                                    className="audit-histogram-mark"
-                                />
-                            </g>
-                        ) : null}
 
                         {/* 막대: 계열을 아래부터 쌓는다. 조각 사이에 틈, 맨 위 조각만 위 모서리가 둥글다.
                                 묶음의 key가 바뀌면 새로 그려져 자라기 효과가 다시 난다 (막대마다 왼쪽부터 조금씩 늦게) */}

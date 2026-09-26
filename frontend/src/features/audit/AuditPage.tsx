@@ -56,20 +56,9 @@ const RENDER_STEP = 100; // 목록은 이만큼씩 그린다 (2,000행을 한 �
 const rowButtonOf = (key: string) =>
     document.querySelector<HTMLButtonElement>(`.audit-row-button[data-key="${CSS.escape(key)}"]`);
 
-// 목록 한 행. 누르면 팝업창으로 자세히 본다. 마우스를 올리거나 키보드로 오면 막대그래프에서 그 기록의 칸을 짚는다
-function AuditRow({
-    record,
-    selected,
-    onOpen,
-    onPoint,
-}: {
-    record: AuditRecord;
-    selected: boolean;
-    onOpen: () => void;
-    onPoint: (at: number | null) => void;
-}) {
+// 목록 한 행. 누르면 팝업창으로 자세히 본다
+function AuditRow({ record, selected, onOpen }: { record: AuditRecord; selected: boolean; onOpen: () => void }) {
     const summary = summaryOf(record);
-    const at = Date.parse(timeOf(record));
     return (
         <li className={`audit-row${selected ? ' is-selected' : ''}`}>
             <button
@@ -79,10 +68,6 @@ function AuditRow({
                 aria-haspopup="dialog"
                 aria-current={selected ? 'true' : undefined}
                 onClick={onOpen}
-                onMouseEnter={() => onPoint(at)}
-                onMouseLeave={() => onPoint(null)}
-                onFocus={() => onPoint(at)}
-                onBlur={() => onPoint(null)}
             >
                 <span className="audit-col-time">{formatKoreanDateTimeSeconds(timeOf(record))}</span>
                 <span className="audit-col-user" title={record.userId}>
@@ -218,8 +203,6 @@ export function AuditPage() {
         setQuery(id);
     };
     const onlyFacet = (id: FacetId, value: string) => setSelection((prev) => ({ ...prev, [id]: [value] }));
-    // 목록에서 마우스를 올린 기록의 시각 (막대그래프가 그 칸을 짚는다)
-    const [pointAt, setPointAt] = useState<number | null>(null);
 
     // 필터 초기화(필터 창 안): 처음 열었을 때와 똑같은 화면으로 되돌린다.
     // 조건(거르기·검색어·기간 전체)뿐 아니라 화면 상태(그룹 기준, 열린 필터 창·거르기 목록의 접기·더 보기,
@@ -296,7 +279,6 @@ export function AuditPage() {
                             rankRecords={records}
                             window={timeWindow}
                             loading={listLoading}
-                            highlightAt={pointAt}
                             groupBy={groupBy}
                             onSelect={setPeriod}
                             onFilter={(facet, values) => setSelection((prev) => ({ ...prev, [facet]: values }))}
@@ -339,7 +321,6 @@ export function AuditPage() {
                                             record={record}
                                             selected={openKey === key}
                                             onOpen={() => setOpenKey(key)}
-                                            onPoint={setPointAt}
                                         />
                                     );
                                 })}

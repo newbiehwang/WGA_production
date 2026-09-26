@@ -667,13 +667,6 @@
   transition: opacity 160ms ease;
 }
 
-/* 목록에서 가리킨 기록이 든 칸의 바닥 줄 */
-.audit-histogram-mark {
-  stroke: var(--color-primary);
-  stroke-width: 3;
-  stroke-linecap: round;
-}
-
 @keyframes audit-tip-in {
   from {
     opacity: 0;
