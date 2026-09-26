@@ -612,15 +612,31 @@ def set_log_retention(log_group_name: str, retention_days: int) -> Dict[str, Any
     return {"status": "success", **preview, "cloudtrail": _trail("logs.amazonaws.com", "PutRetentionPolicy", response)}
 
 
+def _preview(target: str, before: Any, after: Any, summary: str, warning: Optional[str] = None) -> Dict[str, Any]:
+    """변경 도구의 미리 보기 (승인 카드에 보일 내용).
+    - target: 바뀌는 리소스 (로그 그룹·알람 이름 등). 카드의 '대상' 칩
+    - before/after: 지금 값과 바뀔 값. 카드의 '30일 → 14일'
+    - warning: 이 변경의 영향 (없으면 뺀다). 카드의 영향 줄
+    - summary: 한 줄 요약. 영향은 괄호로 붙인다. 승인 기록·감사 로그·결과 설명(모델에게 주는 글)에 쓰고,
+      target·warning이 없는 예전 승인 요청의 카드는 이 요약을 그대로 보인다
+    """
+    preview = {"target": target, "before": before, "after": after,
+               "summary": summary + (f" ({warning})" if warning else "")}
+    if warning:
+        preview["warning"] = warning
+    return preview
+
+
 @mcp_server.preview("setLogRetention")
 def preview_log_retention(log_group_name: str, retention_days: int) -> Dict[str, Any]:
     _check_log_group(log_group_name)
     if retention_days not in RETENTION_DAYS:
         raise ValueError(f"보존 기간은 {RETENTION_DAYS} 중 하나여야 합니다: {retention_days}")
     before = _current_retention(log_group_name)
-    return {"target": log_group_name, "before": _retention_text(before), "after": _retention_text(retention_days),
-            "summary": f"{log_group_name} 로그 보존 기간 {_retention_text(before)} → {_retention_text(retention_days)}"
-                       + (" (지난 로그 일부가 지워질 수 있습니다)" if before is None or retention_days < before else "")}
+    warning = "지난 로그 일부가 지워질 수 있습니다" if before is None or retention_days < before else None
+    return _preview(log_group_name, _retention_text(before), _retention_text(retention_days),
+                    f"{log_group_name} 로그 보존 기간 {_retention_text(before)} → {_retention_text(retention_days)}",
+                    warning)
 
 
 def _check_alarm(alarm_name: str) -> None:
@@ -670,9 +686,9 @@ def set_alarm_actions(alarm_name: str, enabled: bool) -> Dict[str, Any]:
 def preview_alarm_actions(alarm_name: str, enabled: bool) -> Dict[str, Any]:
     _check_alarm(alarm_name)
     before = _alarm_actions_enabled(alarm_name)
-    return {"target": alarm_name, "before": _actions_text(before), "after": _actions_text(enabled),
-            "summary": f"{alarm_name} {_actions_text(before)} → {_actions_text(enabled)}"
-                       + (" (알람이 울려도 알림이 가지 않습니다)" if not enabled else "")}
+    warning = "알람이 울려도 알림이 가지 않습니다" if not enabled else None
+    return _preview(alarm_name, _actions_text(before), _actions_text(enabled),
+                    f"{alarm_name} {_actions_text(before)} → {_actions_text(enabled)}", warning)
 
 
 EC2_ACTIONS = {"stop": ("running", "stopped"), "start": ("stopped", "running")}  # 동작 → (필요한 지금 상태, 바뀔 상태)
@@ -720,9 +736,8 @@ def preview_ec2_instance_state(instance_id: str, action: str) -> Dict[str, Any]:
         raise ValueError(f"{instance_id}는 지금 {current} 상태라 {action}할 수 없습니다 ({needed} 상태여야 함)")
     name = _name_of(instance.get('Tags'))
     label = f"{instance_id}" + (f" ({name})" if name else "")
-    warning = " (중지하면 이 인스턴스의 서비스가 멈춥니다. 인스턴스 저장소의 데이터는 사라집니다)" if action == "stop" else ""
-    return {"target": label, "before": current, "after": target,
-            "summary": f"EC2 {label} {current} → {target}{warning}"}
+    warning = "중지하면 이 인스턴스의 서비스가 멈춥니다. 인스턴스 저장소의 데이터는 사라집니다" if action == "stop" else None
+    return _preview(label, current, target, f"EC2 {label} {current} → {target}", warning)
 
 
 PUBLIC_ACCESS_BLOCK_ALL = {"BlockPublicAcls": True, "IgnorePublicAcls": True, "BlockPublicPolicy": True,
@@ -767,10 +782,10 @@ def preview_s3_public_access_block(bucket_name: str) -> Dict[str, Any]:
     if not off:
         raise ValueError(f"{bucket_name}은 퍼블릭 액세스 차단이 이미 모두 켜져 있습니다")
     security = _security_of(bucket_name)
-    warning = (" (버킷 정책이 공개입니다. 차단을 켜면 정적 웹사이트 등 공개 접근이 끊깁니다)"
-               if security.get('policy_is_public') else "")
-    return {"target": bucket_name, "before": f"꺼진 항목 {len(off)}개 ({', '.join(off)})", "after": "4개 모두 켜짐",
-            "summary": f"S3 {bucket_name} 퍼블릭 액세스 차단 {len(off)}개 항목 켜기{warning}"}
+    warning = ("버킷 정책이 공개입니다. 차단을 켜면 정적 웹사이트 등 공개 접근이 끊깁니다"
+               if security.get('policy_is_public') else None)
+    return _preview(bucket_name, f"꺼진 항목 {len(off)}개 ({', '.join(off)})", "4개 모두 켜짐",
+                    f"S3 {bucket_name} 퍼블릭 액세스 차단 {len(off)}개 항목 켜기", warning)
 
 
 @mcp_server.tool()

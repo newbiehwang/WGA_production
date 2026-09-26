@@ -986,7 +986,8 @@
 }
 
 /* ---------------------------------------------------------------- 변경 작업 승인 카드 (ApprovalCard.tsx)
-   답변 아래에 둔다. 승인을 기다리는 동안은 주황 테두리로 눈에 띄게, 끝나면 차분한 회색으로 */
+   답변 아래에 둔다. 승인을 기다리는 동안은 주황 테두리로 눈에 띄게, 의심 신호가 있으면 빨간 테두리와 맨 위의 빨간 띠.
+   결정한 뒤에는 차분한 회색의 한 줄로 접는다 (실패만 옅은 빨강) */
 
 .approval-card {
   margin-top: 12px;
@@ -995,23 +996,71 @@
   background: #fffaf2;
   padding: 14px 16px;
   display: grid;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr); /* 좁은 화면에서 한 줄·호출 줄이 카드 밖으로 넘치지 않게 */
+  gap: 10px;
   animation: menu-in 160ms ease both;
 }
 
-.approval-card:not(.is-pending) {
+.approval-card.is-tainted {
+  border-color: rgba(220, 53, 69, 0.45);
+  background: #fffafa;
+  padding-top: 0;
+  overflow: hidden;
+}
+
+.approval-card.is-closed {
   border-color: var(--color-line);
   background: #f8fafc;
+  padding: 0;
+  gap: 0;
 }
 
-.approval-card.is-executed {
-  border-color: rgba(88, 167, 121, 0.45);
-  background: #f4fbf6;
-}
-
-.approval-card.is-failed {
+.approval-card.is-closed.is-failed {
   border-color: rgba(220, 53, 69, 0.35);
   background: #fdf5f6;
+}
+
+/* 의심 신호: 카드 맨 위를 가로지르는 빨간 띠 (체류 신호, services/llm/approvals.py) */
+.approval-alert {
+  margin: 0 -16px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(220, 53, 69, 0.08);
+  border-bottom: 1px solid rgba(220, 53, 69, 0.2);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #3c4650;
+}
+
+.approval-alert-icon {
+  flex: none;
+  margin-top: 1px;
+  color: #c0303f;
+}
+
+.approval-alert-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.approval-alert-title {
+  margin: 0;
+  font-family: var(--font-label);
+  font-weight: 700;
+  color: #b02a37;
+}
+
+.approval-alert-list {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.approval-alert-hint {
+  margin: 0;
+  color: #5f6670;
 }
 
 .approval-head {
@@ -1033,14 +1082,9 @@
   font-weight: 700;
 }
 
-.approval-card:not(.is-pending) .approval-badge {
-  background: rgba(120, 120, 120, 0.14);
-  color: #5f6670;
-}
-
 .approval-tool {
   font-family: var(--font-label);
-  font-size: 0.86rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: #1f2933;
 }
@@ -1054,6 +1098,7 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 대상 칩이 없는 예전 요청의 요약 문장 */
 .approval-summary {
   margin: 0;
   font-size: 0.9rem;
@@ -1062,18 +1107,58 @@
   overflow-wrap: anywhere;
 }
 
-.approval-change {
+/* 대상 · 변경 · 영향: 왼쪽에 작은 회색 이름, 오른쪽에 값 */
+.approval-facts {
   margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 14px;
+  row-gap: 7px;
+}
+
+.approval-fact {
+  display: contents;
+}
+
+.approval-fact dt {
   font-family: var(--font-label);
-  font-size: 0.95rem;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a94a0;
+}
+
+.approval-fact dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.approval-target {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  color: #3c4650;
+  overflow-wrap: anywhere;
+}
+
+.approval-change {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-family: var(--font-label);
 }
 
 .approval-before {
-  color: #6c757d;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #8a94a0;
+  text-decoration: line-through;
+  text-decoration-color: rgba(138, 148, 160, 0.7);
 }
 
 .approval-arrow {
@@ -1081,73 +1166,175 @@
 }
 
 .approval-after {
-  color: var(--color-primary);
+  font-size: 1.12rem;
+  font-weight: 800;
+  color: #111827;
+  text-decoration: none;
 }
 
-.approval-args {
-  margin: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.approval-arg {
-  display: grid;
-  grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
-  gap: 10px;
-  font-size: 12px;
-}
-
-.approval-arg dt {
-  color: #6c757d;
-  font-family: var(--font-label);
-  font-weight: 600;
-}
-
-.approval-arg dd {
-  margin: 0;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.approval-arg code {
-  color: #3c4650;
-}
-
-/* 먼저 읽은 결과에 의심 문구가 있었다 (체류 신호, ApprovalCard) */
-.approval-tainted {
-  display: grid;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(220, 53, 69, 0.3);
-  background: rgba(220, 53, 69, 0.06);
-  font-size: 0.82rem;
+.approval-warning {
+  font-size: 0.86rem;
   line-height: 1.45;
   color: #3c4650;
 }
 
-.approval-tainted-title {
-  margin: 0;
-  font-family: var(--font-label);
-  font-weight: 700;
-  color: #b02a37;
-}
-
-.approval-tainted-list {
-  margin: 0;
-  padding-left: 18px;
-}
-
-.approval-tainted-hint {
-  margin: 0;
-  color: #5f6670;
+/* 승인하면 실제로 실행될 호출 한 줄 (가리거나 줄이지 않는다) */
+.approval-call {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.045);
+  font-size: 12px;
+  line-height: 1.5;
+  color: #3c4650;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .approval-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 2px;
+}
+
+/* 의심 신호가 있을 때: 체크해야 '그래도 승인'이 눌린다 */
+.approval-confirm {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-label);
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #1f2933;
+  cursor: pointer;
+}
+
+.approval-confirm input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #d03b3b;
+  cursor: pointer;
+}
+
+.plan-create-button.approval-approve-risky {
+  background: #d03b3b;
+  box-shadow: 0 8px 16px rgba(208, 59, 59, 0.2);
+}
+
+.plan-create-button.approval-approve-risky:hover:not(:disabled) {
+  background: #b92f2f;
+}
+
+.plan-create-button.approval-approve-risky:disabled {
+  background: #e7a3a3;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* 결정한 뒤의 한 줄: 누르면 펼친다 */
+.approval-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 4px;
+}
+
+.approval-row-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.approval-row-toggle:hover {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.approval-row-toggle:focus-visible,
+.approval-copy:focus-visible {
+  outline: 2px solid rgba(0, 123, 255, 0.45);
+  outline-offset: 1px;
+}
+
+.approval-row-status {
+  flex: none;
+  font-family: var(--font-label);
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #1f2933;
+}
+
+.approval-card.is-failed .approval-row-status {
+  color: #b02a37;
+}
+
+.approval-row-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.84rem;
+  color: #3c4650;
+}
+
+.approval-row-change {
+  color: #6c757d;
+}
+
+.approval-row-caret {
+  flex: none;
+  margin-left: auto;
+  color: #8a94a0;
+  transition: transform 160ms ease;
+}
+
+.approval-row-toggle[aria-expanded='true'] .approval-row-caret {
+  transform: rotate(180deg);
+}
+
+.approval-copy {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: #fff;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 600;
+  color: #5f6670;
+  cursor: pointer;
+}
+
+.approval-copy:hover {
+  color: var(--color-primary);
+  border-color: rgba(0, 123, 255, 0.35);
+}
+
+/* 펼친 내용: 한 줄 아래에 구분선을 두고 기다리던 때와 같은 본문 + 결과 문장 */
+.approval-more {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--color-line);
+  animation: menu-in 160ms ease both;
 }
 
 .approval-status,
@@ -1163,11 +1350,8 @@
   color: #3c4650;
 }
 
-.approval-card.is-executed .approval-status {
-  color: #3f8a61;
-}
-
 .approval-result {
+  padding: 0 16px 12px 44px;
   color: #b02a37;
   overflow-wrap: anywhere;
 }
@@ -1177,6 +1361,17 @@
   font-size: 12px;
   color: #5f6670;
   overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .approval-card,
+  .approval-more {
+    animation: none;
+  }
+
+  .approval-row-caret {
+    transition: none;
+  }
 }
 
 /* 도구 결과에 지시문처럼 보이는 문구가 있었다는 표시 (ProgressTrace, services/llm/injection.py) */

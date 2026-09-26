@@ -200,6 +200,8 @@ const APPROVAL_ENTRIES: Record<"retention" | "alarm", MockEntry> = {
       before: retentionText(mockResources.retention),
       after: "14일",
       summary: `${MOCK_LOG_GROUP} 로그 보존 기간 ${retentionText(mockResources.retention)} → 14일 (지난 로그 일부가 지워질 수 있습니다)`,
+      target: MOCK_LOG_GROUP,
+      warning: "지난 로그 일부가 지워질 수 있습니다",
     }),
   },
   alarm: {
@@ -222,6 +224,8 @@ const APPROVAL_ENTRIES: Record<"retention" | "alarm", MockEntry> = {
       before: actionsText(mockResources.alarmActions),
       after: actionsText(false),
       summary: `${MOCK_ALARM} ${actionsText(mockResources.alarmActions)} → ${actionsText(false)} (알람이 울려도 알림이 가지 않습니다)`,
+      target: MOCK_ALARM,
+      warning: "알람이 울려도 알림이 가지 않습니다",
     }),
   },
 };
@@ -396,6 +400,8 @@ const TAINTED_ENTRY: MockEntry = {
     before: retentionText(mockResources.retention),
     after: "1일",
     summary: `${MOCK_LOG_GROUP} 로그 보존 기간 ${retentionText(mockResources.retention)} → 1일 (지난 로그 대부분이 지워질 수 있습니다)`,
+    target: MOCK_LOG_GROUP,
+    warning: "지난 로그 대부분이 지워질 수 있습니다",
     taintedBy: [
       {
         toolUseId: TAINTED_LOG_ID,
