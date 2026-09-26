@@ -1157,64 +1157,18 @@
   filter: brightness(0.9) drop-shadow(0 4px 8px rgba(31, 41, 51, 0.18));
 }
 
-/* 다른 계층을 고르면 나머지 조각은 은은하게 옅게. 이 기록의 계층은 덜 옅게 (어디인지 계속 보이게) */
+/* 다른 계층을 고르면 나머지 조각은 은은하게 옅게 */
 .audit-cycle-svg.has-pick .audit-cycle-seg:not(.is-selected) {
   opacity: 0.55;
-}
-
-.audit-cycle-svg.has-pick .audit-cycle-seg.is-here:not(.is-selected) {
-  opacity: 0.8;
 }
 
 .audit-cycle-svg.has-pick .audit-cycle-seg:not(.is-selected):hover {
   opacity: 0.9;
 }
 
-/* 선택 표시: 고리 바깥의 둥근 호. 고른 조각으로 미끄러져 가고, 색은 그 계층의 성격을 따른다 */
-.audit-cycle-mark {
-  fill: none;
-  stroke: #5f6b7a;
-  stroke-width: 4;
-  stroke-linecap: round;
-  pointer-events: none;
-  transition: transform 460ms cubic-bezier(0.34, 1.2, 0.4, 1), stroke 240ms ease;
-  animation: audit-cycle-mark-in 420ms ease 280ms backwards;
-}
-
-.audit-cycle-mark.is-here {
-  stroke: var(--color-primary);
-}
-
-.audit-cycle-mark.is-marked {
-  stroke: #ff9900;
-}
-
-@keyframes audit-cycle-mark-in {
-  from { opacity: 0; stroke-dasharray: 0 200; }
-  to { opacity: 1; stroke-dasharray: 200 0; }
-}
-
 .audit-cycle-seg:focus-visible .audit-cycle-shape {
   stroke: var(--color-primary);
   stroke-width: 2;
-}
-
-/* 이 기록의 계층: 파랑으로 채운다 */
-.audit-cycle-seg.is-here .audit-cycle-shape {
-  fill: var(--color-primary);
-}
-
-.audit-cycle-seg.is-here.is-selected .audit-cycle-shape {
-  filter: brightness(0.93) drop-shadow(0 4px 9px rgba(0, 123, 255, 0.3));
-}
-
-.audit-cycle-seg.is-here.is-selected:hover .audit-cycle-shape {
-  filter: brightness(0.9) drop-shadow(0 4px 9px rgba(0, 123, 255, 0.32));
-}
-
-.audit-cycle-seg.is-here .audit-cycle-label,
-.audit-cycle-seg.is-here .audit-cycle-no {
-  fill: #fff;
 }
 
 /* 흔적 */
@@ -1237,11 +1191,11 @@
   stroke-dasharray: 3 2.5;
 }
 
-.audit-cycle-seg.is-off-record:not(.is-marked):not(.is-here) .audit-cycle-shape {
+.audit-cycle-seg.is-off-record:not(.is-marked) .audit-cycle-shape {
   fill: #fff;
 }
 
-.audit-cycle-seg.is-off-record:not(.is-marked):not(.is-here) .audit-cycle-label {
+.audit-cycle-seg.is-off-record:not(.is-marked) .audit-cycle-label {
   fill: #8a939e;
 }
 
@@ -1249,11 +1203,11 @@
   stroke: #e0a040;
 }
 
-/* 가운데: 옅은 원판 위에 차례(작은 회색 숫자)와 이름 */
+/* 가운데: 옅은 원판 위에 고른 계층의 이름 */
 .audit-cycle-hub {
   fill: #f7f9fc;
-  stroke: #e6ebf2;
-  stroke-width: 1;
+  stroke: #dfe5ee;
+  stroke-width: 1.2;
 }
 
 .audit-cycle-center {
@@ -1266,10 +1220,6 @@
   font-weight: 600;
   letter-spacing: -0.03em;
   fill: #1f2933;
-}
-
-.audit-cycle-center.is-here .audit-cycle-name {
-  fill: var(--color-primary);
 }
 
 .audit-cycle-center.is-marked .audit-cycle-name {
@@ -1315,11 +1265,6 @@
   font-family: var(--font-label);
   font-size: 12px;
   font-weight: 800;
-}
-
-.audit-cycle-panel-no.is-here {
-  background: var(--color-primary);
-  color: #fff;
 }
 
 .audit-cycle-panel-no.is-marked {
@@ -1453,7 +1398,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .audit-cycle-seg,
-  .audit-cycle-mark,
   .audit-cycle-center {
     animation: none;
     transition: none;
@@ -1508,8 +1452,8 @@
   color: #b02a37;
 }
 
-/* ---------------------------------------------------------------- 역추적 (AuditLayers.tsx, 변경 작업 행)
-   제목 줄의 결론, 조각 안쪽의 판정 선, 설명 칸의 물음·판정·답·근거가 된 기록 */
+/* ---------------------------------------------------------------- 판정 (AuditLayers.tsx, 변경 작업 행)
+   제목 줄의 판정 개수, 조각의 바탕색, 설명 칸의 판정 배지·찾은 것·근거 기록 */
 .audit-layers-head {
   display: flex;
   flex-wrap: wrap;
@@ -1530,86 +1474,7 @@
   overflow-wrap: anywhere;
 }
 
-.audit-trace-verdict-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-family: var(--font-label);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.audit-trace-verdict-pill.is-ok { background: rgba(88, 167, 121, 0.14); color: #3f8a61; }
-.audit-trace-verdict-pill.is-warn { background: rgba(255, 153, 0, 0.15); color: #9a5b00; }
-.audit-trace-verdict-pill.is-fail { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
-.audit-trace-verdict-pill.is-loading { background: #f0f3f7; color: #6c757d; font-weight: 600; }
-
-/* 조각 안쪽 가장자리의 판정 선 */
-.audit-cycle-status {
-  fill: none;
-  stroke-width: 3.5;
-  stroke-linecap: round;
-  pointer-events: none;
-  animation: audit-cycle-in 300ms ease 200ms backwards;
-}
-
-.audit-cycle-status.is-ok { stroke: #58a779; }
-.audit-cycle-status.is-warn { stroke: #ff9900; }
-.audit-cycle-status.is-fail { stroke: #dc3545; }
-.audit-cycle-status.is-info { stroke: #b8c2ce; }
-
-/* 파란 조각(이 기록) 위에서도 보이게 흰 테두리를 두른다 */
-.audit-cycle-seg.is-here .audit-cycle-status {
-  stroke-width: 3.5;
-  paint-order: stroke;
-  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.9));
-}
-
-/* 고리 아래: 판정 선의 뜻 */
-.audit-cycle-figure {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-.audit-trace-legend {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 4px 12px;
-  font-size: 11.5px;
-  color: #6c757d;
-}
-
-.audit-trace-legend li {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.audit-trace-legend li.is-caption {
-  font-family: var(--font-label);
-  font-weight: 700;
-  color: #8a939e;
-}
-
-.audit-trace-legend-line {
-  width: 14px;
-  height: 3.5px;
-  border-radius: 999px;
-  background: #b8c2ce;
-}
-
-.audit-trace-legend-line.is-ok { background: #58a779; }
-.audit-trace-legend-line.is-warn { background: #ff9900; }
-.audit-trace-legend-line.is-fail { background: #dc3545; }
-
-/* 설명 칸의 역추적 */
+/* 설명 칸의 판정: 찾은 것과 근거 기록 (왼쪽 선 색 = 판정) */
 .audit-trace-answer-box {
   display: grid;
   gap: 6px;
@@ -1624,18 +1489,77 @@
 .audit-trace-answer-box.is-warn { border-left-color: #ff9900; }
 .audit-trace-answer-box.is-fail { border-left-color: #dc3545; }
 
-.audit-trace-answer-head {
+/* 판정 개수: ● 주의 3  ● 정상 3  ● 참고 1 */
+.audit-counts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12.5px;
+  color: #5f6670;
 }
 
-.audit-trace-answer-title {
+.audit-counts li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audit-counts strong {
   font-family: var(--font-label);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  color: #1f2933;
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-counts-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+
+.audit-counts .is-ok .audit-counts-dot { background: #b9dfc6; }
+.audit-counts .is-warn .audit-counts-dot { background: #f5d46b; }
+.audit-counts .is-fail .audit-counts-dot { background: #f0b3b9; }
+.audit-counts .is-info .audit-counts-dot { background: #cfd5dd; }
+
+.audit-counts-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
   color: #6c757d;
+}
+
+.audit-counts-note.is-error {
+  color: #b02a37;
+}
+
+/* 판정이 있으면 조각의 바탕색 = 판정 (이 기록·흔적의 채움보다 앞선다) */
+.audit-cycle-svg .audit-cycle-seg.has-status.is-ok .audit-cycle-shape { fill: #d5ecdc; }
+.audit-cycle-svg .audit-cycle-seg.has-status.is-warn .audit-cycle-shape { fill: #fbe6a6; }
+.audit-cycle-svg .audit-cycle-seg.has-status.is-fail .audit-cycle-shape { fill: #f6d0d4; }
+.audit-cycle-svg .audit-cycle-seg.has-status.is-info .audit-cycle-shape { fill: #e3e7ec; }
+
+.audit-cycle-svg .audit-cycle-seg.has-status.is-ok .audit-cycle-label { fill: #276544; }
+.audit-cycle-svg .audit-cycle-seg.has-status.is-warn .audit-cycle-label { fill: #735600; }
+.audit-cycle-svg .audit-cycle-seg.has-status.is-fail .audit-cycle-label { fill: #9c1f2c; }
+.audit-cycle-svg .audit-cycle-seg.has-status.is-info .audit-cycle-label { fill: #5f6670; }
+
+.audit-cycle-svg .audit-cycle-seg.has-status .audit-cycle-no { fill: #8a939e; }
+
+/* 기록으로 남지 않는 층(점선)도 판정 바탕색을 따른다 */
+.audit-cycle-svg .audit-cycle-seg.has-status.is-off-record .audit-cycle-shape { stroke: #b8c2ce; }
+
+/* 판정 바탕 위에서는 파란 빛 그림자 대신 중립 그림자 */
+.audit-cycle-svg .audit-cycle-seg.has-status.is-selected .audit-cycle-shape {
+  filter: brightness(0.93) drop-shadow(0 4px 8px rgba(31, 41, 51, 0.16));
+}
+
+/* 설명 칸 제목 옆의 판정 배지 */
+.audit-cycle-panel-head .audit-trace-badge {
+  margin-left: auto;
 }
 
 .audit-trace-badge {
@@ -1650,14 +1574,6 @@
 .audit-trace-badge.is-warn { background: rgba(255, 153, 0, 0.16); color: #9a5b00; }
 .audit-trace-badge.is-fail { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
 .audit-trace-badge.is-info { background: rgba(120, 120, 120, 0.12); color: #5f6670; }
-
-.audit-trace-answer-q {
-  margin: 0;
-  font-family: var(--font-label);
-  font-size: 13.5px;
-  font-weight: 700;
-  color: #1f2933;
-}
 
 .audit-trace-answer-a {
   margin: 0;
