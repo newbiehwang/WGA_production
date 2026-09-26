@@ -149,11 +149,12 @@ export function ResultBadge({ record }: { record: AuditRecord }) {
     );
 }
 
-// 도구 칸: 질문·변경 작업·사용자 관리는 종류를, 도구 호출은 도구 이름을 보인다 (목록 행과 기록 팝업창 제목이 같이 쓴다)
+// 도구 칸: 질문·변경 작업·사용자 관리는 종류를, 도구 호출은 도구 이름을 보인다 (목록 행과 기록 팝업창 제목이 같이 쓴다).
+// 종류마다 색을 달리하지 않는다: 목록·팝업창 모두 둘레 글자색(검정)을 따른다
 export function KindLabel({ record }: { record: AuditRecord }) {
-    if (record.kind === 'request') return <span className="audit-kind-request">질문</span>;
-    if (record.kind === 'action') return <span className="audit-kind-action">{toolLabelOf(record.tool)}</span>;
-    if (record.kind === 'admin') return <span className="audit-kind-admin">사용자 관리</span>;
+    if (record.kind === 'request') return <>질문</>;
+    if (record.kind === 'action') return <>{toolLabelOf(record.tool)}</>;
+    if (record.kind === 'admin') return <>사용자 관리</>;
     return <>{labelOf(record.tool ?? '')}</>;
 }
 
