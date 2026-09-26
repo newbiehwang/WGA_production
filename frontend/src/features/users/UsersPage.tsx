@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { inviteUser, listUsers, setEnabled, setRole, userErrorText } from '@/api/users';
 import { ROLE_LABELS } from '@/auth/authClient';
-import { LoadingCard } from '@/components/LoadingCard';
+import { LoadingCard, useMinimumVisible } from '@/components/LoadingCard';
 import { RefreshButton } from '@/components/RefreshButton';
 import type { ManagedUser, UserRole } from '@/types/users';
 import { formatKoreanDateTime } from '@/utils/formatters';
@@ -106,6 +106,7 @@ export function UsersPage() {
     const [users, setUsers] = useState<ManagedUser[]>([]);
     const [cursor, setCursor] = useState<string | null>(null);
     const [loading, setLoading] = useState<'list' | 'more' | null>('list');
+    const listLoading = useMinimumVisible(loading === 'list'); // 목록 자리의 기다림 카드 (최소 1초)
     const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
     const [busy, setBusy] = useState<string | null>(null); // 바꾸는 중인 사용자
@@ -182,7 +183,7 @@ export function UsersPage() {
         <section className="plan-panel users-panel" aria-label="사용자 관리">
             <div className="plan-panel-header">
                 <h1 className="plan-panel-eyebrow">사용자 관리</h1>
-                <RefreshButton onClick={() => load()} loading={loading !== null} />
+                <RefreshButton onClick={() => load()} loading={loading !== null || listLoading} />
             </div>
 
             <div className="users-toolbar">
@@ -233,7 +234,7 @@ export function UsersPage() {
                         <span className="users-col-account">계정</span>
                     </div>
 
-                    {loading === 'list' ? (
+                    {listLoading ? (
                         <div className="plan-panel-loading">
                             <LoadingCard text="사용자를 불러오는 중…" />
                         </div>
@@ -310,7 +311,7 @@ export function UsersPage() {
                         </ul>
                     )}
                 </div>
-                {cursor && loading !== 'list' ? (
+                {cursor && !listLoading ? (
                     <div className="audit-more">
                         <button
                             type="button"

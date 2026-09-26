@@ -538,12 +538,15 @@
   margin-bottom: 10px;
 }
 
-/* 목록을 불러오는 동안: 빈 목록 자리 가운데에 기다림 카드(.loading-card)를 띄운다 */
+/* 목록을 불러오는 동안: 표 머리 아래 남은 자리를 다 채우고(flex: 1) 그 가운데에 기다림 카드(.loading-card)를 띄운다.
+   나타날 때는 로그아웃 중 화면(.logout-overlay, layout.css)과 같은 효과: 6px 위에서 내려오며 흐릿하게 나타난다 */
 .plan-panel-loading {
+  flex: 1;
   min-height: 180px;
   display: grid;
   place-items: center;
   padding: 20px;
+  animation: menu-in 160ms ease both;
 }
 
 /* 기다림 카드 (components/LoadingCard.tsx). 로그아웃 중 화면과 목록 로딩이 같이 쓴다 */

@@ -8,7 +8,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { fetchAudit } from '@/api/audit';
 import { ROLE_LABELS, type Role } from '@/auth/authClient';
-import { LoadingCard } from '@/components/LoadingCard';
+import { LoadingCard, useMinimumVisible } from '@/components/LoadingCard';
 import { RefreshButton } from '@/components/RefreshButton';
 import type { AuditKind, AuditLocus, AuditRecord, AuditStatus } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
@@ -394,6 +394,7 @@ export function AuditPage() {
     const [items, setItems] = useState<AuditRecord[]>([]);
     const [cursor, setCursor] = useState<string | null>(null);
     const [loading, setLoading] = useState<'list' | 'more' | null>('list');
+    const listLoading = useMinimumVisible(loading === 'list'); // 목록 자리의 기다림 카드 (최소 1초)
     const [error, setError] = useState<string | null>(null);
     const [openKey, setOpenKey] = useState<string | null>(null);
     // 거르기용 도구 목록: 지금까지 받은 기록에 나온 도구 (서버는 정확한 도구 이름으로만 거른다)
@@ -447,7 +448,7 @@ export function AuditPage() {
         <section className="plan-panel audit-panel" aria-label="감사 로그">
             <div className="plan-panel-header">
                 <h1 className="plan-panel-eyebrow">감사 로그</h1>
-                <RefreshButton onClick={() => load()} loading={loading !== null} />
+                <RefreshButton onClick={() => load()} loading={loading !== null || listLoading} />
             </div>
 
             <div className="audit-filters">
@@ -508,7 +509,7 @@ export function AuditPage() {
                         <span className="audit-col-flags">표시</span>
                     </div>
 
-                    {loading === 'list' ? (
+                    {listLoading ? (
                         <div className="plan-panel-loading">
                             <LoadingCard text="감사 로그를 불러오는 중…" />
                         </div>
