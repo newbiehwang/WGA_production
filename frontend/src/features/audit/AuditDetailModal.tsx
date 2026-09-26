@@ -1,13 +1,12 @@
 // 기록 한 건을 자세히 보는 팝업창. 모양과 여닫는 효과는 이 앱의 다른 팝업창(대화 목록, SessionListModal)과 같은
 // create-plan-model이다: 화면을 어둡게 덮고 가운데에 뜬다, 오른쪽 위 ✕, 닫을 때 접히는 효과.
-//   [↑][↓] 3 / 132                                  ✕
-//   EC2 인스턴스 중지                                     ← 도구·종류
+//   EC2 인스턴스 중지                                     ✕   ← 도구·종류
 //   2026. 9. 26. 오후 7:53:36 · 요청자 · 승인 요청 · 의심 뒤 요청
 //   [같은 질문의 기록] [같은 대화의 기록] [이 요청자만] [이 도구만]
 //   ───────────────────────────────
 //   항목 표 (층·변경 내용·실행될 값·작업 ID…) · 층별로 따져 보기     ← 본문만 스크롤
 //
-// - ↑/↓(또는 k/j)로 거른 목록의 앞뒤 기록으로 옮긴다 (팝업창을 닫지 않고). Esc·✕·바깥 누르기로 닫는다
+// - 키보드 ↑/↓(또는 k/j)로 거른 목록의 앞뒤 기록으로 옮긴다 (팝업창을 닫지 않고). Esc·✕·바깥 누르기로 닫는다
 // - 이어 찾기 버튼(같은 질문·대화·작업의 기록, 이 요청자만·이 도구만)은 목록의 조건을 바꾸고 팝업창을 닫는다 (바뀐 목록을 보게)
 // - 열릴 때 팝업창에 포커스를 두고, 닫으면 부르는 쪽이 그 기록의 행으로 포커스를 돌려준다
 // - 패널(plan-panel)은 등장 효과로 transform이 남아 있어 그 안의 position: fixed가 화면이 아니라 패널 기준이 된다.
@@ -27,17 +26,13 @@ const isTyping = (target: EventTarget | null) =>
 
 export function AuditDetailModal({
     record,
-    index,
-    total,
     onMove,
     onClose,
     onRelated,
     onFacet,
 }: {
     record: AuditRecord;
-    index: number; // 거른 목록 안의 자리 (0부터)
-    total: number;
-    onMove: (step: -1 | 1) => void;
+    onMove: (step: -1 | 1) => void; // 앞뒤 기록 (거른 목록의 처음·끝이면 부르는 쪽이 무시한다)
     onClose: () => void;
     onRelated: (id: string) => void; // 이 ID가 든 기록을 모두 (검색어로)
     onFacet: (id: FacetId, value: string) => void; // 그 거르기를 이 값 하나로
@@ -107,35 +102,6 @@ export function AuditDetailModal({
                     </svg>
                 </button>
                 <div className="audit-detail-head">
-                    <div className="audit-detail-nav">
-                        <button
-                            type="button"
-                            className="icon-button audit-detail-step"
-                            onClick={() => onMove(-1)}
-                            disabled={index <= 0}
-                            aria-label="이전 기록 (↑)"
-                            title="이전 기록 (↑)"
-                        >
-                            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-                                <path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                        </button>
-                        <button
-                            type="button"
-                            className="icon-button audit-detail-step"
-                            onClick={() => onMove(1)}
-                            disabled={index >= total - 1}
-                            aria-label="다음 기록 (↓)"
-                            title="다음 기록 (↓)"
-                        >
-                            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-                                <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                        </button>
-                        <span className="audit-detail-position">
-                            {(index + 1).toLocaleString()} / {total.toLocaleString()}
-                        </span>
-                    </div>
                     <h3 id="audit-detail-title" className="create-plan-step-heading">
                         <KindLabel record={record} />
                     </h3>

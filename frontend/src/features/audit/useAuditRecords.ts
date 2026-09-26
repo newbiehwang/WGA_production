@@ -27,7 +27,6 @@ const errorText = (error: unknown) => {
 export function useAuditRecords({ from, to }: AuditRange) {
     const [records, setRecords] = useState<AuditRecord[]>([]);
     const [loading, setLoading] = useState(true);
-    const [received, setReceived] = useState(0); // 불러오는 동안 지금까지 받은 건수 (기다림 카드에 보인다)
     const [truncated, setTruncated] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const requestNo = useRef(0);
@@ -35,7 +34,6 @@ export function useAuditRecords({ from, to }: AuditRange) {
     const load = useCallback(async () => {
         const no = ++requestNo.current;
         setLoading(true);
-        setReceived(0);
         setError(null);
         try {
             const all: AuditRecord[] = [];
@@ -44,7 +42,6 @@ export function useAuditRecords({ from, to }: AuditRange) {
                 const page = await fetchAudit({ from, to, scope: 'all', limit: PAGE_SIZE, cursor });
                 if (no !== requestNo.current) return;
                 all.push(...page.items);
-                setReceived(all.length);
                 cursor = page.cursor ?? undefined;
                 if (!cursor || all.length >= MAX_RECORDS) break;
             }
@@ -64,5 +61,5 @@ export function useAuditRecords({ from, to }: AuditRange) {
         load();
     }, [load]);
 
-    return { records, loading, received, truncated, error, reload: load };
+    return { records, loading, truncated, error, reload: load };
 }
