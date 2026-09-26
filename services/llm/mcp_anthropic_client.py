@@ -58,6 +58,8 @@ class AnthropicMCPClient:
         self.total_output_tokens = 0
         self.total_cache_read_tokens = 0
         self.total_cache_write_tokens = 0
+        # 모델을 부를 때마다의 토큰 (감사 로그의 질문 행에 남긴다, usage_summary)
+        self.model_calls: List[Dict[str, int]] = []
         self.tool_search_count = 0
         self.thinking = thinking
         # 도구 검색 (tool_search.py). 모델이 지원하지 않아 거절되면 이 클라이언트(모델별로 캐시된다)에서는 끈다
@@ -529,8 +531,7 @@ class AnthropicMCPClient:
                 # 토큰 사용량 누적
                 input_tokens = usage.get("input_tokens", 0)
                 output_tokens = usage.get("output_tokens", 0)
-                self.total_input_tokens += input_tokens
-                self.total_output_tokens += output_tokens
+                self._add_usage(usage)
 
                 # 디버그 로그에 최종 분석 응답 기록 (토큰 사용량 포함)
                 self.debug_log.append({
@@ -631,8 +632,7 @@ class AnthropicMCPClient:
                 # 토큰 사용량 누적
                 input_tokens = usage.get("input_tokens", 0)
                 output_tokens = usage.get("output_tokens", 0)
-                self.total_input_tokens += input_tokens
-                self.total_output_tokens += output_tokens
+                self._add_usage(usage)
 
                 # 디버그 로그에 상태 업데이트 응답 기록 (토큰 사용량 포함)
                 self.debug_log.append({
@@ -710,6 +710,7 @@ class AnthropicMCPClient:
         self.total_output_tokens = 0
         self.total_cache_read_tokens = 0
         self.total_cache_write_tokens = 0
+        self.model_calls = []
         self.tool_search_count = 0
         # 체류 신호도 질문마다 새로 센다 (이전 질문에서 읽은 것은 대화 기록에 도구 결과로 남지 않는다)
         self._tool_calls = 0
@@ -833,10 +834,7 @@ class AnthropicMCPClient:
             # 토큰 사용량 추출 및 누적
             input_tokens = usage.get("input_tokens", 0)
             output_tokens = usage.get("output_tokens", 0)
-            self.total_input_tokens += input_tokens
-            self.total_output_tokens += output_tokens
-            self.total_cache_read_tokens += usage.get("cache_read_input_tokens") or 0
-            self.total_cache_write_tokens += usage.get("cache_creation_input_tokens") or 0
+            self._add_usage(usage)
 
             print(f"이번 반복 토큰 사용량: 입력={input_tokens}, 출력={output_tokens}, "
                   f"캐시 읽기={usage.get('cache_read_input_tokens') or 0}, "
@@ -1218,6 +1216,33 @@ class AnthropicMCPClient:
                     break
 
         return final_text
+
+    def _add_usage(self, usage: Dict[str, Any]) -> None:
+        """모델 호출 한 번의 토큰을 누적하고, 호출별 목록에도 남긴다. 캐시에서 읽은·캐시에 쓴 입력은 input_tokens와 따로 온다."""
+        call = {
+            "input": int(usage.get("input_tokens") or 0),
+            "output": int(usage.get("output_tokens") or 0),
+            "cacheWrite": int(usage.get("cache_creation_input_tokens") or 0),
+            "cacheRead": int(usage.get("cache_read_input_tokens") or 0),
+        }
+        self.total_input_tokens += call["input"]
+        self.total_output_tokens += call["output"]
+        self.total_cache_write_tokens += call["cacheWrite"]
+        self.total_cache_read_tokens += call["cacheRead"]
+        self.model_calls.append(call)
+
+    def usage_summary(self) -> Dict[str, Any]:
+        """이번 질문에 쓴 토큰: 네 종류의 합계와 모델 호출별 목록 (감사 로그, audit.AuditLog.request_finished).
+        실패한 질문도 그때까지 쓴 만큼 남긴다."""
+        return {
+            "tokens": {
+                "input": self.total_input_tokens,
+                "output": self.total_output_tokens,
+                "cacheWrite": self.total_cache_write_tokens,
+                "cacheRead": self.total_cache_read_tokens,
+            },
+            "calls": [dict(call) for call in self.model_calls],
+        }
 
     def _usage_extra(self) -> Dict[str, int]:
         """토큰 사용량 중 입력·출력 밖의 것: 캐시에서 읽은·캐시에 쓴 입력과 도구 검색 횟수 (도구 검색 전후 비교용)."""
