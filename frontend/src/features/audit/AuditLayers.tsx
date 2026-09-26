@@ -28,12 +28,13 @@ import { LAYERS, requesterOf, toolLabelOf } from './auditModel';
 // 근거: 이 기록이 그 계층에 있는 까닭을 기록의 값으로 보인다. 문장 대신 흐름(단계 → 단계 → 단계)으로
 //   유입  [도구 비용 조회] › [결과 3,449자] › [받는 곳 모델]
 //   유출  [모델이 부름 로그 보존 기간 변경] › [위험도 변경] › [처리 승인 요청]
-//   효과  [결정 승인] › [결정한 사람 kim@…] › [AWS 바뀌기 전]
+//   효과  [결정 승인] › [결정한 사람 kim@…] › [다음 실행]
 // tone: 끝 단계의 뜻 (good 바뀌지 않음·성공, bad 실패, change AWS가 바뀜)
 interface EvidenceStep {
     label: string;
     value: string;
-    sub?: string; // 작은 고정폭 글자 (도구 이름·이벤트 이름)
+    sub?: string; // 작은 고정폭 글자 (도구 이름·이벤트 이름). 길면 말줄임
+    hint?: string; // 마우스를 올리면 뜨는 전체 글 (말줄임한 값의 원문)
     tone?: 'good' | 'bad' | 'change';
 }
 
@@ -86,7 +87,7 @@ function evidenceOf(record: AuditRecord): EvidenceStep[] {
         case 'executed':
             return [
                 { label: '실행', value: tool, sub: record.tool },
-                { label: 'CloudTrail', value: record.cloudTrailEvent?.split(':').pop() ?? '—' },
+                { label: '결과', value: '성공' }, // CloudTrail 이벤트는 매개의 흔적에서 보인다
                 { label: 'AWS', value: '바뀜', tone: 'change' },
             ];
         case 'failed':
@@ -100,13 +101,15 @@ function evidenceOf(record: AuditRecord): EvidenceStep[] {
     }
 }
 
-// 근거의 흐름 (단계 사이에 ›)
-function Evidence({ steps }: { steps: EvidenceStep[] }) {
-    if (!steps.length) return null;
+// 값의 흐름 (단계 사이에 ›). 근거는 파란 상자, 흔적은 주황 상자. 흐름이 여럿이면 한 상자 안에 줄로 쌓는다
+function Evidence({ title, flows, variant }: { title: string; flows: EvidenceStep[][]; variant: 'here' | 'mark' }) {
+    const shown = flows.filter((steps) => steps.length);
+    if (!shown.length) return null;
     return (
-        <div className="audit-evidence">
-            <span className="audit-evidence-title">근거</span>
-            <ol className="audit-evidence-flow">
+        <div className={`audit-evidence is-${variant}`}>
+            <span className="audit-evidence-title">{title}</span>
+            {shown.map((steps, flowIndex) => (
+            <ol key={flowIndex} className="audit-evidence-flow">
                 {steps.map((step, index) => (
                     <li key={step.label} className={step.tone ? `is-${step.tone}` : undefined}>
                         {index > 0 ? (
@@ -114,7 +117,7 @@ function Evidence({ steps }: { steps: EvidenceStep[] }) {
                                 <path d="M1.5 1.5L6 6l-4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                         ) : null}
-                        <span className="audit-evidence-step">
+                        <span className="audit-evidence-step" title={step.hint}>
                             <span className="audit-evidence-label">{step.label}</span>
                             <span className="audit-evidence-value">{step.value}</span>
                             {step.sub ? <code className="audit-evidence-sub">{step.sub}</code> : null}
@@ -122,18 +125,50 @@ function Evidence({ steps }: { steps: EvidenceStep[] }) {
                     </li>
                 ))}
             </ol>
+            ))}
         </div>
     );
 }
 
-// 이 기록이 다른 층에 남긴 흔적
-function marksOf(record: AuditRecord): Partial<Record<TraceLayer, string>> {
-    const marks: Partial<Record<TraceLayer, string>> = {};
+// 흔적: 이 기록이 다른 계층에 남긴 표시. 근거처럼 값의 흐름으로 (한 계층에 흐름이 여럿일 수 있다: 체류의 의심 결과가 여럿)
+//   체류  [읽은 결과 로그 분석] › [의심 문구 3종] › [변경 요청 바로 다음 호출]
+//   유입  [도구 결과 로그 분석] › [의심 문구 3종] › [처리 데이터로만 다룸]
+//   매개  [AWS API PutRetentionPolicy] › [요청 ID …] › [대조 CloudTrail 이벤트]
+type Marks = Partial<Record<TraceLayer, EvidenceStep[][]>>;
+
+// 의심 문구: 종류 수와 첫 종류(외 N), 전체는 마우스를 올리면
+const kindsStep = (kinds: string[]): EvidenceStep => ({
+    label: '의심 문구',
+    value: `${kinds.length}종`,
+    sub: kinds.length > 1 ? `${kinds[0]} 외 ${kinds.length - 1}` : kinds[0],
+    hint: kinds.join(', '),
+    tone: 'bad',
+});
+
+function marksOf(record: AuditRecord): Marks {
+    const marks: Marks = {};
     if (record.taintedBy?.length)
-        marks.residence = `의심 문구가 든 결과를 읽은 뒤 요청한 변경입니다 (${record.taintedBy.length}건)`;
+        marks.residence = record.taintedBy.map((seen) => [
+            { label: '읽은 결과', value: toolLabelOf(seen.tool), sub: seen.toolUseId },
+            kindsStep(seen.kinds),
+            { label: '변경 요청', value: seen.callsAgo <= 1 ? '바로 다음 호출' : `${seen.callsAgo}번째 뒤 호출` },
+        ]);
     if (Array.isArray(record.injectionSuspected) && record.injectionSuspected.length)
-        marks.ingress = `결과에 지시문처럼 보이는 문구가 있었습니다 (${record.injectionSuspected.join(', ')})`;
-    if (record.awsRequestId) marks.mediation = `CloudTrail 요청 ID ${record.awsRequestId}로 대조합니다`;
+        marks.ingress = [
+            [
+                { label: '도구 결과', value: toolLabelOf(record.tool), sub: record.tool },
+                kindsStep(record.injectionSuspected),
+                { label: '처리', value: '데이터로만 다룸', tone: 'good' },
+            ],
+        ];
+    if (record.awsRequestId)
+        marks.mediation = [
+            [
+                { label: 'AWS API', value: record.cloudTrailEvent?.split(':').pop() ?? '—', sub: record.cloudTrailEvent?.split(':')[0] },
+                { label: '요청 ID', value: `${record.awsRequestId.slice(0, 8)}…`, hint: record.awsRequestId },
+                { label: '대조', value: 'CloudTrail 이벤트의 requestID' },
+            ],
+        ];
     return marks;
 }
 
@@ -296,23 +331,20 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                             <span className="audit-cycle-en">{selected.en}</span>
                         </div>
                         <p className="audit-cycle-panel-text">{selected.description}</p>
-                        {selectedIsHere ? <Evidence steps={evidenceOf(record)} /> : null}
-                        {marks[selected.id] ? <p className="audit-cycle-callout is-marked">{marks[selected.id]}</p> : null}
-                        {selectedIsHere && otherMarks.length ? (
-                            <div className="audit-cycle-traces">
-                                <span className="audit-cycle-traces-title">다른 계층에 남긴 흔적</span>
-                                <ul>
-                                    {otherMarks.map((layer) => (
-                                        <li key={layer.id}>
-                                            <strong>
-                                                {LAYERS.indexOf(layer) + 1} {layer.label}
-                                            </strong>
-                                            <span>{marks[layer.id]}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        ) : null}
+                        {selectedIsHere ? <Evidence title="근거" flows={[evidenceOf(record)]} variant="here" /> : null}
+                        {/* 이 계층의 흔적 */}
+                        {marks[selected.id] ? <Evidence title="흔적" flows={marks[selected.id]!} variant="mark" /> : null}
+                        {/* 이 기록의 계층을 보고 있으면 다른 계층에 남긴 흔적도 (계층마다 한 상자) */}
+                        {selectedIsHere
+                            ? otherMarks.map((layer) => (
+                                  <Evidence
+                                      key={layer.id}
+                                      title={`흔적 · ${LAYERS.indexOf(layer) + 1} ${layer.label}`}
+                                      flows={marks[layer.id]!}
+                                      variant="mark"
+                                  />
+                              ))
+                            : null}
                     </div>
                 ) : null}
             </div>

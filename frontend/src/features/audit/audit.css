@@ -1342,18 +1342,7 @@
   overflow-wrap: anywhere;
 }
 
-/* 이 기록이 그 계층에서 한 일(파랑)과 그 계층의 흔적(주황) */
-.audit-cycle-callout {
-  margin: 0;
-  padding: 8px 12px;
-  border-left: 3px solid;
-  border-radius: 0 8px 8px 0;
-  font-size: 14px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-/* 근거: 이 기록이 그 계층에 있는 까닭 (단계 › 단계 › 단계) */
+/* 근거(파랑): 이 기록이 그 계층에 있는 까닭, 흔적(주황): 다른 계층에 남긴 표시. 둘 다 단계 › 단계 › 단계 */
 .audit-evidence {
   display: grid;
   gap: 8px;
@@ -1369,6 +1358,24 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   color: #5b8fd6;
+}
+
+/* 흔적: 같은 모양의 주황 상자 */
+.audit-evidence.is-mark {
+  border-color: #f6dfb8;
+  background: linear-gradient(180deg, #fffaf1 0%, #fff4e2 100%);
+}
+
+.audit-evidence.is-mark .audit-evidence-title {
+  color: #c07a12;
+}
+
+.audit-evidence.is-mark .audit-evidence-arrow {
+  color: #e4b56e;
+}
+
+.audit-evidence.is-mark .audit-evidence-step {
+  box-shadow: 0 0 0 1px #f3e2c4, 0 1px 2px rgba(31, 41, 51, 0.04);
 }
 
 .audit-evidence-flow {
@@ -1417,9 +1424,12 @@
 }
 
 .audit-evidence-sub {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   color: #6c757d;
-  overflow-wrap: anywhere;
 }
 
 /* 끝 단계의 뜻: 바뀌지 않음(초록) · 실패·미등록(빨강) · AWS가 바뀜(파랑) */
@@ -1435,50 +1445,6 @@
   color: var(--color-primary);
 }
 
-.audit-cycle-callout.is-marked {
-  border-color: #ff9900;
-  background: #fff8ec;
-  color: #8a5200;
-  font-size: 13px;
-}
-
-.audit-cycle-traces {
-  display: grid;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #fff8ec;
-}
-
-.audit-cycle-traces-title {
-  font-family: var(--font-label);
-  font-size: 11px;
-  font-weight: 700;
-  color: #b0741a;
-}
-
-.audit-cycle-traces ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 4px;
-}
-
-.audit-cycle-traces li {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  gap: 8px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #8a5200;
-  overflow-wrap: anywhere;
-}
-
-.audit-cycle-traces strong {
-  font-family: var(--font-label);
-  white-space: nowrap;
-}
 
 @keyframes audit-cycle-in {
   from { opacity: 0; }
