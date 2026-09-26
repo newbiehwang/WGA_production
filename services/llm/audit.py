@@ -33,7 +33,7 @@ from boto3.dynamodb.conditions import Attr, Key
 from llm_progress import _plain
 
 AUDIT_TTL_DAYS = 90  # DynamoDB 보관 기간. CloudWatch Logs는 1년 (llm.yaml의 AuditLogGroup)
-ADMIN_GROUP = "admins"  # 이 Cognito 그룹의 사용자는 모든 사람의 감사 로그를 본다
+ADMIN_GROUP = "admins"  # 감사 로그는 이 Cognito 그룹의 사용자만 본다 (자기 것 포함 모든 사람의 기록)
 
 # 크기 제한 (DynamoDB 항목은 400KB까지)
 QUESTION_LIMIT = 500
@@ -288,7 +288,8 @@ def _output(item: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def query_audit(table, caller_id: Optional[str], claims: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
-    """감사 로그 조회. 일반 사용자는 자기 기록만, admins 그룹은 모든 사람(scope=all) 또는 특정 사람(user=<sub>)의 기록.
+    """감사 로그 조회. admins 그룹만 볼 수 있다: 자기 기록(scope=mine), 모든 사람(scope=all), 특정 사람(user=<sub>).
+    일반 사용자는 자기 기록도 볼 수 없다 (403). 화면이 탭을 숨기는 것은 편의일 뿐이고, 막는 곳은 여기다.
 
     params (쿼리 문자열): from, to (YYYY-MM-DD, UTC), scope (mine|all), user, tool, status (ok|error),
                           kind (tool|request), limit, cursor
@@ -298,15 +299,15 @@ def query_audit(table, caller_id: Optional[str], claims: Dict[str, Any], params:
     if not caller_id:
         raise AuditQueryError(401, "로그인이 필요합니다")
     params = params or {}
-    admin = is_admin(claims)
+    # 관리자만: 조건을 읽기 전에 막는다 (잘못된 조건에 400으로 답해 조회 방법을 알려 주지 않게)
+    if not is_admin(claims):
+        raise AuditQueryError(403, "감사 로그는 관리자(admins 그룹)만 볼 수 있습니다")
 
     # 누구의 기록인가
     scope = params.get("scope") or "mine"
     target = params.get("user") or None
     if scope not in ("mine", "all"):
         raise AuditQueryError(400, "scope는 mine 또는 all이어야 합니다")
-    if (scope == "all" or (target and target != caller_id)) and not admin:
-        raise AuditQueryError(403, "다른 사용자의 감사 로그는 관리자만 볼 수 있습니다")
     if scope == "mine":
         target = target or caller_id
 
@@ -369,7 +370,7 @@ def query_audit(table, caller_id: Optional[str], claims: Dict[str, Any], params:
         "items": [_output(item) for item in items],
         "cursor": next_cursor,
         "scope": "all" if not target else ("mine" if target == caller_id else "user"),
-        "isAdmin": admin,
+        "isAdmin": True,  # 여기까지 왔으면 관리자다 (예전 화면과의 호환을 위해 남긴다)
         "from": start.isoformat(),
         "to": end.isoformat(),
     }

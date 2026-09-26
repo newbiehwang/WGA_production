@@ -612,7 +612,7 @@ def handle_progress(request_id, caller_id, origin):
 
 
 def handle_audit(params, caller_id, claims, origin):
-    """GET /audit: 감사 로그. 일반 사용자는 자기 기록만, admins 그룹은 모든 사람의 기록 (audit.query_audit)."""
+    """GET /audit: 감사 로그. admins 그룹만 볼 수 있다 (audit.query_audit, 일반 사용자는 403)."""
     try:
         return cors_response(200, query_audit(audit_table, caller_id, claims, params), origin)
     except AuditQueryError as error:

@@ -265,21 +265,25 @@ def run_query(table, caller="alice", groups=None, **params):
     return query_audit(table, caller, claims, {k: str(v) for k, v in params.items()})
 
 
-def test_users_see_only_their_own_records(seeded):
+def test_admins_see_their_own_records_by_default(seeded):
     table, days = seeded
-    result = run_query(table, **{"from": days[-1]})
+    result = run_query(table, groups="admins", **{"from": days[-1]})
     assert {i["userId"] for i in result["items"]} == {"alice"} and len(result["items"]) == 6
-    assert result["scope"] == "mine" and result["isAdmin"] is False
+    assert result["scope"] == "mine" and result["isAdmin"] is True
     # 최신 기록부터, 입력은 객체로, TTL 값은 빼고
     assert [i["at"] for i in result["items"]] == sorted((i["at"] for i in result["items"]), reverse=True)
     assert result["items"][0]["input"] == {"n": 1} and "expiresAt" not in result["items"][0]
 
 
-@pytest.mark.parametrize("params", [{"scope": "all"}, {"user": "bob"}])
-def test_users_cannot_read_other_peoples_records(seeded, params):
+# 감사 로그는 관리자만: 일반 사용자는 자기 기록도, 남의 기록도 못 본다. 승인자(approvers)만으로도 안 된다.
+# 잘못된 조건(scope=everyone)에도 400이 아니라 403: 조건을 검사하기 전에 막는다
+@pytest.mark.parametrize("groups", [None, "approvers", "[approvers readers]"])
+@pytest.mark.parametrize("params", [{}, {"scope": "mine"}, {"user": "alice"}, {"scope": "all"}, {"user": "bob"},
+                                    {"scope": "everyone"}])
+def test_users_cannot_read_audit_records(seeded, groups, params):
     from audit import AuditQueryError
     with pytest.raises(AuditQueryError) as error:
-        run_query(seeded[0], **params)
+        run_query(seeded[0], groups=groups, **params)
     assert error.value.status == 403
 
 
@@ -317,7 +321,7 @@ def test_filtered_paging_does_not_skip_records(seeded):
         params = {"status": "error", "from": days[-1], "limit": 1}
         if cursor:
             params["cursor"] = cursor
-        page = run_query(table, **params)
+        page = run_query(table, groups="admins", **params)
         seen += page["items"]
         cursor = page["cursor"]
         if not cursor:
@@ -336,7 +340,7 @@ def test_filtered_paging_does_not_skip_records(seeded):
 def test_bad_queries_are_rejected(seeded, params, status):
     from audit import AuditQueryError
     with pytest.raises(AuditQueryError) as error:
-        run_query(seeded[0], **params)
+        run_query(seeded[0], groups="admins", **params)
     assert error.value.status == status
 
 
@@ -344,7 +348,7 @@ def test_cursor_for_another_user_is_rejected(seeded):
     from audit import AuditQueryError, _encode_cursor
     cursor = _encode_cursor({"key": {"userId": "bob", "at": "2026-09-25T00:00:00.000Z#x"}})
     with pytest.raises(AuditQueryError) as error:
-        run_query(seeded[0], cursor=cursor)
+        run_query(seeded[0], groups="admins", cursor=cursor)
     assert error.value.status == 400
 
 
@@ -367,6 +371,11 @@ def test_audit_route(seeded):
              "queryStringParameters": {"scope": "all"},
              "requestContext": {"authorizer": {"claims": {"sub": "alice"}}}}
     assert lambda_function.lambda_handler(event, None)["statusCode"] == 403
+    # 일반 사용자는 자기 기록(조건 없음 = scope mine)도 못 본다
+    event["queryStringParameters"] = None
+    response = lambda_function.lambda_handler(event, None)
+    assert response["statusCode"] == 403 and "관리자" in json.loads(response["body"])["error"]
+    event["queryStringParameters"] = {"scope": "all"}
 
     event["requestContext"]["authorizer"]["claims"]["cognito:groups"] = "admins"
     response = lambda_function.lambda_handler(event, None)
@@ -425,3 +434,21 @@ def test_llm_role_can_only_append_and_read_audit_records():
 def test_admins_group_exists():
     group = template("base.yaml")["Resources"]["AdminsGroup"]
     assert group["Type"] == "AWS::Cognito::UserPoolGroup" and group["Properties"]["GroupName"] == "admins"
+
+
+# ---------------------------------------------------------------- 화면 (정적 확인: 프런트엔드 테스트 도구가 없다)
+
+def test_screen_shows_audit_only_to_admins():
+    frontend = ROOT / "frontend" / "src"
+    # 탭: 감사 로그는 관리자에게만 보인다
+    navigation = (frontend / "components" / "layout" / "Navigation.tsx").read_text(encoding="utf-8")
+    assert "{ label: '감사 로그', to: '/audit', adminOnly: true }" in navigation
+    assert "!item.adminOnly || isAdmin(user)" in navigation
+    # 경로: 주소로 바로 들어와도 관리자가 아니면 홈으로
+    app = (frontend / "App.tsx").read_text(encoding="utf-8")
+    assert '<Route path="/audit" element={isAdmin(user) ? <AuditPage /> : <Navigate to="/" replace />} />' in app
+    # 관리자 여부는 ID 토큰의 cognito:groups에서 읽고, 서버와 같은 그룹 이름을 쓴다
+    auth = (frontend / "auth" / "authClient.ts").read_text(encoding="utf-8")
+    assert "claims['cognito:groups']" in auth
+    server = (ROOT / "services" / "llm" / "audit.py").read_text(encoding="utf-8")
+    assert 'ADMIN_GROUP = "admins"' in server and "export const ADMIN_GROUP = 'admins';" in auth

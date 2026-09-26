@@ -628,7 +628,7 @@ Resources:
       Principal: 'apigateway.amazonaws.com'
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayId}/*/*/llm1/progress/*'
 
-  # GET /audit: 감사 로그 (llm_service.handle_audit). 일반 사용자는 자기 기록만, admins 그룹은 모든 사람의 기록
+  # GET /audit: 감사 로그 (llm_service.handle_audit). admins 그룹만 조회 (일반 사용자는 403)
   AuditApiResource:
     Type: AWS::ApiGateway::Resource
     Properties:

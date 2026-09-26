@@ -52,7 +52,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | # | 위협 | 방어 | 테스트 |
 |:--|:--|:--|:--|
 | T1 | 인증 없이 챗봇·대화 기록을 쓴다 (A1) | API Gateway Cognito 인가자. 요청자는 토큰의 `sub`로만 정한다 | `tests/test_chat_history.py::test_missing_claims_is_unauthorized`, `tests/test_chat_history.py::test_create_uses_token_sub_not_client_user_id` |
-| T2 | 남의 대화·진행 상황·감사 기록을 읽거나 고친다 (A2) | 소유자 확인. 남의 것은 '없음(404)'으로 답해 있는지도 알리지 않는다 | `tests/test_chat_history.py::test_other_user_gets_404_and_cannot_modify`, `tests/test_llm_service.py::test_session_history_hidden_from_others`, `tests/test_llm_progress.py::test_other_user_cannot_overwrite_progress`, `tests/test_audit.py::test_users_cannot_read_other_peoples_records`, `tests/test_audit.py::test_cursor_for_another_user_is_rejected` |
+| T2 | 남의 대화·진행 상황·감사 기록을 읽거나 고친다 (A2) | 소유자 확인. 남의 것은 '없음(404)'으로 답해 있는지도 알리지 않는다 | `tests/test_chat_history.py::test_other_user_gets_404_and_cannot_modify`, `tests/test_llm_service.py::test_session_history_hidden_from_others`, `tests/test_llm_progress.py::test_other_user_cannot_overwrite_progress`, `tests/test_audit.py::test_users_cannot_read_audit_records`, `tests/test_audit.py::test_cursor_for_another_user_is_rejected` |
 | T3 | 웹 요청이 Slack 사용자 행세를 한다 (A2) | 웹 요청에서는 Slack 전용 필드를 버린다 | `tests/test_llm_service.py::test_web_request_cannot_use_slack_fields` |
 | T4 | Slack 요청 위조·재전송 (A1) | Slack 서명 확인, 5분 넘은 요청 거절, 비밀이 없으면 닫힌 채 실패 | `tests/test_slack_security.py::test_tampered_requests_are_rejected`, `tests/test_slack_security.py::test_replayed_request_older_than_5_minutes_is_rejected`, `tests/test_slack_security.py::test_missing_secret_fails_closed` |
 | T5 | Cognito 토큰 위조 | 발급자·대상·만료·용도·서명 확인 | `tests/test_slack_security.py::test_invalid_claims_are_rejected`, `tests/test_slack_security.py::test_token_signed_with_other_key_is_rejected` |
@@ -119,7 +119,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | R5 | 인젝션 탐지는 패턴이다 | 중간 | 다른 말로 바꾸면 빠져나간다. 변경은 승인으로 막고 계정 밖으로 나가는 통로는 Claude API뿐이지만, 답변을 왜곡해 사용자를 속이는 것(무결성)은 막지 못한다 | 답변에 근거 도구 결과 표시 |
 | R6 | 가리기는 패턴이다 | 중간 | 모르는 형식의 비밀 값, 리소스 이름·IP·버킷 이름 같은 값은 Claude API로 나간다 | 로그 조회 결과의 필드 허용 목록, 데이터 분류에 따른 도구별 가리기 |
 | R7 | 요청 수·비용 한도가 없다 | 중간 | API Gateway 사용량 계획·사용자별 할당이 없다. 한 사용자가 Anthropic 토큰, Logs Insights 스캔, 흐름 로그 조회, Cost Explorer API 비용을 키울 수 있다 | 사용량 계획과 사용자별 일일 한도, 요청당 반복 수·스캔 범위 제한 |
-| R8 | 조회 권한이 사용자별로 나뉘지 않는다 | 낮음 | 모든 사용자가 같은 MCP 역할로 조회한다. 감사 기록 조회만 `admins` 그룹으로 나뉜다 | Cognito 그룹별로 쓸 수 있는 도구 제한 |
+| R8 | 조회 권한이 사용자별로 나뉘지 않는다 | 낮음 | 모든 사용자가 같은 MCP 역할로 조회한다. 감사 기록은 `admins` 그룹만 조회한다 | Cognito 그룹별로 쓸 수 있는 도구 제한 |
 | R9 | 계정 관리자는 감사 기록을 지울 수 있다 | 낮음 | LLM 역할은 덧붙이기만 하지만 계정 관리자 권한은 이 앱 밖의 일이다 | 로그를 다른 계정·S3 Object Lock으로 복제 |
 
 ## 6. 설계 판단

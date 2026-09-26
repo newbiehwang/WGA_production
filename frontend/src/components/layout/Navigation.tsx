@@ -1,16 +1,17 @@
-// 위쪽 내비게이션: 로고 · 가운데 탭(홈, 대화, 감사 로그) · 오른쪽 프로필 (AXPI Navigation.tsx)
+// 위쪽 내비게이션: 로고 · 가운데 탭(홈, 대화, 관리자에게만 감사 로그) · 오른쪽 프로필 (AXPI Navigation.tsx)
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import type { AuthUser } from '@/auth/authClient';
+import { type AuthUser, isAdmin } from '@/auth/authClient';
 import { makeAvatarLabel } from '@/utils/formatters';
 import { LogoMark } from './LogoMark';
 import { ProfileAvatar } from './ProfileAvatar';
 import { ProfileDropdown } from './ProfileDropdown';
 
+// adminOnly: 관리자(admins 그룹)에게만 보이는 탭. 주소로 바로 들어오는 것은 App의 경로가, 조회는 서버가 막는다
 const NAV_ITEMS = [
     { label: '홈', to: '/' },
     { label: '대화', to: '/chat' },
-    { label: '감사 로그', to: '/audit' },
+    { label: '감사 로그', to: '/audit', adminOnly: true },
 ];
 
 export function Navigation({
@@ -58,7 +59,7 @@ export function Navigation({
                     <LogoMark />
                 </a>
                 <nav className="center-toolbar" aria-label="주요 메뉴">
-                    {NAV_ITEMS.map((item) => (
+                    {NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin(user)).map((item) => (
                         <NavLink
                             key={item.to}
                             to={item.to}

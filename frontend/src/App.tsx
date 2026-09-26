@@ -1,8 +1,8 @@
-// 앱 틀: 로그인하지 않았으면 로그인 화면, 했으면 위쪽 내비게이션 + 화면(홈 / 대화 / 감사 로그)
+// 앱 틀: 로그인하지 않았으면 로그인 화면, 했으면 위쪽 내비게이션 + 화면(홈 / 대화 / 감사 로그는 관리자만)
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { setUnauthorizedHandler } from './api/http';
-import { isReturningFromLogin, onLoginResult } from './auth/authClient';
+import { isAdmin, isReturningFromLogin, onLoginResult } from './auth/authClient';
 import { useAuthStore } from './auth/authStore';
 import { LoginPage } from './components/layout/LoginPage';
 import { LogoutOverlay } from './components/layout/LogoutOverlay';
@@ -76,7 +76,8 @@ export default function App() {
                     <Routes>
                         <Route path="/" element={<HomePage />} />
                         <Route path="/chat" element={<ChatPage />} />
-                        <Route path="/audit" element={<AuditPage />} />
+                        {/* 관리자가 아니면 주소로 들어와도 홈으로 보낸다 (조회는 서버가 403으로 막는다) */}
+                        <Route path="/audit" element={isAdmin(user) ? <AuditPage /> : <Navigate to="/" replace />} />
                         {/* 예전 주소(/start-chat, /dashboard, /login)와 로그인·로그아웃 뒤 돌아오는 /redirect는 홈으로 */}
                         <Route path="*" element={<Navigate to="/" replace />} />
                     </Routes>
