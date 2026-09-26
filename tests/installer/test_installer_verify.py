@@ -196,3 +196,4 @@ def test_commands_are_registered(fake):
         result = run_cli(fake, command, "--help")
         assert result.returncode == 0 and "--dry-run" in result.stdout
     assert "--alarm-email" in run_cli(fake, "deploy", "--help").stdout
+    assert "--admin-email" in run_cli(fake, "deploy", "--help").stdout

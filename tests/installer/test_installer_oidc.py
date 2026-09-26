@@ -216,6 +216,19 @@ def test_shared_region_variable_is_kept_by_default(fake, repo_dir):
     assert [c[1] for c in mutating(fake)] == [f"variable set AWS_DEPLOY_ROLE_ARN_DEV --body {ROLE_ARN} --repo {REPO}"]
 
 
+def test_admin_email_is_registered_as_a_variable(fake, repo_dir):
+    # GitHub Actions 배포도 같은 관리자 계정을 쓰도록 저장소 변수 ADMIN_EMAIL로 등록한다 (deploy.yml이 넘긴다)
+    aws(fake, before=stack())
+    github(fake, environment=GOOD_ENV, policies=["main"], variables={"AWS_REGION": "ap-northeast-2"})
+    code, evts = run_step(fake, oidc.run, repo=repo_dir, admin_email="admin@example.com",
+                          stdin=responses(("confirm", "variable_ADMIN_EMAIL"),
+                                          ("confirm", "variable_AWS_DEPLOY_ROLE_ARN_DEV")))
+    assert code == 0, _dump(evts)
+    assert [c[1] for c in mutating(fake)] == [
+        f"variable set ADMIN_EMAIL --body admin@example.com --repo {REPO}",
+        f"variable set AWS_DEPLOY_ROLE_ARN_DEV --body {ROLE_ARN} --repo {REPO}"]
+
+
 def test_declining_role_variable_means_not_done(fake, repo_dir):
     aws(fake, before=stack())
     github(fake, environment=GOOD_ENV, policies=["main"], variables={"AWS_REGION": "ap-northeast-2"})

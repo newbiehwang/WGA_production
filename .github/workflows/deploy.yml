@@ -51,6 +51,7 @@ jobs:
         run: ./deploy.sh dev
         env:
           ALARM_EMAIL: ${{ vars.ALARM_EMAIL }}
+          ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
 
   prod:
     name: prod 배포 (승인 필요)
@@ -86,3 +87,4 @@ jobs:
         run: ./deploy.sh prod
         env:
           ALARM_EMAIL: ${{ vars.ALARM_EMAIL }}
+          ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
