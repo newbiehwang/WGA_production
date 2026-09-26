@@ -64,6 +64,39 @@
   color: #5f6670;
 }
 
+/* 확인 단계: 보낼 이메일을 크게 */
+.users-invite-question {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2933;
+}
+
+.users-invite-address {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #dbe7f7;
+  border-radius: 10px;
+  background: #f5f9ff;
+  font-family: var(--font-label);
+  font-size: 15px;
+  font-weight: 700;
+  color: #1f2933;
+  overflow-wrap: anywhere;
+  animation: users-invite-in 180ms ease both;
+}
+
+@keyframes users-invite-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .users-invite-address {
+    animation: none;
+  }
+}
+
 .users-invite-error {
   margin: 0;
   font-size: 13px;
