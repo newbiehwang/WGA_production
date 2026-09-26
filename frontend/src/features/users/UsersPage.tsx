@@ -18,6 +18,7 @@ import { ROLE_LABELS } from '@/auth/authClient';
 import { LoadingCard, useMinimumVisible } from '@/components/LoadingCard';
 import { RefreshButton } from '@/components/RefreshButton';
 import { SearchBox } from '@/components/SearchBox';
+import { Toast, useToast } from '@/components/Toast';
 import { ResetButton } from '@/features/audit/FilterMenu';
 import type { ManagedUser, UserRole } from '@/types/users';
 import { formatKoreanDateTime } from '@/utils/formatters';
@@ -119,8 +120,9 @@ export function UsersPage() {
     const [truncated, setTruncated] = useState(false); // MAX_PAGES쪽을 넘어 다 받지 못했다
     const [loading, setLoading] = useState(true);
     const listLoading = useMinimumVisible(loading); // 목록 자리의 기다림 카드 (최소 1초)
-    const [error, setError] = useState<string | null>(null);
-    const [notice, setNotice] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null); // 목록을 받지 못했을 때 (목록 자리에 남긴다)
+    // 바꾼 결과는 패널 위쪽 가운데의 알림으로 (성공·실패 모두, components/Toast)
+    const { toast, show: showToast, clear: clearToast } = useToast();
     const [busy, setBusy] = useState<string | null>(null); // 바꾸는 중인 사용자
     const [inviteOpen, setInviteOpen] = useState(false);
     const requestNo = useRef(0); // 마지막 조회의 응답만 쓴다
@@ -167,14 +169,12 @@ export function UsersPage() {
 
     const change = async (user: ManagedUser, action: () => Promise<ManagedUser>, done: string) => {
         setBusy(user.username);
-        setError(null);
-        setNotice(null);
         try {
             const updated = await action();
             setUsers((prev) => prev.map((item) => (item.username === updated.username ? updated : item)));
-            setNotice(`${updated.email ?? updated.username}: ${done}`);
+            showToast('success', `${updated.email ?? updated.username}: ${done}`);
         } catch (err) {
-            setError(userErrorText(err));
+            showToast('error', userErrorText(err));
         } finally {
             setBusy(null);
         }
@@ -183,8 +183,7 @@ export function UsersPage() {
     // 초대 팝업창에서 초대했으면 목록 맨 위에 넣는다
     const invited = (created: ManagedUser) => {
         setUsers((prev) => [created, ...prev.filter((item) => item.username !== created.username)]);
-        setError(null);
-        setNotice(`${created.email ?? created.username}에 초대 메일을 보냈습니다 (임시 비밀번호, 7일 동안 유효)`);
+        showToast('success', `${created.email ?? created.username}에 초대 메일을 보냈습니다.`);
     };
 
     return (
@@ -244,11 +243,6 @@ export function UsersPage() {
                     <p>{error}</p>
                 </div>
             ) : null}
-            {notice ? (
-                <p className="users-notice" role="status">
-                    {notice}
-                </p>
-            ) : null}
 
             <div className="plan-panel-body">
                 <div className="plan-table users-table">
@@ -300,7 +294,7 @@ export function UsersPage() {
                                                         change(
                                                             user,
                                                             () => setRole(user.username, role),
-                                                            `권한을 ${ROLE_LABELS[role]}로 바꿨습니다`,
+                                                            `권한을 ${ROLE_LABELS[role]}로 바꿨습니다.`,
                                                         )
                                                     }
                                                 />
@@ -317,7 +311,7 @@ export function UsersPage() {
                                                         disabled={rowBusy || user.isSelf}
                                                         title={user.isSelf ? '자기 계정은 정지할 수 없습니다' : '로그인과 갱신을 막습니다'}
                                                         onConfirm={() =>
-                                                            change(user, () => setEnabled(user.username, false), '정지했습니다')
+                                                            change(user, () => setEnabled(user.username, false), '정지했습니다.')
                                                         }
                                                     />
                                                 ) : (
@@ -326,7 +320,7 @@ export function UsersPage() {
                                                         className="users-account-button"
                                                         disabled={rowBusy}
                                                         onClick={() =>
-                                                            change(user, () => setEnabled(user.username, true), '정지를 풀었습니다')
+                                                            change(user, () => setEnabled(user.username, true), '정지를 풀었습니다.')
                                                         }
                                                     >
                                                         정지 해제
@@ -347,6 +341,8 @@ export function UsersPage() {
                     <LoadingCard text="사용자를 불러오는 중…" />
                 </div>
             ) : null}
+
+            <Toast toast={toast} onDone={clearToast} />
 
             {inviteOpen ? <InviteModal onInvited={invited} onClose={() => setInviteOpen(false)} /> : null}
         </section>

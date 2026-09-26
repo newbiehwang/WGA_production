@@ -127,17 +127,6 @@
   outline-offset: 1px;
 }
 
-.users-notice {
-  margin: 0 0 12px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(88, 167, 121, 0.12);
-  color: #3f8a61;
-  font-size: 0.86rem;
-  font-family: var(--font-label);
-  font-weight: 600;
-}
-
 /* 표: 머리와 행이 같은 열 너비를 쓴다 (이메일 · 권한 · 가입일 · 계정) */
 .users-row-grid {
   display: grid;
