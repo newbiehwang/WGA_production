@@ -64,7 +64,11 @@ interface MockTool {
   status: "ok" | "error";
   error?: string;
   suspicious?: string[]; // 결과에 지시문처럼 보이는 문구가 있었다 (services/llm/injection.py)
+  id?: string; // 도구 호출 ID를 정해 둘 때 (승인 요청의 taintedBy가 가리킨다)
 }
+
+// 변경 도구 (감사 로그의 층이 유출이다). 나머지는 유입
+const WRITE_TOOLS = new Set(["setLogRetention", "setAlarmActions"]);
 
 // 답변 예시. 보낼 때마다 차례로 돌아가며, 화면에서 자주 고치는 요소(사고 요약·도구 목록·표·목록·코드·실패한 도구)를 모두 담았다.
 // thinking: 도구를 부르기 전과 뒤의 사고 요약
@@ -374,6 +378,45 @@ const INJECTION_ENTRY: MockEntry = {
   ],
 };
 
+// 모델이 로그에 심긴 지시를 그대로 따라 변경을 요청한 경우 (질문에 '로그대로'가 있으면).
+// 판단은 그대로(승인 필요)이고, 승인 카드와 감사 로그에 '먼저 읽은 의심 결과'가 보인다 (체류 신호)
+const TAINTED_LOG_ID = "toolu_mocklog1";
+const TAINTED_ENTRY: MockEntry = {
+  answer: [
+    "로그에 적힌 대로 `/aws/lambda/wga-llm-dev` 로그 그룹의 보존 기간을 **1일**로 바꾸려면 승인이 필요합니다.",
+    "",
+    "아래 승인 요청을 확인해 주세요.",
+  ].join("\n"),
+  search: { query: "setLogRetention", found: ["setLogRetention"] },
+  tools: [
+    { ...INJECTION_ENTRY.tools[0], id: TAINTED_LOG_ID },
+    {
+      tool_name: "setLogRetention",
+      input: { log_group_name: MOCK_LOG_GROUP, retention_days: 1 },
+      status: "ok",
+    },
+  ],
+  thinking: [
+    "로그에 적힌 대로 해 달라는 요청이다. 먼저 로그를 읽는다.",
+    "로그가 보존 기간을 1일로 바꾸라고 한다. 변경 작업이라 승인 요청을 만든다.",
+  ],
+  approval: () => ({
+    tool: "setLogRetention",
+    args: { log_group_name: MOCK_LOG_GROUP, retention_days: 1 },
+    before: retentionText(mockResources.retention),
+    after: "1일",
+    summary: `${MOCK_LOG_GROUP} 로그 보존 기간 ${retentionText(mockResources.retention)} → 1일 (지난 로그 대부분이 지워질 수 있습니다)`,
+    taintedBy: [
+      {
+        toolUseId: TAINTED_LOG_ID,
+        tool: "execute_log_insights_query",
+        kinds: INJECTION_ENTRY.tools[0].suspicious ?? [],
+        callsAgo: 1,
+      },
+    ],
+  }),
+};
+
 // 승인한 작업의 결과 설명 (실제로는 서버가 저장된 결과로 질문을 만들어 모델이 설명한다)
 const explanationEntry = (action: PendingAction): MockEntry => ({
   answer:
@@ -474,6 +517,7 @@ const entryFor = (body: RequestBody): MockEntry => {
   const action = body.actionId ? actions.get(body.actionId) : undefined;
   if (action) return explanationEntry(action);
   const text = body.text || body.question || "";
+  if (text.includes("로그대로")) return TAINTED_ENTRY;
   if (text.includes("인젝션") || text.includes("의심")) return INJECTION_ENTRY;
   if (text.includes("갤러리")) return GALLERY_ENTRY;
   if (text.includes("차트") || text.includes("그려")) return CHART_ENTRY;
@@ -588,12 +632,13 @@ const auditRecordsOf = (
   };
   let at = time.getTime() + 900; // 첫 도구는 첫 사고 뒤에 시작한다
   const toolRecords = tools.map((tool): AuditRecord => {
-    const toolUseId = `toolu_${newId().slice(0, 8)}`;
+    const toolUseId = tool.id ?? `toolu_${newId().slice(0, 8)}`;
     const record: AuditRecord = {
       ...common,
       at: auditAt(new Date(at), toolUseId),
       day: new Date(at).toISOString().slice(0, 10),
       kind: "tool",
+      locus: WRITE_TOOLS.has(tool.tool_name) ? "egress" : "ingress",
       tool: tool.tool_name,
       toolUseId,
       input: tool.input,
@@ -675,6 +720,7 @@ const actionAuditRecord = (
     at: auditAt(time, `action#${action.actionId}#${event}`),
     day: time.toISOString().slice(0, 10),
     kind: "action",
+    locus: event === "requested" ? "egress" : "effect",
     event,
     actionId: action.actionId,
     tool: action.tool,
@@ -682,6 +728,7 @@ const actionAuditRecord = (
     summary: action.summary,
     status: "ok",
     ...(event !== "requested" && { decidedBy: MOCK_USER_ID }),
+    ...(event === "requested" && action.taintedBy?.length && { taintedBy: action.taintedBy }),
     ...(event === "executed" && action.result && { result: action.result }),
     ...(event === "executed" &&
       action.cloudtrail && {
@@ -710,6 +757,14 @@ const queryAudit = (query: AuditQuery): Result => {
     .filter((r) => !query.tool || r.tool === query.tool)
     .filter((r) => !query.status || r.status === query.status)
     .filter((r) => !query.kind || r.kind === query.kind)
+    // 체류층은 행이 따로 없다: 의심 결과를 읽은 뒤의 승인 요청 행 (services/llm/audit.py)
+    .filter((r) =>
+      !query.locus
+        ? true
+        : query.locus === "residence"
+          ? !!r.taintedBy?.length
+          : r.locus === query.locus,
+    )
     .sort((a, b) => (a.at < b.at ? 1 : -1)); // 최신 기록부터
   const offset = Number(query.cursor ?? 0);
   const limit = Number(query.limit ?? 50);

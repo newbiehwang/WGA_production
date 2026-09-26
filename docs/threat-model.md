@@ -105,6 +105,8 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 |:--|:--|:--|:--|
 | T33 | 감사 기록을 고치거나 지운다 | 쓰기는 `attribute_not_exists`로 덧붙이기만 하고, LLM 역할에는 PutItem·Query만 준다. CloudWatch Logs(365일)에도 같은 기록을 남긴다. 테이블은 PITR | `tests/test_audit.py::test_records_are_append_only`, `tests/test_audit.py::test_llm_role_can_only_append_and_read_audit_records`, `tests/test_audit.py::test_audit_records_are_also_written_to_cloudwatch_logs` |
 | T34 | 도구 호출이 기록되지 않는다 | 도구마다 실제로 받은 값(비밀 값만 가림)으로 기록한다 | `tests/test_audit.py::test_each_tool_call_is_recorded_with_the_value_the_tool_received`, `tests/test_audit.py::test_slack_requests_are_recorded_by_slack_user` |
+| T35 | 승인자가 로그에 심긴 지시에서 나온 변경 요청을 평소 요청처럼 승인한다 (승인 피로) | 같은 질문에서 의심 문구가 든 결과를 읽은 뒤의 변경 요청이면, 그 결과와 거리(몇 번째 뒤 호출)를 승인 요청에 적어 승인 카드·감사 로그에 보인다(체류 신호). 모델이 아직 보지 못한 결과(같은 응답에서 함께 부른 도구)는 세지 않는다. 판단은 바꾸지 않는다 | `tests/test_audit_locus.py::test_change_requested_after_reading_an_injected_log_is_flagged`, `tests/test_audit_locus.py::test_results_from_the_same_response_are_not_counted`, `tests/test_audit_locus.py::test_clean_log_leaves_no_residence_signal` |
+| T36 | 사고가 났을 때 어디가 뚫렸는지 좁히지 못한다 | 감사 행마다 층(경계·유입·유출·효과)을 적고, 관리자는 층과 체류(의심 뒤 요청)로 거른다. 등록부에 없는 도구 호출은 경계층으로 따로 남는다 | `tests/test_audit_locus.py::test_unregistered_tool_is_recorded_at_the_interface`, `tests/test_audit_locus.py::test_change_requested_after_reading_an_injected_log_is_flagged` |
 
 ## 5. 남은 위험
 
@@ -121,6 +123,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | R7 | 요청 수·비용 한도가 없다 | 중간 | API Gateway 사용량 계획·사용자별 할당이 없다. 한 사용자가 Anthropic 토큰, Logs Insights 스캔, 흐름 로그 조회, Cost Explorer API 비용을 키울 수 있다 | 사용량 계획과 사용자별 일일 한도, 요청당 반복 수·스캔 범위 제한 |
 | R8 | 조회 권한이 사용자별로 나뉘지 않는다 | 낮음 | 모든 사용자가 같은 MCP 역할로 조회한다. 감사 기록은 `admins` 그룹만 조회한다 | Cognito 그룹별로 쓸 수 있는 도구 제한 |
 | R9 | 계정 관리자는 감사 기록을 지울 수 있다 | 낮음 | LLM 역할은 덧붙이기만 하지만 계정 관리자 권한은 이 앱 밖의 일이다 | 로그를 다른 계정·S3 Object Lock으로 복제 |
+| R10 | 체류 신호는 질문 하나 안에서만 센다 | 낮음 | 대화 기록에는 도구 결과가 아니라 글만 남는다. 앞 질문에서 읽은 의심 결과를 모델이 답변에 옮겼고, 다음 질문에서 그 답변을 보고 변경을 요청하면 신호가 없다 (승인은 여전히 필요하다) | 대화 단위로 의심 결과를 서버에 남겨 다음 질문의 변경 요청에도 적기 |
 
 ## 6. 설계 판단
 

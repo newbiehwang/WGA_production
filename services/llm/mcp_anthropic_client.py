@@ -5,13 +5,15 @@ import requests
 from typing import Dict, Any, List, Optional
 from mcp_client import MCPClient
 from redaction import Redactor
-from approvals import PREVIEW_META, risk_of
+from approvals import PREVIEW_META, is_registered, risk_of
 import injection
 import tool_search
 
 
 # 응답 한 번의 최대 출력 토큰. 사고 과정(thinking)도 이 안에서 쓰므로 사고를 켠 뒤 8192에서 늘렸다
 MAX_TOKENS = 16000
+# 승인 요청에 적는 '먼저 읽은 의심 결과'의 최대 수 (최근 것부터). 승인 테이블 항목 크기를 제한한다
+MAX_TAINTED = 5
 
 
 class AnthropicMCPClient:
@@ -71,6 +73,9 @@ class AnthropicMCPClient:
         self.approvals = None
         # 요청마다 llm_service가 넣어 주는 결과물 목록 (artifacts.Artifacts). 없으면 예전처럼 주소를 모델에 넘긴다
         self.artifacts = None
+        # 이번 질문에서 부른 도구 수와, 모델이 이미 읽은 의심 결과 (체류 신호, invoke_with_tools가 질문마다 비운다)
+        self._tool_calls = 0
+        self._seen_suspicious: List[Dict[str, Any]] = []
 
     def _report(self, event: str, *args) -> None:
         """한 단계를 진행 상황과 감사 로그에 알린다 (기록할 곳이 없으면 아무것도 하지 않는다).
@@ -82,11 +87,21 @@ class AnthropicMCPClient:
         if self.audit is not None and hasattr(self.audit, event):
             getattr(self.audit, event)(*args)
 
+    def _tool_definition(self, name: str) -> Optional[Dict[str, Any]]:
+        return next((tool for tool in self.tools if tool.get("name") == name), None)
+
     def _tool_risk(self, name: str) -> str:
         """MCP tools/list가 알려 준 위험도 (mcp/lambda_mcp/risk.py). 모르는 도구는 변경 도구로 본다."""
-        return risk_of(next((tool for tool in self.tools if tool.get("name") == name), None))
+        return risk_of(self._tool_definition(name))
 
-    def _request_approval(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+    def _tainted_by(self, call_no: int) -> List[Dict[str, Any]]:
+        """체류 신호: 이 변경 요청 전에 모델이 읽은 의심 결과와, 그 뒤로 몇 번째 도구 호출인지 (approvals 모듈 설명).
+        같은 응답에서 함께 부른 도구의 결과는 모델이 아직 보지 못했으므로 넣지 않는다 (배치가 끝난 뒤에 더한다)."""
+        return [{"toolUseId": seen["toolUseId"], "tool": seen["tool"], "kinds": seen["kinds"],
+                 "callsAgo": call_no - seen["callNo"]} for seen in self._seen_suspicious]
+
+    def _request_approval(self, tool_name: str, tool_input: Dict[str, Any],
+                          tainted_by: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """변경 도구: 실행하지 않고 승인 요청을 만든다. 모델에 돌려줄 도구 결과(MCP 형식)를 돌려준다.
 
         1. 승인 요청을 받을 수 없는 경로(Slack 등)면 거절한다.
@@ -108,7 +123,7 @@ class AnthropicMCPClient:
             preview = json.loads(self._tool_error_text(preview_result))
         except ValueError:
             preview = {}
-        action = self.approvals.request(tool_name, args, preview)
+        action = self.approvals.request(tool_name, args, preview, tainted_by)
         return {"content": [{"type": "text", "text": json.dumps({
             "status": "approval_required",
             "actionId": action["actionId"],
@@ -696,6 +711,9 @@ class AnthropicMCPClient:
         self.total_cache_read_tokens = 0
         self.total_cache_write_tokens = 0
         self.tool_search_count = 0
+        # 체류 신호도 질문마다 새로 센다 (이전 질문에서 읽은 것은 대화 기록에 도구 결과로 남지 않는다)
+        self._tool_calls = 0
+        self._seen_suspicious = []
 
         # 디버그 로그에 사용자 입력 기록
         self.debug_log.append({
@@ -894,7 +912,12 @@ class AnthropicMCPClient:
                         # 넘긴다: 그림은 링크로 공유될 수 있고, 답변과 같이 가명만 보이는 것이 맞다 (docs/threat-model.md R1)
                         risk = self._tool_risk(tool_name)
                         restore = risk != "artifact"
-                        self._report("tool_started", tool_use_id, tool_name, tool_input, restore)
+                        self._tool_calls += 1
+                        call_no = self._tool_calls
+                        # 감사 로그의 층 (audit.py 모듈 설명): 등록부에 없는 도구는 경계, 변경 도구는 유출, 나머지는 유입
+                        locus = ("interface" if not is_registered(self._tool_definition(tool_name))
+                                 else "egress" if risk == "write" else "ingress")
+                        self._report("tool_started", tool_use_id, tool_name, tool_input, restore, locus)
 
                         # 디버그 로그에 도구 사용 요청 기록
                         self.debug_log.append({
@@ -907,7 +930,7 @@ class AnthropicMCPClient:
                         # MCP 도구 호출. AWS를 바꾸는 도구는 실행하지 않고 승인 요청을 만든다 (approvals.py)
                         is_write = risk == "write"
                         if is_write:
-                            result = self._request_approval(tool_name, tool_input)
+                            result = self._request_approval(tool_name, tool_input, self._tainted_by(call_no))
                         else:
                             result = self.mcp_client.call_tool(
                                 tool_name,
@@ -941,7 +964,8 @@ class AnthropicMCPClient:
                             "tool_id": tool_use_id,
                             "name": tool_name,
                             "result": result,
-                            "suspicious": suspicious
+                            "suspicious": suspicious,
+                            "call_no": call_no,
                         })
                     except Exception as e:
                         # 오류 처리
@@ -990,6 +1014,11 @@ class AnthropicMCPClient:
                     "role": "user",
                     "content": tool_results_list
                 })
+                # 이제 모델이 이 결과들을 읽는다: 의심 결과를 이후 변경 요청의 체류 신호로 남긴다 (최근 것 몇 개만)
+                self._seen_suspicious = (self._seen_suspicious + [
+                    {"toolUseId": res["tool_id"], "tool": res["name"], "kinds": res["suspicious"],
+                     "callNo": res["call_no"]}
+                    for res in tool_results if res.get("suspicious")])[-MAX_TAINTED:]
                 continue  # proceed to next iteration
 
             # 도구 호출이 없으면 마지막 assistant 응답을 즉시 반환

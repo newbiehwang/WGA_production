@@ -17,6 +17,11 @@
 승인이 사람의 확인이 아니라 버튼 한 번이 되었다 (docs/threat-model.md R2).
 
 Slack 봇·요청자를 모르는 경로는 승인 화면이 없어 변경 작업을 요청할 수 없다 (llm_service가 ApprovalRequester를 주지 않는다).
+
+의심 결과 뒤의 요청 (taintedBy)
+같은 질문에서 모델이 이 변경을 요청하기 전에 읽은 도구 결과 중 지시문처럼 보이는 문구가 있던 것(injection.py)을
+승인 요청에 적는다 (mcp_anthropic_client). 판단은 바꾸지 않는다: 변경은 원래 모두 승인이 필요하다.
+승인자에게 "이 요청이 사용자의 뜻인지, 로그에 심긴 지시를 따른 것인지"를 확인하라고 알리는 신호다.
 """
 import hashlib
 import json
@@ -48,6 +53,18 @@ def args_hash(tool: str, args: Dict[str, Any]) -> str:
 def risk_of(tool_definition: Optional[Dict[str, Any]]) -> str:
     """MCP 도구 정의의 위험도. 정의나 표시가 없으면 변경 도구로 본다 (안전하게 실패)."""
     return ((tool_definition or {}).get("_meta") or {}).get(RISK_META) or "write"
+
+
+def is_registered(tool_definition: Optional[Dict[str, Any]]) -> bool:
+    """위험도 등록부(mcp/lambda_mcp/risk.py)에 있는 도구인가. 없으면 변경 도구로 다루고, 감사 로그에 경계층으로 남긴다."""
+    return bool(((tool_definition or {}).get("_meta") or {}).get(RISK_META))
+
+
+def tainted_view(tainted_by: Any) -> List[Dict[str, Any]]:
+    """저장된 taintedBy를 화면·감사 로그에 줄 모양으로 (DynamoDB의 숫자는 Decimal로 온다)."""
+    return [{"toolUseId": entry.get("toolUseId"), "tool": entry.get("tool"),
+             "kinds": [str(kind) for kind in entry.get("kinds") or []],
+             "callsAgo": int(entry.get("callsAgo") or 0)} for entry in tainted_by or []]
 
 
 def approval_mode(environment: str) -> str:
@@ -94,6 +111,8 @@ def public_view(item: Dict[str, Any]) -> Dict[str, Any]:
     for key in ("decidedBy", "decidedAt", "result"):
         if item.get(key) is not None:
             view[key] = int(item[key]) if key == "decidedAt" else item[key]
+    if item.get("taintedBy"):
+        view["taintedBy"] = tainted_view(item["taintedBy"])
     trail = trail_of(item)
     if trail:
         view["cloudtrail"] = trail
@@ -108,8 +127,9 @@ class ApprovalStore:
 
     @staticmethod
     def new_item(*, requester_id: str, requester_email: Optional[str], request_id: Optional[str],
-                 session_id: Optional[str], tool: str, args: Dict[str, Any], preview: Dict[str, Any]) -> Dict[str, Any]:
-        """저장할 승인 요청 (아직 저장하지 않는다)."""
+                 session_id: Optional[str], tool: str, args: Dict[str, Any], preview: Dict[str, Any],
+                 tainted_by: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """저장할 승인 요청 (아직 저장하지 않는다). tainted_by: 이 요청 전에 읽은 의심 결과 (모듈 설명)."""
         now = _now()
         item = {
             "actionId": str(uuid.uuid4()),
@@ -127,6 +147,7 @@ class ApprovalStore:
             "createdAt": now,
             "expiresAt": now + APPROVAL_TTL_SECONDS,
             "ttl": now + RECORD_TTL_DAYS * 86400,
+            "taintedBy": tainted_view(tainted_by) or None,
         }
         return {key: value for key, value in item.items() if value is not None}
 
@@ -199,9 +220,10 @@ class ApprovalRequester:
         self._audit = audit
         self.created: List[Dict[str, Any]] = []
 
-    def request(self, tool: str, args: Dict[str, Any], preview: Dict[str, Any]) -> Dict[str, Any]:
+    def request(self, tool: str, args: Dict[str, Any], preview: Dict[str, Any],
+                tainted_by: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """승인 요청을 만든다. 감사 로그에 먼저 남기고(실패하면 예외, 요청을 만들지 않는다) 저장한다."""
-        item = self._store.new_item(tool=tool, args=args, preview=preview, **self._common)
+        item = self._store.new_item(tool=tool, args=args, preview=preview, tainted_by=tainted_by, **self._common)
         if self._audit is None:
             raise RuntimeError("감사 로그 없이 변경 작업을 요청할 수 없습니다")
         self._audit.action_event("requested", item)

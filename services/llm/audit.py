@@ -11,6 +11,16 @@
 - 변경 작업의 사건 하나 = 항목 하나 (kind "action"): 요청·승인·거절·실행·실패, 작업 ID, 도구, 인자, 결정한 사람
 두 종류 모두 요청자(sub, 이메일, 웹·Slack), 질문 ID(requestId), 대화 ID(sessionId)를 함께 남긴다.
 
+층 (locus): 사고가 났을 때 "어디가 뚫렸나"를 층 하나씩 좁히려고, 기록마다 도구 반복 위의 자리를 적는다.
+fingate-x의 '원인의 계층'(상태 변화에서 거꾸로 세운 층)을 이 앱에 맞춰 옮겼다. 판단은 바꾸지 않고 기록만 나눈다.
+    interface  경계  등록부(위험도)에 없는 도구를 불렀다 (변경 도구로 다룬다)
+    ingress    유입  조회·결과물 도구의 결과가 들어왔다. 의심 문구(injectionSuspected)가 이 층의 흔적
+    residence  체류  의심 결과를 읽은 뒤 같은 질문에서 변경을 요청했다 (요청 행의 taintedBy. 따로 행을 두지 않는다)
+    egress     유출  변경 도구를 부르려 했다 (그 도구 호출 행과 승인 요청 행)
+    effect     효과  승인·거절·실행·실패
+    (판단층은 모델 안이라 기록할 수 없다. 유입·체류·유출이 함께 보이면 그 층이 뚫린 것으로 본다)
+질문 행(kind "request")은 요약이라 층이 없다.
+
 가리기 (redaction.py)
 - 비밀 값은 감사 로그에도 남기지 않는다.
 - 계정 ID·이메일은 원래 값으로 남긴다: 모델에는 가명을 보냈지만, 감사는 "실제로 무엇을 조회했나"를 추적해야 한다.
@@ -30,7 +40,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from boto3.dynamodb.conditions import Attr, Key
 
+from approvals import tainted_view
 from llm_progress import _plain
+
+# 층 (모듈 설명). residence는 조회 조건으로만 쓴다 (taintedBy가 있는 승인 요청 행)
+LOCI = ("interface", "ingress", "residence", "egress", "effect")
 
 AUDIT_TTL_DAYS = 90  # DynamoDB 보관 기간. CloudWatch Logs는 1년 (llm.yaml의 AuditLogGroup)
 ADMIN_GROUP = "admins"  # 감사 로그는 이 Cognito 그룹의 사용자만 본다 (자기 것 포함 모든 사람의 기록)
@@ -113,23 +127,26 @@ class AuditLog:
         }
         self._question = _clip(redactor.secrets_only(question or ""), QUESTION_LIMIT)
         self._started = _now()
-        self._tools: Dict[str, Tuple[datetime, str, Any]] = {}  # 도구 호출 ID → (시작 시각, 이름, 입력)
+        self._tools: Dict[str, Tuple[datetime, str, Any, str]] = {}  # 도구 호출 ID → (시작 시각, 이름, 입력, 층)
         self.tool_count = 0
         self.suspicious_count = 0  # 지시문처럼 보이는 문구가 든 도구 결과 수 (injection.py)
 
     # ---------------------------------------------------------------- 도구 반복에서 부르는 메서드
-    def tool_started(self, tool_id: str, name: str, tool_input: Any, restore: bool = True) -> None:
+    def tool_started(self, tool_id: str, name: str, tool_input: Any, restore: bool = True,
+                     locus: str = "ingress") -> None:
         # 모델이 준 입력에는 가명이 들어 있을 수 있다. 도구가 실제로 받은 값으로 되돌린 뒤 비밀 값만 가린다.
         # restore=False: 가명 그대로 받은 도구 (차트 등 결과물 도구. mcp_anthropic_client)
+        # locus: 도구 반복이 정한 층 (등록부에 없으면 interface, 변경 도구면 egress, 나머지는 ingress)
         actual = self._redactor.secrets_only(self._redactor.restore(tool_input) if restore else tool_input)
-        self._tools[tool_id] = (_now(), name, actual)
+        self._tools[tool_id] = (_now(), name, actual, locus)
 
     def tool_finished(self, tool_id: str, ok: bool, error: Optional[str] = None,
                       result_chars: Optional[int] = None, suspicious: Optional[List[str]] = None) -> None:
-        started, name, tool_input = self._tools.pop(tool_id, (_now(), "unknown", {}))
+        started, name, tool_input, locus = self._tools.pop(tool_id, (_now(), "unknown", {}, "ingress"))
         self.tool_count += 1
         record = {
             "kind": "tool",
+            "locus": locus,
             "tool": name,
             "toolUseId": tool_id,
             "input": _clip(json.dumps(tool_input, ensure_ascii=False, default=str), INPUT_LIMIT),
@@ -168,6 +185,7 @@ class AuditLog:
         """변경 작업의 사건 (requested · approved · denied · executed · failed). 저장하지 못하면 예외를 올린다."""
         record = {
             "kind": "action",
+            "locus": "egress" if event == "requested" else "effect",
             "event": event,
             "actionId": action.get("actionId"),
             "tool": action.get("tool"),
@@ -175,6 +193,8 @@ class AuditLog:
             "summary": action.get("summary"),
             "status": "error" if event == "failed" else "ok",
             "decidedBy": decided_by,
+            # 이 변경을 요청하기 전에 같은 질문에서 읽은 의심 결과 (체류층, approvals 모듈 설명). 요청 행에만 있다
+            "taintedBy": (tainted_view(action.get("taintedBy")) or None) if event == "requested" else None,
         }
         if result:
             record["result"] = _clip(self._redactor.secrets_only(result), ERROR_LIMIT)
@@ -292,7 +312,7 @@ def query_audit(table, caller_id: Optional[str], claims: Dict[str, Any], params:
     일반 사용자는 자기 기록도 볼 수 없다 (403). 화면이 탭을 숨기는 것은 편의일 뿐이고, 막는 곳은 여기다.
 
     params (쿼리 문자열): from, to (YYYY-MM-DD, UTC), scope (mine|all), user, tool, status (ok|error),
-                          kind (tool|request), limit, cursor
+                          kind (tool|request|action), locus (LOCI), limit, cursor
     """
     if table is None:
         raise AuditQueryError(503, "감사 로그 테이블이 설정되지 않았습니다")
@@ -329,6 +349,12 @@ def query_audit(table, caller_id: Optional[str], claims: Dict[str, Any], params:
     for field, name in (("tool", "tool"), ("status", "status"), ("kind", "kind")):
         if params.get(field):
             conditions.append(Attr(name).eq(params[field]))
+    locus = params.get("locus")
+    if locus:
+        if locus not in LOCI:
+            raise AuditQueryError(400, f"locus는 {', '.join(LOCI)} 중 하나여야 합니다")
+        # 체류층은 행이 따로 없다: 의심 결과를 읽은 뒤의 승인 요청 행
+        conditions.append(Attr("taintedBy").exists() if locus == "residence" else Attr("locus").eq(locus))
     base: Dict[str, Any] = {"ScanIndexForward": False}  # 최신 기록부터
     if conditions:
         expression = conditions[0]
