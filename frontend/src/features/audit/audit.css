@@ -272,6 +272,184 @@
   color: #9a5b00;
 }
 
+/* ---------------------------------------------------------------- 기간 고르기 (PeriodPicker) */
+
+.audit-period {
+  position: relative;
+}
+
+/* '직접': 시작·끝 시각 입력 */
+.audit-period-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: 300px;
+  padding: 14px;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.14);
+  display: grid;
+  gap: 10px;
+  animation: menu-in 140ms ease both;
+}
+
+.audit-period-popover label {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 600;
+  color: #6c757d;
+}
+
+.audit-period-popover input {
+  height: 32px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 13px;
+  color: #1f2933;
+}
+
+.audit-period-note,
+.audit-period-error {
+  margin: 0;
+  font-size: 12px;
+  color: #8a94a0;
+}
+
+.audit-period-error {
+  color: #b02a37;
+}
+
+.audit-period-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---------------------------------------------------------------- 시간대별 막대그래프 (AuditHistogram) */
+
+.audit-histogram {
+  margin-bottom: 10px;
+  padding: 10px 12px 4px;
+  border: 1px solid #edf1f6;
+  border-radius: 12px;
+}
+
+.audit-histogram-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #4a5561;
+}
+
+.audit-histogram-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audit-histogram-legend strong {
+  font-family: var(--font-label);
+  color: #1f2933;
+}
+
+.audit-histogram-hint {
+  margin-left: auto;
+  color: #8a94a0;
+}
+
+.audit-histogram-plot {
+  position: relative;
+}
+
+.audit-histogram-plot svg {
+  display: block;
+  cursor: crosshair;
+  touch-action: none; /* 드래그가 화면 스크롤로 새지 않게 */
+  user-select: none;
+}
+
+.audit-histogram-plot svg:focus-visible {
+  outline: 2px solid rgba(0, 123, 255, 0.32);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.audit-histogram-grid,
+.audit-histogram-axis {
+  stroke: #eef2f6;
+  stroke-width: 1;
+}
+
+.audit-histogram-axis {
+  stroke: #dfe5ec;
+}
+
+.audit-histogram-tick {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  fill: #8a94a0;
+}
+
+.audit-histogram-hover {
+  fill: #eef4fb;
+}
+
+.audit-histogram-brush {
+  fill: rgba(0, 123, 255, 0.12);
+}
+
+.audit-histogram-tooltip {
+  position: absolute;
+  top: -6px;
+  transform: translate(-50%, -100%);
+  z-index: 5;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+  font-size: 12px;
+  color: #4a5561;
+  white-space: nowrap;
+  pointer-events: none;
+  display: grid;
+  gap: 3px;
+}
+
+.audit-histogram-tooltip-time {
+  font-family: var(--font-label);
+  font-weight: 600;
+  color: #6c757d;
+}
+
+.audit-histogram-tooltip strong {
+  font-family: var(--font-label);
+  font-size: 13px;
+  color: #1f2933;
+}
+
+/* 말풍선의 줄 표시: 계열 색의 짧은 선 */
+.audit-histogram-tooltip i {
+  display: inline-block;
+  width: 10px;
+  height: 2px;
+  margin: 0 6px 3px 0;
+  border-radius: 1px;
+  vertical-align: middle;
+}
+
 /* 좁은 화면에서만: 거르기 목록 열기 */
 .audit-facets-button {
   display: none;
