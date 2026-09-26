@@ -2,7 +2,7 @@
 //   🔍 요청자·도구·리소스 ID·질문 내용으로 찾기                                   [/]
 // - 글자를 멈추고 0.2초 뒤에 거른다 (2,000건을 글자마다 다시 거르지 않게)
 // - '/'를 누르면 검색창으로 간다 (다른 입력칸에 쓰는 중이 아닐 때). 검색창에서 Esc: 글자가 있으면 지우고, 없으면 빠져나간다
-// - 옆 패널의 '같은 질문의 기록' 같은 버튼이 검색어를 바꾸면 검색창 글자도 따라 바뀐다
+// - 기록 팝업창의 '같은 질문의 기록' 같은 버튼이 검색어를 바꾸면 검색창 글자도 따라 바뀐다
 import { useEffect, useRef, useState } from 'react';
 
 const DEBOUNCE_MS = 200;
@@ -15,7 +15,7 @@ export function AuditSearch({ value, onChange }: { value: string; onChange: (val
     const [text, setText] = useState(value);
     const input = useRef<HTMLInputElement>(null);
 
-    // 바깥에서 검색어가 바뀌면(옆 패널 버튼, 조건 모두 지우기) 글자를 맞춘다
+    // 바깥에서 검색어가 바뀌면(기록 팝업창의 버튼, 필터 초기화) 글자를 맞춘다
     useEffect(() => setText(value), [value]);
 
     useEffect(() => {
@@ -48,7 +48,7 @@ export function AuditSearch({ value, onChange }: { value: string; onChange: (val
                 onChange={(event) => setText(event.target.value)}
                 onKeyDown={(event) => {
                     if (event.key !== 'Escape') return;
-                    event.preventDefault(); // 옆 패널이 함께 닫히지 않게 (패널은 defaultPrevented를 보고 넘어간다)
+                    event.preventDefault(); // 검색창 안의 Esc는 여기서 끝낸다 (다른 Esc 처리는 defaultPrevented를 보고 넘어간다)
                     if (text) {
                         setText('');
                         onChange('');

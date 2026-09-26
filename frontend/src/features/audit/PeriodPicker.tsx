@@ -37,7 +37,7 @@ export function PeriodPicker({
         };
         const onKeyDown = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
-                event.preventDefault(); // 옆 패널이 함께 닫히지 않게
+                event.preventDefault(); // 기록 팝업창 등이 함께 닫히지 않게
                 setOpen(false);
             }
         };
