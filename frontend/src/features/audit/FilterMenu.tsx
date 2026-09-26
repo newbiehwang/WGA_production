@@ -1,16 +1,17 @@
 // 필터 버튼과 세부 선택 창. 기간·그룹 기준·거르기 목록(FacetSidebar: 종류·결과·층·요청자·도구·출처·표시)을
 // 늘 펼쳐 두지 않고, '필터' 버튼을 누를 때만 아래에 연다. 걸린 조건은 버튼 옆에 조각(칩)으로 보여, 창을 열지 않아도 안다.
-//   [필터 2 ▾]  기간: 최근 7일   그룹 기준: 요청자 ✕   결과: 실패 ✕
+//   [필터 1 ▾]  기간: 전체   그룹 기준: 요청자 ✕   결과: 실패 ✕      ← 버튼의 수는 거르기(종류·결과…)만 센다
 //   ┌──────────────────────────────────────────────────────────┐
-//   │ 기간       [1시간][4시간][1일][7일][30일][직접]           ✕ │   ← ✕: 다른 팝업창과 같은 닫기
+//   │ 기간       [전체][1시간][4시간][1일][7일][30일][직접]  [↺ 필터 초기화] ✕ │   ← ✕: 다른 팝업창과 같은 닫기
 //   │ 그룹 기준  [결과][종류][요청자][도구]                          │
 //   │ ─────────────────────────────────────────                  │
 //   │ ▾ 종류        ▾ 요청자        ▾ 도구                         │   ← 여러 단으로. 값마다 건수, 체크로 고르고 풀기
 //   │ ☑ 질문  119   ☐ demo…  101    ☐ 로그 분석  24                │
 //   └──────────────────────────────────────────────────────────┘
 // - 고르면 바로 목록·그래프에 적용된다 (적용 버튼 없음). 건수는 다른 조건을 적용한 채 센다
-// - 바깥을 누르거나 Esc, 오른쪽 위 ✕로 닫는다. 모두 처음으로 되돌리기는 줄 오른쪽 끝의 '필터 초기화'
-// - 칩: 기간은 늘 보인다(처음 값이 아니면 ✕로 최근 7일로). 그룹 기준은 결과가 아닐 때, 거르기는 고른 값마다
+// - 바깥을 누르거나 Esc, 오른쪽 위 ✕로 닫는다. '필터 초기화'는 처음 화면으로 되돌린다(창은 열어 둔다)
+// - 칩: 기간은 늘 보인다(처음 값이 아니면 ✕로 전체로). 그룹 기준은 결과가 아닐 때, 거르기는 고른 값마다
+// - 버튼의 수·파란 테두리는 거르기를 골랐을 때만. 기간·그룹 기준은 보는 방식이라 필터로 세지 않는다
 import { useEffect, useRef, useState } from 'react';
 import type { AuditRecord } from '@/types/audit';
 import {
@@ -37,6 +38,31 @@ const chipLabel = (id: FacetId, value: string, records: AuditRecord[]) => {
     return value;
 };
 
+// 필터 초기화 버튼 (필터 창 오른쪽 위, 조건에 맞는 기록이 없을 때의 안내). 처음 화면이면 꺼 둔다
+export function ResetButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
+    return (
+        <button
+            type="button"
+            className="audit-reset"
+            onClick={onClick}
+            disabled={disabled}
+            title="처음 화면으로 되돌립니다 (거르기·검색어를 지우고, 기간은 전체, 그룹 기준은 결과)"
+        >
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                <path
+                    d="M4 12a8 8 0 1 0 2.34-5.66M4 4v5h5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                />
+            </svg>
+            필터 초기화
+        </button>
+    );
+}
+
 interface Chip {
     key: string;
     name: string; // 기간 · 그룹 기준 · 종류 …
@@ -54,6 +80,8 @@ export function FilterMenu({
     onPeriod,
     groupBy,
     onGroupBy,
+    onReset,
+    canReset,
     resetNo,
 }: {
     records: AuditRecord[]; // 건수를 셀 기록 (기간·검색어를 적용한 것)
@@ -65,13 +93,13 @@ export function FilterMenu({
     onPeriod: (period: Period) => void;
     groupBy: GroupBy;
     onGroupBy: (groupBy: GroupBy) => void;
-    resetNo: number; // 필터 초기화: 바뀌면 창을 닫는다
+    onReset: () => void; // 필터 초기화
+    canReset: boolean; // 처음 화면과 다른가
+    resetNo: number; // 필터 초기화: 바뀌면 거르기 목록을 새로 그려 접기·더 보기를 처음으로
 }) {
     const [open, setOpen] = useState(false);
     const box = useRef<HTMLDivElement>(null);
     const button = useRef<HTMLButtonElement>(null);
-
-    useEffect(() => setOpen(false), [resetNo]);
 
     // 바깥을 누르거나 Esc를 누르면 닫는다. 기간 '직접' 입력이 열려 있으면 Esc는 그것부터 닫는다 (PeriodPicker)
     useEffect(() => {
@@ -114,8 +142,8 @@ export function FilterMenu({
             })),
         ),
     ];
-    // 버튼의 수: 처음 값과 다른 조건 (기간·그룹 기준 포함)
-    const count = activeCount(selection) + (isDefaultPeriod(period) ? 0 : 1) + (groupBy !== 'result' ? 1 : 0);
+    // 버튼의 수: 고른 거르기 값의 수 (기간·그룹 기준은 세지 않는다)
+    const count = activeCount(selection);
 
     return (
         <div className="audit-filter-menu" ref={box}>
@@ -171,27 +199,30 @@ export function FilterMenu({
                             <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                         </svg>
                     </button>
-                    <div className="audit-filter-options">
-                        <div className="audit-filter-option">
-                            <span className="audit-filter-label">기간</span>
-                            <PeriodPicker period={period} window={window} onChange={onPeriod} />
-                        </div>
-                        <div className="audit-filter-option">
-                            <span className="audit-filter-label">그룹 기준</span>
-                            <div className="audit-segment" role="group" aria-label="그룹 기준">
-                                {GROUP_OPTIONS.map((option) => (
-                                    <button
-                                        key={option.value}
-                                        type="button"
-                                        className={`audit-segment-btn${option.value === groupBy ? ' is-active' : ''}`}
-                                        aria-pressed={option.value === groupBy}
-                                        onClick={() => onGroupBy(option.value)}
-                                    >
-                                        {option.label}
-                                    </button>
-                                ))}
+                    <div className="audit-filter-top">
+                        <div className="audit-filter-options">
+                            <div className="audit-filter-option">
+                                <span className="audit-filter-label">기간</span>
+                                <PeriodPicker period={period} window={window} onChange={onPeriod} />
+                            </div>
+                            <div className="audit-filter-option">
+                                <span className="audit-filter-label">그룹 기준</span>
+                                <div className="audit-segment" role="group" aria-label="그룹 기준">
+                                    {GROUP_OPTIONS.map((option) => (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            className={`audit-segment-btn${option.value === groupBy ? ' is-active' : ''}`}
+                                            aria-pressed={option.value === groupBy}
+                                            onClick={() => onGroupBy(option.value)}
+                                        >
+                                            {option.label}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                         </div>
+                        <ResetButton onClick={onReset} disabled={!canReset} />
                     </div>
                     <FacetSidebar key={resetNo} records={records} selection={selection} onChange={onChange} />
                 </div>

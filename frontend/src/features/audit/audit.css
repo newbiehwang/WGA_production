@@ -219,12 +219,25 @@
   animation: menu-in 140ms ease both;
 }
 
-/* 창 위쪽: 기간 · 그룹 기준 (소제목 없이 이름표와 버튼만) */
+/* 창 위쪽: 왼쪽에 기간 · 그룹 기준(소제목 없이 이름표와 버튼만), 오른쪽에 필터 초기화. 오른쪽 끝은 ✕ 자리 */
+.audit-filter-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 48px 12px 16px;
+  border-bottom: 1px solid #edf1f6;
+}
+
 .audit-filter-options {
+  flex: 1;
+  min-width: 0;
   display: grid;
   gap: 10px;
-  padding: 14px 48px 12px 16px; /* 오른쪽은 ✕ 자리 */
-  border-bottom: 1px solid #edf1f6;
+}
+
+.audit-filter-top .audit-reset {
+  flex-shrink: 0;
+  margin-left: 0;
 }
 
 .audit-filter-option {
@@ -725,7 +738,7 @@
   vertical-align: middle;
 }
 
-/* 필터 초기화: 기간·건수 줄의 오른쪽 끝. 처음 화면이면 흐리게 꺼 둔다 */
+/* 필터 초기화: 필터 창 오른쪽 위(과 기록이 없을 때의 안내). 처음 화면이면 흐리게 꺼 둔다 */
 .audit-reset {
   display: inline-flex;
   align-items: center;
