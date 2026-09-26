@@ -83,7 +83,7 @@ export function Details({ record }: { record: AuditRecord }) {
         if (record.status === 'error')
             rows.push(['결과', '바꾸지 못했습니다 (바로 앞의 같은 사건 행은 시도를 기록한 것입니다)']);
     } else {
-        rows.push(['질문', record.question ?? '']);
+        // 질문과 답변은 표 위에 대화창 모양으로 보인다 (AuditConversation)
         if (record.model) rows.push(['모델', <code key="model">{record.model}</code>]);
         rows.push(['도구 호출', `${record.toolCount ?? 0}번`]);
         if (record.injectionSuspected) rows.push(['의심 문구가 든 도구 결과', `${record.injectionSuspected}건`]);

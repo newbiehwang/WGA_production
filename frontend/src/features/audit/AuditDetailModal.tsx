@@ -3,6 +3,7 @@
 //   EC2 인스턴스 중지                                     ✕   ← 도구·종류
 //   2026. 9. 26. 오후 7:53:36 · 요청자 · 승인 요청 · 의심 뒤 요청
 //   ───────────────────────────────
+//   질문 기록이면: 질문과 답변 (대화창 모양, AuditConversation)
 //   항목 표 (층·변경 내용·실행될 값·작업 ID…) · 층별로 따져 보기     ← 본문만 스크롤
 //
 // - 키보드 ↑/↓(또는 k/j)로 거른 목록의 앞뒤 기록으로 옮긴다 (팝업창을 닫지 않고). Esc·✕·바깥 누르기로 닫는다
@@ -15,6 +16,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { AuditRecord } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
+import { AuditConversation } from './AuditConversation';
 import { Details, Flags, KindLabel, ResultBadge } from './AuditDetails';
 import { keyOf, requesterOf, timeOf } from './auditModel';
 
@@ -106,8 +108,11 @@ export function AuditDetailModal({
                     </div>
                 </div>
                 <div ref={body} className="audit-detail-body">
-                    {/* 기록이 바뀌면 역추적을 닫은 상태로 새로 그린다 */}
-                    <Details key={key} record={record} />
+                    {/* 질문 기록: 질문과 답변을 대화창 모양으로 먼저, 나머지 항목은 그 아래 표로.
+                        기록이 바뀌면 둘 다 새로 그린다 (답변을 다시 받고, 역추적은 닫은 상태로).
+                        형제끼리 key가 겹치면 React가 옛 것을 지우지 못하므로 앞에 이름을 붙인다 */}
+                    {record.kind === 'request' ? <AuditConversation key={`answer:${key}`} record={record} /> : null}
+                    <Details key={`details:${key}`} record={record} />
                 </div>
             </div>
         </div>,

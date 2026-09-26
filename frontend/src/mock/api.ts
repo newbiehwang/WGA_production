@@ -613,13 +613,44 @@ const AUDIT_EXTRA_TOOLS: MockTool[] = [
     status: "ok",
   },
 ];
+// 예시 기록의 질문과 답변: 도구 묶음(ANSWERS의 도구들, AUDIT_EXTRA_TOOLS 하나씩)과 같은 차례
 const AUDIT_QUESTIONS = [
   "지난주 Lambda 오류 알려줘",
   "이번 달 비용이 가장 큰 서비스는?",
   "지금 울리는 알람 있어?",
+  "안녕, 뭘 할 수 있어?",
   "콜드 스타트를 줄이는 방법 알려줘",
   "wga-llm-dev 함수 오류 추이 보여줘",
 ];
+const AUDIT_EXTRA_ANSWERS = [
+  [
+    "Lambda 콜드 스타트를 줄이는 방법은 크게 세 가지입니다.",
+    "",
+    "1. **프로비저닝된 동시성**: 미리 실행 환경을 띄워 둡니다. 가장 확실하지만 비용이 듭니다.",
+    "2. **패키지 줄이기**: 쓰지 않는 라이브러리를 빼고, 무거운 모듈은 필요할 때 불러옵니다.",
+    "3. **SnapStart**(Java·Python): 초기화가 끝난 상태를 스냅샷으로 두고 거기서 시작합니다.",
+    "",
+    "`wga-llm-dev`는 요청이 드문드문 들어와서 2번부터 해 보는 것을 권합니다.",
+  ].join("\n"),
+  [
+    "`wga-llm-dev` 함수의 지난 7일 오류 추이입니다.",
+    "",
+    "| 날짜 | 오류 |",
+    "|:--|--:|",
+    "| 9월 20일 | 0 |",
+    "| 9월 22일 | 2 |",
+    "| 9월 24일 | 1 |",
+    "",
+    "22일에 오류가 몰렸고, 이후로는 줄어드는 추세입니다.",
+  ].join("\n"),
+];
+// 장애 때 도구가 실패한 질문의 답변
+const AUDIT_FAILED_ANSWER =
+  "지금은 지표를 가져오지 못했습니다. AWS가 요청을 잠시 거절하거나 도구가 제한 시간 안에 끝나지 않았습니다. 잠시 뒤 다시 물어봐 주세요.";
+
+// 답변 전체 (실제로는 질문 행과 따로 둔 답변 항목, services/llm/audit.py 모듈 설명 '답변'). 키는 답변 항목의 at
+const auditAnswers = new Map<string, string>();
+const ANSWER_PREVIEW = 200; // 질문 행에 두는 답변 앞부분 (services/llm/audit.py ANSWER_PREVIEW)
 
 // 감사 로그의 정렬 키와 같은 모양: 시각(UTC, 밀리초까지) + '#' + 도구 호출 ID 또는 'request#<질문 ID>'
 const auditAt = (time: Date, suffix: string) =>
@@ -632,6 +663,7 @@ const auditRecordsOf = (
   tools: MockTool[],
   time: Date,
   redacted: Record<string, number> = {},
+  answer?: string,
 ): AuditRecord[] => {
   const requestId = newId();
   const common = {
@@ -678,6 +710,13 @@ const auditRecordsOf = (
     ms: at - time.getTime() + STEP_GAP_MS,
     ...(failed && { status: "ok" as const }), // 도구가 실패해도 질문(답변)은 성공일 수 있다
   };
+  if (answer !== undefined) {
+    // 서버처럼 질문 행에는 앞부분과 글자 수만, 전체는 따로 (GET /audit?answer=…)
+    request.answerPreview =
+      answer.length > ANSWER_PREVIEW ? `${answer.slice(0, ANSWER_PREVIEW - 1)}…` : answer;
+    request.answerChars = answer.length;
+    auditAnswers.set(request.at.replace("#request#", "#answer#"), answer);
+  }
   return [...toolRecords, request];
 };
 
@@ -790,21 +829,23 @@ const seedAudit = (): AuditRecord[] => {
     for (let k = 0; k < count; k += 1) {
       const time = new Date(Math.min(now - 1000, hour + random() * HOUR_MS));
       const failing = incident && random() < incident.failRate;
-      const tools = failing
-        ? [FAILING_TOOLS[Math.floor(random() * FAILING_TOOLS.length)]]
-        : toolSets[Math.floor(random() * toolSets.length)];
+      // 도구 묶음의 차례로 질문·답변을 맞춘다. 장애 때는 질문만 차례로 돌린다
+      const set = failing ? -1 : Math.floor(random() * toolSets.length);
+      const tools =
+        set < 0 ? [FAILING_TOOLS[Math.floor(random() * FAILING_TOOLS.length)]] : toolSets[set];
+      const question = AUDIT_QUESTIONS[set < 0 ? n % AUDIT_QUESTIONS.length : set];
+      const answer =
+        set < 0
+          ? AUDIT_FAILED_ANSWER
+          : set < ANSWERS.length
+            ? ANSWERS[set].answer
+            : AUDIT_EXTRA_ANSWERS[set - ANSWERS.length];
       // 몇 건은 질문에 붙여 넣은 계정 ID·키를 Claude로 보내기 전에 가린 기록
       const roll = random();
       const redacted: Record<string, number> =
         roll < 0.12 ? { account_id: 1 } : roll < 0.16 ? { aws_access_key: 1, account_id: 2 } : {};
       records.push(
-        ...auditRecordsOf(
-          pickUser(),
-          AUDIT_QUESTIONS[n % AUDIT_QUESTIONS.length],
-          tools,
-          time,
-          redacted,
-        ),
+        ...auditRecordsOf(pickUser(), question, tools, time, redacted, answer),
       );
       n += 1;
     }
@@ -929,6 +970,14 @@ const usersRoute = (method: string, parts: string[], body: RequestBody, params: 
     return update(changed, adminAuditRecord(enabled ? "enabled" : "disabled", changed));
   }
   return [404, { error: "없는 경로입니다" }];
+};
+
+// 답변 전체 (GET /audit?answer=<질문 행의 at>&user=…, services/llm/audit.py query_answer)
+const answerAudit = (at: string): Result => {
+  const answer = auditAnswers.get(at.replace("#request#", "#answer#"));
+  return answer === undefined
+    ? [404, { error: "이 질문의 답변 기록이 없습니다" }]
+    : [200, { answer, answerChars: answer.length }];
 };
 
 // 역추적 (GET /audit?trace=<actionId>, services/llm/audit_trace.py의 build와 같은 물음·같은 답)
@@ -1122,6 +1171,7 @@ const route = (
     return [200, { phase, steps, startedAt: run.started }];
   }
   if (method === "get" && path === "/audit" && params.trace) return traceAudit(params.trace);
+  if (method === "get" && path === "/audit" && params.answer) return answerAudit(params.answer);
   if (first === "users") return usersRoute(method, path.split("/").filter(Boolean), body, params);
   if (method === "get" && path === "/audit") return queryAudit(params);
   if (method === "get" && path === "/health") {
@@ -1252,6 +1302,8 @@ const route = (
       body.text || body.question || "질문",
       tools,
       new Date(run.started),
+      {},
+      answer,
     );
     // 변경 도구를 부른 답변이면 승인 요청을 만든다
     const pending: PendingAction[] = [];
