@@ -63,7 +63,8 @@ def collect(table, action_id: str, day) -> Dict[str, List[Dict[str, Any]]]:
         if moment:
             kwargs = dict(KeyConditionExpression=Key("userId").eq(requested["userId"])
                           & Key("at").between(_at(moment - QUESTION_WINDOW), _at(moment + QUESTION_WINDOW) + "~"),
-                          FilterExpression=Attr("requestId").eq(requested["requestId"]) & Attr("kind").ne("action"))
+                          FilterExpression=Attr("requestId").eq(requested["requestId"]) & Attr("kind").ne("action")
+                          & Attr("kind").ne("answer"))  # 답변 전체(audit.py '답변')는 역추적에 쓰지 않는다
             question_rows, _, _ = _query_pages(table, kwargs, None, MAX_TRACE_ROWS, MAX_TRACE_PAGES)
             question_rows.sort(key=_time_of)
     return {"events": events, "question": question_rows}

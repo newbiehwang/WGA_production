@@ -238,6 +238,122 @@ def test_records_are_append_only(audit_env):
     assert items_of(audit_env, "alice")[0]["status"] == "ok"
 
 
+# ---------------------------------------------------------------- 답변 (질문 항목의 미리보기 + 따로 둔 답변 전체)
+
+def run_llm1(llm, monkeypatch, answer):
+    class Answering(FakeClient):
+        def process_user_input(self, text, system_prompt):
+            super().process_user_input(text, system_prompt)
+            return answer
+
+    monkeypatch.setattr(llm, "get_client", lambda: Answering())
+    body = {"text": "알람", "requestId": REQUEST_ID, "sessionId": "s1"}
+    return llm.handle_llm1_with_mcp(body, ORIGIN, caller_id="alice", caller_email="alice@example.com")
+
+
+def test_llm1_records_the_answer_the_user_received(audit_env, monkeypatch):
+    llm = load_service_module("services/llm", "llm_service")
+    answer = f"계정 {ACCOUNT}의 키 {ACCESS_KEY}는 지난주에 만들었습니다. " + "가" * 300
+    response = run_llm1(llm, monkeypatch, answer)
+    shown = json.loads(response["body"])["answer"]  # 사용자가 받은 답변 (가명·가림 적용 뒤)
+    assert ACCESS_KEY not in shown
+
+    items = items_of(audit_env, "alice")
+    request = next(i for i in items if i["kind"] == "request")
+    saved = next(i for i in items if i["kind"] == "answer")
+    # 답변 항목: 사용자가 받은 글자 그대로 전체, 질문 항목과 같은 시각·질문 ID
+    assert saved["answer"] == shown and saved["answerChars"] == len(shown)
+    assert saved["at"] == request["at"].replace("#request#", "#answer#")
+    assert saved["requestId"] == REQUEST_ID and saved["sessionId"] == "s1"
+    # 날짜 인덱스에 넣지 않는다 (day가 없다)
+    assert "day" not in saved and "day" in request
+    # 질문 항목에는 앞부분만
+    assert request["answerPreview"] == shown[:199] + "…" and request["answerChars"] == len(shown)
+
+
+def test_answer_goes_to_cloudwatch_on_the_request_line(audit_env, monkeypatch):
+    llm = load_service_module("services/llm", "llm_service")
+    response = run_llm1(llm, monkeypatch, "오류가 없습니다.")
+    records = log_records()
+    # 답변 항목을 따로 쓰지 않고, 질문 줄에 답변 전체를 함께 쓴다
+    assert [r["kind"] for r in records] == ["tool", "request"]
+    assert records[1]["answer"] == json.loads(response["body"])["answer"] == "오류가 없습니다."
+
+
+def test_very_long_answer_is_clipped_to_the_safety_limit(audit_env, monkeypatch):
+    llm = load_service_module("services/llm", "llm_service")
+    from audit import ANSWER_LIMIT
+    run_llm1(llm, monkeypatch, "가" * (ANSWER_LIMIT + 10))
+    saved = next(i for i in items_of(audit_env, "alice") if i["kind"] == "answer")
+    assert len(saved["answer"]) == ANSWER_LIMIT and saved["answerChars"] == ANSWER_LIMIT + 10
+
+
+def test_failed_request_has_no_answer(audit_env, monkeypatch):
+    llm = load_service_module("services/llm", "llm_service")
+
+    class Broken(FakeClient):
+        def process_user_input(self, text, system_prompt):
+            raise RuntimeError("Anthropic 오류")
+
+    monkeypatch.setattr(llm, "get_client", lambda: Broken())
+    llm.handle_llm1_with_mcp({"text": "알람"}, ORIGIN, caller_id="alice")
+    (request,) = items_of(audit_env, "alice")
+    assert request["kind"] == "request" and "answerPreview" not in request
+
+
+@pytest.fixture
+def answered(audit_env, monkeypatch):
+    llm = load_service_module("services/llm", "llm_service")
+    run_llm1(llm, monkeypatch, "오류가 없습니다.")
+    request = next(i for i in items_of(audit_env, "alice") if i["kind"] == "request")
+    return audit_env, request
+
+
+def run_answer(table, groups="admins", **params):
+    from audit import query_answer
+    claims = {"sub": "admin-1", "cognito:groups": groups}
+    return query_answer(table, "admin-1", claims, params)
+
+
+def test_answers_are_not_in_the_list(answered):
+    table, _ = answered
+    # 모든 사람(날짜 인덱스)도, 한 사람(기본 키)도 답변 항목은 목록에 없다
+    for params in ({"scope": "all"}, {"scope": "all", "user": "alice"}):
+        kinds = [item["kind"] for item in run_query(table, caller="admin-1", groups="admins", **params)["items"]]
+        assert sorted(kinds) == ["request", "tool"]
+
+
+def test_admins_read_the_full_answer_by_the_request_row(answered):
+    table, request = answered
+    result = run_answer(table, answer=request["at"], user="alice")
+    assert result == {"answer": "오류가 없습니다.", "answerChars": 9}
+
+
+@pytest.mark.parametrize("groups, params, status", [
+    ("", {"answer": "x", "user": "alice"}, 403),  # 관리자만
+    ("admins", {"answer": "2026-09-26T10:00:00.000Z#toolu_1", "user": "alice"}, 400),  # 질문 행이 아니다
+    ("admins", {"answer": "2026-09-26T10:00:00.000Z#request#r1"}, 400),  # 요청자 없음
+    ("admins", {"answer": "2026-09-26T10:00:00.000Z#request#r1", "user": "alice"}, 404),  # 답변 기록 없음
+])
+def test_bad_answer_queries_are_rejected(answered, groups, params, status):
+    from audit import AuditQueryError
+    with pytest.raises(AuditQueryError) as error:
+        run_answer(answered[0], groups=groups, **params)
+    assert error.value.status == status
+
+
+def test_answer_route(answered):
+    table, request = answered
+    lambda_function = load_service_module("services/llm", "lambda_function")
+    event = {"path": "/audit", "httpMethod": "GET", "headers": {"origin": ORIGIN},
+             "queryStringParameters": {"answer": request["at"], "user": "alice"},
+             "requestContext": {"authorizer": {"claims": {"sub": "bob"}}}}
+    assert lambda_function.lambda_handler(event, None)["statusCode"] == 403
+    event["requestContext"]["authorizer"]["claims"]["cognito:groups"] = "admins"
+    response = lambda_function.lambda_handler(event, None)
+    assert response["statusCode"] == 200 and json.loads(response["body"])["answer"] == "오류가 없습니다."
+
+
 # ---------------------------------------------------------------- 조회: GET /audit
 
 def put(table, user, at, tool="get_active_alarms", status="ok", kind="tool"):

@@ -7,7 +7,9 @@
 
 기록 단위
 - 도구 호출 한 번 = 항목 하나 (kind "tool"): 도구, 입력, 성공·실패, 오류, 걸린 시간, 결과 크기
-- 질문 하나 = 항목 하나 (kind "request"): 질문, 모델, 성공·실패, 도구 호출 수, 가린 값의 수, 걸린 시간
+- 질문 하나 = 항목 하나 (kind "request"): 질문, 모델, 성공·실패, 도구 호출 수, 가린 값의 수, 걸린 시간,
+  답변 미리보기(answerPreview)와 답변 글자 수(answerChars)
+- 질문 하나의 답변 = 항목 하나 (kind "answer"): 사용자가 받은 답변 전체. 아래 '답변' 참고
 - 변경 작업의 사건 하나 = 항목 하나 (kind "action"): 요청·승인·거절·실행·실패, 작업 ID, 도구, 인자, 결정한 사람
 - 사용자 관리의 사건 하나 = 항목 하나 (kind "admin"): 초대·권한 변경(전→후)·정지·정지 해제, 대상, 한 사람
 두 종류 모두 요청자(sub, 이메일, 웹·Slack), 질문 ID(requestId), 대화 ID(sessionId)를 함께 남긴다.
@@ -27,6 +29,16 @@ fingate-x의 '원인의 계층'(상태 변화에서 거꾸로 세운 층)을 이
 - 계정 ID·이메일은 원래 값으로 남긴다: 모델에는 가명을 보냈지만, 감사는 "실제로 무엇을 조회했나"를 추적해야 한다.
   그래서 도구 입력은 모델이 준 입력(가명)이 아니라 도구가 실제로 받은 입력(되돌린 값)을 남긴다.
 
+답변 (GET /audit?answer=…)
+- 사용자가 실제로 받은 답변(화면에 보인 글자, 가명·가림 적용 뒤)을 남긴다. 대화 기록은 사용자가 지울 수 있어 증거가 되지 못한다
+- 목록 화면은 기간 안의 기록을 날짜 인덱스로 한꺼번에 받으므로, 긴 답변을 질문 항목에 넣으면 목록이 무거워지고
+  한 번의 조회(1MB)에 읽히는 건수가 줄어든다. 그래서 질문 항목에는 미리보기만 두고, 전체는 따로 둔다
+      질문 항목  at = <시각>#request#<질문 ID>   day 있음 → 날짜 인덱스(목록)에 들어간다
+      답변 항목  at = <시각>#answer#<질문 ID>    day 없음 → 날짜 인덱스에 들어가지 않는다 (희소 인덱스). 팝업창이 열 때만 읽는다
+- CloudWatch Logs에는 답변 항목을 따로 쓰지 않고, 질문 줄에 답변 전체를 함께 쓴다 (Logs Insights에서 한 줄로 보게)
+- 답변 길이는 모델의 출력 상한(MAX_TOKENS)으로 이미 묶여 있다. ANSWER_LIMIT은 그래도 넘칠 때를 위한 안전 상한이다
+  (DynamoDB 항목 400KB, CloudWatch Logs 이벤트 256KB. 한글 한 글자는 UTF-8로 3바이트)
+
 추가만 한다: 이미 있는 항목을 덮어쓰지 않고(조건부 쓰기), LLM Lambda에는 수정·삭제 권한을 주지 않는다.
 
 기록에 실패해도 답변은 계속 만든다 (조회 도구). 변경 작업의 사건(action_event)은 기록하지 못하면 예외를 올려
@@ -34,6 +46,7 @@ fingate-x의 '원인의 계층'(상태 변화에서 거꾸로 세운 층)을 이
 """
 import base64
 import json
+import re
 import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -54,6 +67,8 @@ ADMIN_GROUP = "admins"  # 감사 로그는 이 Cognito 그룹의 사용자만 �
 QUESTION_LIMIT = 500
 INPUT_LIMIT = 2000
 ERROR_LIMIT = 500
+ANSWER_LIMIT = 50000  # 답변 전체의 안전 상한 (50,000자 × 3바이트 = 150KB, 모듈 설명 '답변')
+ANSWER_PREVIEW = 200  # 질문 항목(목록)에 두는 답변 앞부분
 
 # 조회 제한
 DEFAULT_DAYS = 7  # 기간을 주지 않으면 최근 7일
@@ -164,7 +179,8 @@ class AuditLog:
         self._write(started, tool_id, record)
 
     # ---------------------------------------------------------------- 요청이 끝날 때 (llm_service)
-    def request_finished(self, ok: bool, error: Optional[str] = None) -> None:
+    def request_finished(self, ok: bool, error: Optional[str] = None, answer: Optional[str] = None) -> None:
+        """answer: 사용자가 받은 답변 (실패한 요청은 없다). 질문 항목에는 미리보기, 답변 항목에는 전체를 남긴다."""
         record = {
             "kind": "request",
             "question": self._question,
@@ -178,7 +194,22 @@ class AuditLog:
         }
         if error:
             record["error"] = _clip(self._redactor.secrets_only(str(error)), ERROR_LIMIT)
-        self._write(self._started, f"request#{self._common['requestId']}", record)
+        full = None
+        if answer is not None:
+            # 화면에 보인 답변은 이미 가렸지만, 다른 항목처럼 비밀 값을 한 번 더 가린다
+            text = self._redactor.secrets_only(str(answer))
+            full = _clip(text, ANSWER_LIMIT)
+            record["answerPreview"] = _clip(text, ANSWER_PREVIEW)
+            record["answerChars"] = len(text)  # 잘리기 전의 전체 길이
+        request_id = self._common["requestId"]
+        # CloudWatch Logs에는 질문 줄에 답변 전체를 함께 쓴다
+        self._write(self._started, f"request#{request_id}", record,
+                    log_extra={"answer": full} if full is not None else None)
+        if full is not None:
+            # 답변 전체: 날짜 인덱스에 넣지 않고(목록이 무거워지지 않게), CloudWatch Logs에는 이미 썼다
+            self._write(self._started, f"answer#{request_id}",
+                        {"kind": "answer", "answer": full, "answerChars": record["answerChars"]},
+                        indexed=False, logged=False)
 
     # ---------------------------------------------------------------- 변경 작업 (approvals.py, llm_service)
     def action_event(self, event: str, action: Dict[str, Any], decided_by: Optional[str] = None,
@@ -227,12 +258,15 @@ class AuditLog:
         self._write(_now(), suffix, record, strict=True)
 
     # ---------------------------------------------------------------- 저장
-    def _write(self, moment: datetime, suffix: str, record: Dict[str, Any], strict: bool = False) -> None:
+    def _write(self, moment: datetime, suffix: str, record: Dict[str, Any], strict: bool = False, *,
+               indexed: bool = True, logged: bool = True, log_extra: Optional[Dict[str, Any]] = None) -> None:
+        """indexed=False: 날짜 인덱스에 넣지 않는다 (day를 두지 않는다. 답변 항목).
+        logged=False: CloudWatch Logs에 쓰지 않는다. log_extra: CloudWatch Logs에만 더 쓸 값 (질문 줄의 답변 전체)."""
         at = _iso(moment)
         item = {**self._common, **record,
                 # 정렬 키: 시각 + 도구 호출 ID 또는 질문 ID (같은 밀리초에 여러 건이어도 겹치지 않게)
                 "at": f"{at}#{suffix}",
-                "day": at[:10],  # 날짜 인덱스 (관리자가 기간으로 전체 사용자를 조회)
+                "day": at[:10] if indexed else None,  # 날짜 인덱스 (관리자가 기간으로 전체 사용자를 조회)
                 "expiresAt": int(time.time()) + AUDIT_TTL_DAYS * 86400}
         item = {key: value for key, value in item.items() if value is not None}
         if strict and self._table is None:
@@ -246,8 +280,9 @@ class AuditLog:
                 raise
             print(f"감사 로그 저장 실패 (DynamoDB, 계속 진행): {error}")
         try:
-            if self._sink is not None:
-                self._sink.write({"wga_audit": True, **{k: v for k, v in item.items() if k != "expiresAt"}})
+            if self._sink is not None and logged:
+                self._sink.write({"wga_audit": True, **{k: v for k, v in item.items() if k != "expiresAt"},
+                                  **(log_extra or {})})
         except Exception as error:
             print(f"감사 로그 저장 실패 (CloudWatch Logs, 계속 진행): {error}")
 
@@ -365,8 +400,9 @@ def query_audit(table, caller_id: Optional[str], claims: Dict[str, Any], params:
     except ValueError:
         raise AuditQueryError(400, "limit은 숫자여야 합니다")
 
-    # 거르기 (도구·결과·종류)
-    conditions = []
+    # 거르기 (도구·결과·종류). 답변 항목은 목록에 넣지 않는다: 날짜 인덱스에는 없지만,
+    # 한 사람을 기본 키로 읽을 때는 걸리므로 거른다 (모듈 설명 '답변')
+    conditions = [Attr("kind").ne("answer")]
     for field, name in (("tool", "tool"), ("status", "status"), ("kind", "kind")):
         if params.get(field):
             conditions.append(Attr(name).eq(params[field]))
@@ -421,3 +457,31 @@ def query_audit(table, caller_id: Optional[str], claims: Dict[str, Any], params:
         "from": start.isoformat(),
         "to": end.isoformat(),
     }
+
+
+# ---------------------------------------------------------------- 조회: GET /audit?answer=<질문 행의 at>&user=<요청자>
+
+REQUEST_AT = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)#request#([0-9A-Za-z-]{1,64})")
+
+
+def query_answer(table, caller_id: Optional[str], claims: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
+    """질문 하나의 답변 전체 (모듈 설명 '답변'). 관리자만. 화면은 목록에서 받은 질문 행의 at과 userId를 그대로 넘긴다.
+    답변 항목의 키는 질문 행의 키에서 request를 answer로 바꾼 것이다. 조회는 기본 키 Query 하나 (새 권한이 필요 없다)."""
+    if table is None:
+        raise AuditQueryError(503, "감사 로그 테이블이 설정되지 않았습니다")
+    if not caller_id:
+        raise AuditQueryError(401, "로그인이 필요합니다")
+    if not is_admin(claims):
+        raise AuditQueryError(403, "감사 로그는 관리자(admins 그룹)만 볼 수 있습니다")
+    params = params or {}
+    user = params.get("user") or ""
+    match = REQUEST_AT.fullmatch(params.get("answer") or "")
+    if not match or not user:
+        raise AuditQueryError(400, "answer는 질문 행의 at, user는 그 요청자여야 합니다")
+    key = f"{match.group(1)}#answer#{match.group(2)}"
+    items = table.query(KeyConditionExpression=Key("userId").eq(user) & Key("at").eq(key)).get("Items", [])
+    if not items:
+        # 답변을 남기기 전에 쌓인 질문이거나, 실패해 답변이 없는 질문
+        raise AuditQueryError(404, "이 질문의 답변 기록이 없습니다")
+    item = _output(items[0])
+    return {"answer": item.get("answer", ""), "answerChars": item.get("answerChars")}
