@@ -415,6 +415,26 @@
   fill: #8a94a0;
 }
 
+/* 날이 바뀌는 눈금 (9/24) */
+.audit-histogram-tick.is-date {
+  font-weight: 700;
+  fill: #4a5561;
+}
+
+.audit-histogram-empty {
+  font-family: var(--font-label);
+  font-size: 13px;
+  fill: #8a94a0;
+}
+
+/* 다시 불러오는 동안: 앞 그래프·목록을 흐리게 남겨 둔다 */
+.audit-histogram.is-loading,
+.audit-table.is-loading {
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
 .audit-histogram-hover {
   fill: #eef4fb;
 }

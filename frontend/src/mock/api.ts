@@ -576,7 +576,7 @@ let answerIndex = 1; // 0번은 예시 대화에 이미 나와 있으므로 다�
 // ---------------------------------------------------------------- 감사 로그 (GET /audit, services/llm/audit.py)
 // mock 사용자는 관리자(admins 그룹)로 둔다: '내 기록'과 '모든 사용자'를 모두 확인할 수 있다.
 // 주소에 ?mock-role=member를 붙이면 일반 사용자가 되어, 서버처럼 403을 돌려준다 (auth/authClient.ts).
-// 지난 30일 동안 세 사람(나, 다른 웹 사용자, Slack 사용자)의 예시 기록을 만들고,
+// 지난 30일 동안 여러 사람(나, 다른 웹 사용자들, Slack 사용자)의 예시 기록을 실제 사용처럼 만들고(아래 seedAudit),
 // 질문을 보내면 그 질문과 도구 호출이 맨 위에 바로 추가된다.
 
 const MOCK_USER_ID = "mock-user";
@@ -586,14 +586,14 @@ const AUDIT_USERS = [
   { userId: MOCK_USER_ID, email: "demo@example.com", source: "web" as const },
   { userId: "7c1e9a52-kim", email: "kim@example.com", source: "web" as const },
   { userId: "slack:U04ABCDE", source: "slack" as const },
-  // ?mock-audit=many일 때만: 요청자가 많을 때의 거르기 목록('더 보기') 확인용
-  ...(MOCK_AUDIT_MANY
-    ? ["lee", "park", "choi", "jung", "kang", "yoon"].map((name, index) => ({
-        userId: `a${index}0f3b-${name}`,
-        email: `${name}@example.com`,
-        source: "web" as const,
-      }))
-    : []),
+  // 요청자를 더 둔다: 기본은 셋 더(나눠 보기의 상위 5명 + '기타' 확인용), ?mock-audit=many는 여섯 더(거르기 목록의 '더 보기' 확인용)
+  ...["lee", "park", "choi", "jung", "kang", "yoon"]
+    .slice(0, MOCK_AUDIT_MANY ? 6 : 3)
+    .map((name, index) => ({
+      userId: `a${index}0f3b-${name}`,
+      email: `${name}@example.com`,
+      source: "web" as const,
+    })),
 ];
 const AUDIT_EXTRA_TOOLS: MockTool[] = [
   {
@@ -681,39 +681,133 @@ const auditRecordsOf = (
   return [...toolRecords, request];
 };
 
+// ---- 예시 기록의 시각: 실제 사용처럼 만든다 (감사 로그 막대그래프를 눈으로 확인하려면 고르게 흩어진 기록으로는 안 된다)
+// - 평일 업무 시간(한국 시간 9~18시)에 많고, 점심·저녁에 조금, 밤과 주말에는 드물다
+// - 장애 구간 세 번: 그 몇 시간 동안 질문이 몰리고 도구가 많이 실패한다
+// - 기록이 하나도 없는 날이 하루 있다 (빈 칸 확인용)
+// - 난수는 씨앗을 정해 두어 새로 고쳐도 같은 기록이 나온다 (시각은 지금 기준이라 조금씩 밀린다)
+
+// 씨앗이 정해진 난수 (mulberry32)
+const seededRandom = (seed: number) => () => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+
+// 평균이 mean인 포아송 분포에서 하나 (한 시간에 몇 건)
+const poisson = (mean: number, random: () => number) => {
+  const limit = Math.exp(-mean);
+  let k = 0;
+  let p = random();
+  while (p > limit) {
+    k += 1;
+    p *= random();
+  }
+  return k;
+};
+
+const HOUR_MS = 60 * 60 * 1000;
+const KST_MS = 9 * HOUR_MS;
+
+// 한 시간에 들어오는 질문의 상대적인 양 (한국 시간 기준)
+const hourlyWeight = (time: number) => {
+  const kst = new Date(time + KST_MS);
+  const hour = kst.getUTCHours();
+  const weekend = kst.getUTCDay() === 0 || kst.getUTCDay() === 6;
+  const byHour =
+    hour >= 9 && hour <= 18
+      ? hour === 12
+        ? 0.55 // 점심
+        : hour === 10 || hour === 14 || hour === 15
+          ? 1.25 // 오전·오후의 몰리는 때
+          : 1
+      : hour >= 19 && hour <= 22
+        ? 0.35
+        : hour >= 7 && hour <= 8
+          ? 0.3
+          : 0.05;
+  return byHour * (weekend ? 0.18 : 1);
+};
+
+// 장애 구간: 지금부터 며칠 전(daysAgo)에 hours시간. 그동안 질문이 load배로 늘고 도구가 failRate만큼 실패한다
+const INCIDENTS = [
+  { daysAgo: 2.35, hours: 3, load: 4, failRate: 0.6 },
+  { daysAgo: 11.6, hours: 2, load: 3, failRate: 0.5 },
+  { daysAgo: 19.25, hours: 5, load: 2.5, failRate: 0.35 },
+];
+const QUIET_DAY = 16; // 이 날(며칠 전)의 하루는 기록이 없다
+
+// 장애 때 실패하는 도구
+const FAILING_TOOLS: MockTool[] = [
+  {
+    tool_name: "get_metric_data",
+    input: { namespace: "AWS/Lambda", metric_name: "Errors" },
+    status: "error",
+    error: "ThrottlingException: Rate exceeded",
+  },
+  {
+    tool_name: "analyze_log_group",
+    input: { log_group_name: "/aws/lambda/wga-llm-dev", days: 1 },
+    status: "error",
+    error: "도구가 제한 시간(25초) 안에 끝나지 않았습니다",
+  },
+];
+
 const seedAudit = (): AuditRecord[] => {
+  const random = seededRandom(20260926);
   const records: AuditRecord[] = [];
   const toolSets = [
     ...ANSWERS.map((a) => a.tools),
     [AUDIT_EXTRA_TOOLS[0]],
     [AUDIT_EXTRA_TOOLS[1]],
   ];
-  // 30일 동안 하루 한두 건씩 (시각·사람·도구가 골고루 섞이도록 번호로 돌린다).
-  // 주소에 ?mock-audit=many를 붙이면 질문 1,100개(30일에 기록 약 2,200건)를 만든다: 감사 로그의 2,000건 한도와 긴 목록 확인용
-  const count = MOCK_AUDIT_MANY ? 1100 : 42;
-  const stepHours = MOCK_AUDIT_MANY ? 0.64 : 17;
-  for (let n = 0; n < count; n += 1) {
-    const time = new Date(
-      Date.now() - (n * stepHours + 3) * 60 * 60 * 1000 - (n % 7) * 11 * 60 * 1000,
+  // 업무 시간 한 시간의 평균 질문 수. 기본은 30일에 기록 약 1,000건, ?mock-audit=many는 약 2,700건 (2,000건 한도·긴 목록 확인용)
+  const peak = MOCK_AUDIT_MANY ? 4.5 : 1.6;
+  // 사람마다 쓰는 양이 다르다 (앞사람일수록 많이)
+  const userWeights = AUDIT_USERS.map((_, index) => 1 / (index + 1.3));
+  const totalWeight = userWeights.reduce((sum, w) => sum + w, 0);
+  const pickUser = () => {
+    let r = random() * totalWeight;
+    for (let i = 0; i < AUDIT_USERS.length; i += 1) {
+      r -= userWeights[i];
+      if (r <= 0) return AUDIT_USERS[i];
+    }
+    return AUDIT_USERS[0];
+  };
+
+  const now = Date.now();
+  const start = Math.floor((now - 30 * 24 * HOUR_MS) / HOUR_MS) * HOUR_MS;
+  let n = 0;
+  for (let hour = start; hour < now; hour += HOUR_MS) {
+    const daysAgo = (now - hour) / (24 * HOUR_MS);
+    if (Math.floor(daysAgo) === QUIET_DAY) continue;
+    const incident = INCIDENTS.find(
+      (i) => daysAgo <= i.daysAgo && daysAgo > i.daysAgo - i.hours / 24,
     );
-    const user = AUDIT_USERS[n % AUDIT_USERS.length];
-    const tools = toolSets[n % toolSets.length];
-    // 몇 건은 질문에 붙여 넣은 계정 ID·키를 Claude로 보내기 전에 가린 기록
-    const redacted: Record<string, number> =
-      n % 5 === 0
-        ? { account_id: 1 }
-        : n % 11 === 0
-          ? { aws_access_key: 1, account_id: 2 }
-          : {};
-    records.push(
-      ...auditRecordsOf(
-        user,
-        AUDIT_QUESTIONS[n % AUDIT_QUESTIONS.length],
-        tools,
-        time,
-        redacted,
-      ),
-    );
+    const mean = peak * hourlyWeight(hour) * (incident ? incident.load : 1);
+    const count = poisson(mean, random);
+    for (let k = 0; k < count; k += 1) {
+      const time = new Date(Math.min(now - 1000, hour + random() * HOUR_MS));
+      const failing = incident && random() < incident.failRate;
+      const tools = failing
+        ? [FAILING_TOOLS[Math.floor(random() * FAILING_TOOLS.length)]]
+        : toolSets[Math.floor(random() * toolSets.length)];
+      // 몇 건은 질문에 붙여 넣은 계정 ID·키를 Claude로 보내기 전에 가린 기록
+      const roll = random();
+      const redacted: Record<string, number> =
+        roll < 0.12 ? { account_id: 1 } : roll < 0.16 ? { aws_access_key: 1, account_id: 2 } : {};
+      records.push(
+        ...auditRecordsOf(
+          pickUser(),
+          AUDIT_QUESTIONS[n % AUDIT_QUESTIONS.length],
+          tools,
+          time,
+          redacted,
+        ),
+      );
+      n += 1;
+    }
   }
   return records;
 };

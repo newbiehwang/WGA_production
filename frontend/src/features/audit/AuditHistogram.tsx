@@ -1,11 +1,15 @@
 // 감사 로그 목록 위의 시간대별 건수 막대그래프 (Datadog Audit Trail의 막대그래프를 따랐다).
-//   ■ 성공 1,650  ■ 실패 150                                  드래그해 기간 좁히기
-//   50 ┤        ▂       ▅
-//      │ ▁ ▂ ▅ ▃█ ▁ ▁ ▇ █ ▂       ← 칸마다 실패(아래)·성공(위)을 쌓는다. 실패를 바닥에 두어 칸끼리 비교하기 쉽게
-//      └─────────────────────
-//       09:00   12:00   15:00
+//   ■ 성공 471  ■ 실패 43                                     드래그하거나 막대를 눌러 기간 좁히기
+//   30 ┤─────────────────────────────────          ← 가는 가로 눈금선 (0 · 중간 · 윗값)
+//   20 ┤──────────────▅──────────────────
+//   10 ┤──▂──▅─▃█──▁─▁█─▇─█─▂──────────────
+//    0 ┴──█──█─██──█─██─█─█─█───────────
+//        9/24     06:00     12:00     18:00    9/25      ← 날이 바뀌는 눈금은 날짜(굵게), 나머지는 시각
 //
-// - 목록과 같은 기록(기간·거르기를 적용한 것)을 센다. 칸의 크기는 기간을 60칸 이하로 나누는 가장 작은 것 (timeWindow.ts)
+// - 목록과 같은 기록(기간·검색어·거르기를 적용한 것)을 칸마다 센다. 칸은 기간에 따라 1분~하루 (timeWindow.bucketSizeOf)
+// - 칸마다 실패(아래)·성공(위)을 쌓는다. 실패를 바닥에 두어 칸끼리 실패 건수를 비교하기 쉽게
+// - 가로 눈금은 막대 수와 상관없이 '보기 좋은 시각'에 찍는다 (10분·3시간·하루·5일 등, timeWindow.ticksOf)
+// - 기록이 없으면 그래프 자리에 '이 기간에 기록이 없습니다'. 불러오는 동안에는 앞 그래프를 흐리게 남겨 둔다
 // - 마우스를 올리면 그 칸의 시각과 건수를 보이고, 드래그하면 그 구간으로, 한 칸을 누르면 그 칸으로 기간을 좁힌다
 // - 키보드: 그래프에 포커스를 두고 ←/→로 칸을 옮기고 Enter로 그 칸만 본다. 칸의 내용은 화면 읽기 프로그램에도 알린다
 // - 색: 성공 #4a8fe0, 실패 #d03b3b (흰 바탕에서 색각 이상 구분·대비 검사를 통과한 값). 색만으로 구분하지 않게
@@ -13,30 +17,45 @@
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import type { AuditRecord } from '@/types/audit';
 import { timeOf } from './auditModel';
-import { bucketSizeOf, bucketStart, formatShort, formatTick, type TimeWindow } from './timeWindow';
+import { bucketSizeOf, bucketStart, formatShort, ticksOf, type TimeWindow } from './timeWindow';
 
-const COLORS = { ok: '#4a8fe0', error: '#d03b3b' };
-const PLOT_H = 64; // 막대가 서는 높이
-const TOP = 6; // 위쪽 눈금 글자 자리
-const AXIS_H = 18; // 아래 눈금 글자 자리
-const GUTTER = 30; // 왼쪽 세로 눈금 글자 자리
+// 쌓는 계열 (아래부터). 나눠 보기를 더하면 이 목록이 바뀐다
+interface Series {
+    key: string;
+    label: string;
+    color: string;
+}
+const RESULT_SERIES: Series[] = [
+    { key: 'error', label: '실패', color: '#d03b3b' },
+    { key: 'ok', label: '성공', color: '#4a8fe0' },
+];
+const failedOf = (record: AuditRecord) => record.status === 'error' || record.event === 'failed';
+const resultKeyOf = (record: AuditRecord) => (failedOf(record) ? 'error' : 'ok');
+
+const PLOT_H = 140; // 막대가 서는 높이
+const TOP = 8; // 윗값 글자가 잘리지 않게 둔 여백
+const AXIS_H = 22; // 아래 눈금 글자 자리
+const GUTTER = 40; // 왼쪽 세로 눈금 글자 자리
 const GAP = 2; // 막대 사이·쌓은 조각 사이의 틈 (바탕색)
 const MAX_BAR = 24;
 const RADIUS = 4;
 
 interface Bucket {
     start: number;
-    ok: number;
-    error: number;
+    counts: Record<string, number>;
+    total: number;
 }
 
-const failedOf = (record: AuditRecord) => record.status === 'error' || record.event === 'failed';
-
-// 0부터 max를 덮는 깔끔한 윗값 (1·2·5 × 10^k)
-const niceMax = (max: number) => {
-    if (max <= 1) return 1;
-    const power = 10 ** Math.floor(Math.log10(max));
-    return [1, 2, 5, 10].map((step) => step * power).find((value) => value >= max) ?? max;
+// 세로 눈금: 0부터 max를 덮는 깔끔한 간격(1·2·5 × 10^k)으로 서너 개
+const yTicksOf = (max: number) => {
+    if (max <= 0) return { top: 1, ticks: [0] };
+    const raw = max / 3;
+    const power = 10 ** Math.floor(Math.log10(raw));
+    const step = Math.max(1, [1, 2, 5, 10].map((m) => m * power).find((v) => v >= raw) ?? raw);
+    const top = Math.ceil(max / step) * step;
+    const ticks: number[] = [];
+    for (let v = 0; v <= top; v += step) ticks.push(v);
+    return { top, ticks };
 };
 
 // 위쪽 두 모서리만 둥근 막대 (바닥은 각지게)
@@ -48,10 +67,12 @@ const barPath = (x: number, y: number, w: number, h: number, rounded: boolean) =
 export function AuditHistogram({
     records,
     window,
+    loading,
     onSelect,
 }: {
     records: AuditRecord[];
     window: TimeWindow;
+    loading: boolean; // 다시 불러오는 중: 앞 그래프를 흐리게 남겨 둔다
     onSelect: (window: TimeWindow) => void;
 }) {
     const wrap = useRef<HTMLDivElement>(null);
@@ -67,37 +88,44 @@ export function AuditHistogram({
         return () => observer.disconnect();
     }, []);
 
+    const series = RESULT_SERIES;
     const size = bucketSizeOf(window);
+    const first = bucketStart(window.from, size);
     const buckets = useMemo(() => {
-        const first = bucketStart(window.from, size);
         const count = Math.max(1, Math.ceil((window.to - first) / size));
-        const list: Bucket[] = Array.from({ length: count }, (_, index) => ({ start: first + index * size, ok: 0, error: 0 }));
+        const list: Bucket[] = Array.from({ length: count }, (_, index) => ({
+            start: first + index * size,
+            counts: {},
+            total: 0,
+        }));
         for (const record of records) {
-            const index = Math.floor((Date.parse(timeOf(record)) - first) / size);
-            const bucket = list[index];
+            const bucket = list[Math.floor((Date.parse(timeOf(record)) - first) / size)];
             if (!bucket) continue;
-            if (failedOf(record)) bucket.error += 1;
-            else bucket.ok += 1;
+            const key = resultKeyOf(record);
+            bucket.counts[key] = (bucket.counts[key] ?? 0) + 1;
+            bucket.total += 1;
         }
         return list;
-    }, [records, window.from, window.to, size]);
+    }, [records, first, window.to, size]);
 
-    const totals = useMemo(
-        () => buckets.reduce((sum, b) => ({ ok: sum.ok + b.ok, error: sum.error + b.error }), { ok: 0, error: 0 }),
-        [buckets],
-    );
-    const top = niceMax(Math.max(...buckets.map((b) => b.ok + b.error)));
+    const totals = useMemo(() => {
+        const sums: Record<string, number> = {};
+        for (const bucket of buckets) for (const [key, n] of Object.entries(bucket.counts)) sums[key] = (sums[key] ?? 0) + n;
+        return sums;
+    }, [buckets]);
+    const total = Object.values(totals).reduce((sum, n) => sum + n, 0);
+    const { top, ticks: yTicks } = yTicksOf(Math.max(0, ...buckets.map((b) => b.total)));
 
     const plotW = Math.max(0, width - GUTTER);
+    const end = first + buckets.length * size; // 마지막 칸의 끝
     const slot = plotW / buckets.length;
     const barW = Math.max(1, Math.min(MAX_BAR, slot - GAP));
+    const xOfTime = (at: number) => GUTTER + ((at - first) / (end - first)) * plotW;
     const xOf = (index: number) => GUTTER + index * slot + (slot - barW) / 2;
-    const hOf = (value: number) => (value / top) * PLOT_H;
+    const yOf = (value: number) => TOP + PLOT_H - (value / top) * PLOT_H;
     const indexAt = (x: number) => Math.min(buckets.length - 1, Math.max(0, Math.floor((x - GUTTER) / slot)));
     const baseY = TOP + PLOT_H;
-
-    // 눈금: 글자가 겹치지 않게 약 80px마다 한 칸
-    const tickEvery = Math.max(1, Math.ceil(80 / Math.max(slot, 1)));
+    const xTicks = useMemo(() => (plotW > 0 ? ticksOf(first, end, plotW) : []), [first, end, plotW]);
 
     // 칸 하나 또는 여러 칸을 기간으로 (전체 기간 밖으로 나가지 않게)
     const selectBuckets = (from: number, to: number) =>
@@ -107,15 +135,17 @@ export function AuditHistogram({
         });
 
     const pointerX = (event: PointerEvent<SVGSVGElement>) => event.clientX - event.currentTarget.getBoundingClientRect().left;
+    const interactive = total > 0 && !loading;
 
     const onPointerDown = (event: PointerEvent<SVGSVGElement>) => {
-        if (event.button !== 0) return;
+        if (event.button !== 0 || !interactive) return;
         event.preventDefault(); // 마우스로 누를 때는 포커스(테두리)를 옮기지 않는다. 키보드로 왔을 때만 테두리가 보인다
         event.currentTarget.setPointerCapture(event.pointerId);
         const x = pointerX(event);
         setDrag({ x0: x, x1: x });
     };
     const onPointerMove = (event: PointerEvent<SVGSVGElement>) => {
+        if (!interactive) return;
         const x = pointerX(event);
         if (drag) setDrag({ ...drag, x1: x });
         setActive(indexAt(x));
@@ -130,6 +160,7 @@ export function AuditHistogram({
     };
 
     const onKeyDown = (event: KeyboardEvent<SVGSVGElement>) => {
+        if (!interactive) return;
         const current = active ?? buckets.length - 1;
         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
             event.preventDefault();
@@ -144,38 +175,36 @@ export function AuditHistogram({
     };
     // 키보드로 들어오면 기록이 있는 마지막 칸부터
     const onFocus = () => {
-        if (active !== null) return;
-        const last = buckets.map((b) => b.ok + b.error > 0).lastIndexOf(true);
+        if (active !== null || !interactive) return;
+        const last = buckets.map((b) => b.total > 0).lastIndexOf(true);
         setActive(last >= 0 ? last : buckets.length - 1);
     };
 
-    const shown = active !== null ? buckets[active] : null;
+    const shown = active !== null && interactive ? buckets[active] : null;
     const rangeText = (bucket: Bucket) => `${formatShort(bucket.start)} ~ ${formatShort(bucket.start + size)}`;
     const tooltipLeft = active !== null ? Math.min(Math.max(xOf(active) + barW / 2, 90), Math.max(90, width - 90)) : 0;
+    const summary = (bucket: Bucket) =>
+        `${rangeText(bucket)}: ${[...series].reverse().map((s) => `${s.label} ${bucket.counts[s.key] ?? 0}건`).join(', ')}`;
 
     return (
-        <div className="audit-histogram">
+        <div className={`audit-histogram${loading ? ' is-loading' : ''}`}>
             <div className="audit-histogram-legend">
-                <span>
-                    <svg width="10" height="10" aria-hidden="true">
-                        <rect width="10" height="10" rx="2" fill={COLORS.ok} />
-                    </svg>
-                    성공 <strong>{totals.ok.toLocaleString()}</strong>
-                </span>
-                <span>
-                    <svg width="10" height="10" aria-hidden="true">
-                        <rect width="10" height="10" rx="2" fill={COLORS.error} />
-                    </svg>
-                    실패 <strong>{totals.error.toLocaleString()}</strong>
-                </span>
-                <span className="audit-histogram-hint">드래그하거나 막대를 눌러 기간 좁히기</span>
+                {[...series].reverse().map((s) => (
+                    <span key={s.key}>
+                        <svg width="10" height="10" aria-hidden="true">
+                            <rect width="10" height="10" rx="2" fill={s.color} />
+                        </svg>
+                        {s.label} <strong>{(totals[s.key] ?? 0).toLocaleString()}</strong>
+                    </span>
+                ))}
+                {total > 0 ? <span className="audit-histogram-hint">드래그하거나 막대를 눌러 기간 좁히기</span> : null}
             </div>
             <div ref={wrap} className="audit-histogram-plot">
                 {width > 0 ? (
                     <svg
                         width={width}
                         height={TOP + PLOT_H + AXIS_H}
-                        tabIndex={0}
+                        tabIndex={interactive ? 0 : -1}
                         role="group"
                         aria-label="시간대별 기록 건수. ←/→로 시간대를 옮기고 Enter로 그 시간대만 봅니다"
                         onPointerDown={onPointerDown}
@@ -186,20 +215,47 @@ export function AuditHistogram({
                         onFocus={onFocus}
                         onBlur={() => setActive(null)}
                     >
-                        {/* 세로 눈금: 윗값과 바닥 (가는 선) */}
-                        <line x1={GUTTER} x2={width} y1={TOP} y2={TOP} className="audit-histogram-grid" />
-                        <line x1={GUTTER} x2={width} y1={baseY} y2={baseY} className="audit-histogram-axis" />
-                        <text x={GUTTER - 6} y={TOP + 4} textAnchor="end" className="audit-histogram-tick">
-                            {top.toLocaleString()}
-                        </text>
-                        <text x={GUTTER - 6} y={baseY} textAnchor="end" className="audit-histogram-tick">
-                            0
-                        </text>
+                        {/* 세로 눈금: 가는 가로선과 왼쪽 글자 (0은 바닥선) */}
+                        {yTicks.map((value) => (
+                            <g key={`y${value}`}>
+                                <line
+                                    x1={GUTTER}
+                                    x2={width}
+                                    y1={yOf(value)}
+                                    y2={yOf(value)}
+                                    className={value === 0 ? 'audit-histogram-axis' : 'audit-histogram-grid'}
+                                />
+                                {total > 0 || value === 0 ? (
+                                    <text x={GUTTER - 8} y={yOf(value) + 4} textAnchor="end" className="audit-histogram-tick">
+                                        {value.toLocaleString()}
+                                    </text>
+                                ) : null}
+                            </g>
+                        ))}
+
+                        {/* 가로 눈금: 날짜(굵게)와 시각 */}
+                        {xTicks.map((tick) => {
+                            const x = xOfTime(tick.at);
+                            if (x > width - 20) return null; // 오른쪽 끝에 걸려 잘릴 글자는 그리지 않는다
+                            return (
+                                <g key={`x${tick.at}`}>
+                                    <line x1={x} x2={x} y1={baseY} y2={baseY + 4} className="audit-histogram-axis" />
+                                    <text
+                                        x={x}
+                                        y={baseY + 17}
+                                        textAnchor="middle"
+                                        className={`audit-histogram-tick${tick.isDate ? ' is-date' : ''}`}
+                                    >
+                                        {tick.label}
+                                    </text>
+                                </g>
+                            );
+                        })}
 
                         {/* 가리킨 칸의 옅은 바탕 */}
-                        {active !== null ? (
+                        {shown ? (
                             <rect
-                                x={GUTTER + active * slot}
+                                x={GUTTER + (active ?? 0) * slot}
                                 y={TOP}
                                 width={slot}
                                 height={PLOT_H}
@@ -207,43 +263,31 @@ export function AuditHistogram({
                             />
                         ) : null}
 
+                        {/* 막대: 계열을 아래부터 쌓는다. 조각 사이에 틈, 맨 위 조각만 위 모서리가 둥글다 */}
                         {buckets.map((bucket, index) => {
+                            if (!bucket.total) return null;
                             const x = xOf(index);
-                            const errorH = hOf(bucket.error);
-                            const okH = hOf(bucket.ok);
-                            // 두 조각이 다 있으면 사이에 틈을 둔다. 맨 위 조각만 위 모서리가 둥글다
-                            const gap = bucket.error && bucket.ok ? GAP : 0;
+                            const parts = series.filter((s) => bucket.counts[s.key]);
+                            let y = baseY;
                             return (
                                 <g key={bucket.start}>
-                                    {bucket.error ? (
-                                        <path
-                                            d={barPath(x, baseY - errorH, barW, errorH, !bucket.ok)}
-                                            fill={COLORS.error}
-                                        />
-                                    ) : null}
-                                    {bucket.ok ? (
-                                        <path
-                                            d={barPath(x, baseY - errorH - gap - okH, barW, okH, true)}
-                                            fill={COLORS.ok}
-                                        />
-                                    ) : null}
+                                    {parts.map((s, i) => {
+                                        const h = ((bucket.counts[s.key] ?? 0) / top) * PLOT_H;
+                                        const gap = i > 0 ? GAP : 0;
+                                        const shape = barPath(x, y - gap - h, barW, h, i === parts.length - 1);
+                                        y -= gap + h;
+                                        return <path key={s.key} d={shape} fill={s.color} />;
+                                    })}
                                 </g>
                             );
                         })}
 
-                        {/* 오른쪽 끝에 걸려 잘릴 눈금은 그리지 않는다 */}
-                        {buckets.map((bucket, index) =>
-                            index % tickEvery === 0 && GUTTER + index * slot + 36 <= width ? (
-                                <text
-                                    key={`t${bucket.start}`}
-                                    x={GUTTER + index * slot}
-                                    y={baseY + 14}
-                                    className="audit-histogram-tick"
-                                >
-                                    {formatTick(bucket.start, size)}
-                                </text>
-                            ) : null,
-                        )}
+                        {/* 기록이 없으면 그래프 자리에 안내 (불러오는 중이면 비워 둔다) */}
+                        {total === 0 && !loading ? (
+                            <text x={GUTTER + plotW / 2} y={TOP + PLOT_H / 2} textAnchor="middle" className="audit-histogram-empty">
+                                이 기간에 기록이 없습니다
+                            </text>
+                        ) : null}
 
                         {/* 드래그 중인 구간 */}
                         {drag ? (
@@ -261,19 +305,17 @@ export function AuditHistogram({
                 {shown && !drag ? (
                     <div className="audit-histogram-tooltip" style={{ left: tooltipLeft }} aria-hidden="true">
                         <div className="audit-histogram-tooltip-time">{rangeText(shown)}</div>
-                        <div>
-                            <i style={{ background: COLORS.ok }} />
-                            <strong>{shown.ok.toLocaleString()}</strong> 성공
-                        </div>
-                        <div>
-                            <i style={{ background: COLORS.error }} />
-                            <strong>{shown.error.toLocaleString()}</strong> 실패
-                        </div>
+                        {[...series].reverse().map((s) => (
+                            <div key={s.key}>
+                                <i style={{ background: s.color }} />
+                                <strong>{(shown.counts[s.key] ?? 0).toLocaleString()}</strong> {s.label}
+                            </div>
+                        ))}
                     </div>
                 ) : null}
                 {/* 화면 읽기 프로그램: 가리킨 칸의 내용 */}
                 <span className="sr-only" aria-live="polite">
-                    {shown ? `${rangeText(shown)}: 성공 ${shown.ok}건, 실패 ${shown.error}건` : ''}
+                    {shown ? summary(shown) : ''}
                 </span>
             </div>
         </div>

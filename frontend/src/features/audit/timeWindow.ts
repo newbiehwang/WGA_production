@@ -64,13 +64,6 @@ export const formatShort = (ms: number) => {
 };
 export const formatWindow = (window: TimeWindow) => `${formatShort(window.from)} ~ ${formatShort(window.to)}`;
 
-// 막대그래프 아래 눈금: 하루보다 짧은 칸은 시:분(날이 바뀌는 칸은 날짜), 하루 칸은 날짜
-export const formatTick = (ms: number, bucket: number) => {
-    const p = kstParts(ms);
-    if (bucket >= DAY || (p.hh === '00' && p.mm === '00')) return `${p.month}/${p.day}`;
-    return `${p.hh}:${p.mm}`;
-};
-
 // <input type="datetime-local">의 값(YYYY-MM-DDTHH:mm)을 한국 시간으로 읽고 쓴다
 export const toInputValue = (ms: number) => {
     const p = kstParts(ms);
@@ -85,11 +78,55 @@ export const fromInputValue = (value: string) => {
 
 // ---------------------------------------------------------------- 막대 칸
 
-// 칸의 크기 후보. 구간을 MAX_BUCKETS칸 이하로 나누는 가장 작은 것을 쓴다
-const BUCKETS = [60e3, 5 * 60e3, 15 * 60e3, 30 * 60e3, HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR, DAY];
+const MINUTE = 60 * 1000;
+// 칸의 크기 후보. 구간을 MAX_BUCKETS칸 이하로 나누는 가장 작은 것을 쓴다.
+// 12시간 칸은 두지 않는다: 30일을 12시간으로 나누면 하루가 막대 두 개로 쪼개져 읽기 어렵다 (하루 칸으로 간다)
+//   1시간 → 1분 · 4시간 → 5분 · 1일 → 30분 · 7일 → 3시간 · 30일 → 하루
+const BUCKETS = [MINUTE, 2 * MINUTE, 5 * MINUTE, 10 * MINUTE, 15 * MINUTE, 30 * MINUTE, HOUR, 3 * HOUR, 6 * HOUR, DAY];
 const MAX_BUCKETS = 60;
 export const bucketSizeOf = (window: TimeWindow) =>
     BUCKETS.find((size) => (window.to - window.from) / size <= MAX_BUCKETS) ?? DAY;
 
 // 칸의 시작 (한국 시간 기준으로 맞춘다: 6시간 칸은 0·6·12·18시, 하루 칸은 0시에서 시작)
 export const bucketStart = (ms: number, size: number) => Math.floor((ms + KST) / size) * size - KST;
+
+// ---------------------------------------------------------------- 가로 눈금
+
+// 눈금 간격 후보. 눈금 사이가 minGapPx 이상 벌어지는 가장 작은 것을 쓴다 (막대 수와 상관없이 '보기 좋은 시각'에 찍는다)
+const TICKS = [
+    MINUTE,
+    2 * MINUTE,
+    5 * MINUTE,
+    10 * MINUTE,
+    15 * MINUTE,
+    30 * MINUTE,
+    HOUR,
+    2 * HOUR,
+    3 * HOUR,
+    6 * HOUR,
+    12 * HOUR,
+    DAY,
+    2 * DAY,
+    5 * DAY,
+    7 * DAY,
+];
+
+export interface Tick {
+    at: number;
+    label: string;
+    isDate: boolean; // 날짜 눈금 (한국 시간 0시). 굵게 그린다
+}
+
+// from~to 사이의 눈금. 한국 시간 0시에 걸리는 눈금은 날짜(9/24), 나머지는 시각(06:00)
+export function ticksOf(from: number, to: number, widthPx: number, minGapPx = 72): Tick[] {
+    const span = to - from;
+    const interval = TICKS.find((step) => (step / span) * widthPx >= minGapPx) ?? 7 * DAY;
+    const ticks: Tick[] = [];
+    for (let at = bucketStart(from, interval); at <= to; at += interval) {
+        if (at < from) continue;
+        const p = kstParts(at);
+        const isDate = p.hh === '00' && p.mm === '00';
+        ticks.push({ at, label: isDate ? `${p.month}/${p.day}` : `${p.hh}:${p.mm}`, isDate });
+    }
+    return ticks;
+}

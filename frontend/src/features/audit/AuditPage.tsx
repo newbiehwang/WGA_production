@@ -262,11 +262,12 @@ export function AuditPage() {
                         <ResetButton onClick={resetFilters} disabled={!customized} />
                     </div>
 
-                    {listLoading || error ? null : (
-                        <AuditHistogram records={filtered} window={timeWindow} onSelect={setPeriod} />
+                    {/* 다시 불러오는 동안에도 앞 그래프·목록을 흐리게 남겨 둔다 (자리가 들썩이지 않게) */}
+                    {error ? null : (
+                        <AuditHistogram records={filtered} window={timeWindow} loading={listLoading} onSelect={setPeriod} />
                     )}
 
-                    <div className="plan-table audit-table">
+                    <div className={`plan-table audit-table${listLoading ? ' is-loading' : ''}`}>
                         <div className="plan-table-header audit-table-header" aria-hidden="true">
                             <span className="audit-col-time">시각</span>
                             <span className="audit-col-user">요청자</span>
@@ -276,8 +277,8 @@ export function AuditPage() {
                             <span className="audit-col-flags">표시</span>
                         </div>
 
-                        {/* 불러오는 동안 목록은 비워 두고, 카드는 흰 박스 전체의 가운데에 띄운다 (아래 plan-panel-loading) */}
-                        {listLoading || error ? null : filtered.length === 0 ? (
+                        {/* 처음 불러올 때는 목록을 비워 두고, 카드는 흰 박스 전체의 가운데에 띄운다 (아래 plan-panel-loading) */}
+                        {error || (listLoading && filtered.length === 0) ? null : filtered.length === 0 ? (
                             <div className="plan-panel-empty">
                                 {inWindow.length === 0 ? (
                                     <p>이 기간에 기록이 없습니다. 질문을 보내면 도구 호출마다 기록이 남습니다.</p>
