@@ -980,37 +980,6 @@
 }
 
 /* 이어 찾기 버튼: 같은 질문·대화·작업의 기록, 이 요청자만, 이 도구만 */
-.audit-detail-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.audit-detail-actions button {
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  background: #fff;
-  color: #3c4650;
-  font-family: var(--font-label);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
-}
-
-.audit-detail-actions button:hover {
-  border-color: rgba(0, 123, 255, 0.4);
-  background: #f1f6fd;
-  color: var(--color-primary);
-}
-
-.audit-detail-actions button:focus-visible {
-  outline: 2px solid rgba(0, 123, 255, 0.32);
-  outline-offset: 2px;
-}
-
 .audit-detail-body {
   flex: 1;
   min-height: 0;
