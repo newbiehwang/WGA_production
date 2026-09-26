@@ -38,8 +38,10 @@ interface MockSession {
 // 답변을 만드는 과정의 시간표 (ms). 진행 상황 표시(생각 중 → 도구 실행 → 생각)와 취소 버튼을 확인할 수 있게
 // 실제처럼 몇 초에 걸쳐 단계가 하나씩 나타나고, 마지막 단계가 끝난 뒤에 답이 온다
 const FIRST_THINKING_AT = 600; // 첫 사고 요약이 나오는 때
-const TOOL_MS = 1400; // 도구 하나가 도는 시간
-const STEP_GAP_MS = 400; // 단계 사이
+const BASE_TOOL_MS = 1400; // 도구 하나가 도는 시간
+const BASE_STEP_GAP_MS = 400; // 단계 사이
+const TOOL_MS = BASE_TOOL_MS; // 감사 로그 예시의 시간 (진행 상황은 planRun이 답변마다 slow를 곱해 쓴다)
+const STEP_GAP_MS = BASE_STEP_GAP_MS;
 
 // 지금 쓰는 모델 (실제로는 요청할 때의 최신 Sonnet, services/llm/llm_service.py의 current_model)
 const MODEL = { id: "claude-sonnet-5", display_name: "Claude Sonnet 5" };
@@ -72,6 +74,7 @@ interface MockEntry {
   search?: { query: string; found: string[] };
   // 결과물(차트): 답변에는 ![제목](artifact://…) 참조만, 주소와 그릴 내용은 inference.artifacts로 (services/llm/artifacts.py)
   artifacts?: Artifact[];
+  slow?: number; // 단계마다 걸리는 시간을 몇 배로 (기다리는 동안의 한 줄이 돌아가며 바뀌는 모습을 볼 때)
 }
 
 const ANSWERS: MockEntry[] = [
@@ -457,17 +460,20 @@ const runs = new Map<string, Run>();
 
 const planRun = (entry: (typeof ANSWERS)[number]): Omit<Run, "started"> => {
   const plan: PlannedStep[] = [];
-  let at = FIRST_THINKING_AT;
+  const slow = entry.slow ?? 1;
+  const gapMs = BASE_STEP_GAP_MS * slow;
+  const toolMs = BASE_TOOL_MS * slow;
+  let at = FIRST_THINKING_AT * slow;
   plan.push({ at, step: { type: "thinking", text: entry.thinking[0] } });
-  at += STEP_GAP_MS;
+  at += gapMs;
   if (entry.search) {
     plan.push({ at, step: { type: "search", ...entry.search } });
-    at += STEP_GAP_MS;
+    at += gapMs;
   }
   for (const tool of entry.tools) {
     plan.push({
       at,
-      until: at + TOOL_MS,
+      until: at + toolMs,
       step: {
         type: "tool",
         id: newId(),
@@ -476,16 +482,16 @@ const planRun = (entry: (typeof ANSWERS)[number]): Omit<Run, "started"> => {
         status: tool.status,
         ...(tool.error && { error: tool.error }),
         ...(tool.suspicious && { suspicious: tool.suspicious }),
-        ms: TOOL_MS,
+        ms: toolMs,
       },
     });
-    at += TOOL_MS + STEP_GAP_MS;
+    at += toolMs + gapMs;
   }
   if (entry.thinking[1]) {
     plan.push({ at, step: { type: "thinking", text: entry.thinking[1] } });
-    at += STEP_GAP_MS * 2;
+    at += gapMs * 2;
   }
-  return { plan, total: at + STEP_GAP_MS, entry };
+  return { plan, total: at + gapMs, entry };
 };
 
 // 시작부터 elapsed ms가 지났을 때 보이는 단계. 아직 끝나지 않은 도구는 '실행 중'
@@ -498,11 +504,20 @@ const stepsAt = (run: Omit<Run, "started">, elapsed: number) =>
         : p.step,
     );
 
+// 오래 걸리는 답변 (질문에 '천천히'가 있으면): 첫 예시 답변을 여섯 배 느리게. 생각 → 조회 → 비용 → 정리마다
+// 기다리는 동안의 한 줄이 3초마다 다음 말로 넘어가는 것을 본다
+const slowEntry = (): MockEntry => ({
+  ...ANSWERS[0],
+  tools: [...ANSWERS[0].tools, { tool_name: "cost-explorer", input: { operation: "getCostAndUsage" }, status: "ok" }],
+  slow: 6,
+});
+
 // 질문에 맞는 답변: 승인한 작업의 설명 → 변경 요청(보존·알람) → 나머지는 예시를 돌아가며
 const entryFor = (body: RequestBody): MockEntry => {
   const action = body.actionId ? actions.get(body.actionId) : undefined;
   if (action) return explanationEntry(action);
   const text = body.text || body.question || "";
+  if (text.includes("천천히")) return slowEntry();
   if (text.includes("로그대로")) return TAINTED_ENTRY;
   if (text.includes("인젝션") || text.includes("의심")) return INJECTION_ENTRY;
   if (text.includes("갤러리")) return GALLERY_ENTRY;

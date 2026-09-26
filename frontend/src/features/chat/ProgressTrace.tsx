@@ -1,7 +1,8 @@
 // 답변을 만드는 과정 (Claude Code가 작업 과정을 보여 주는 모양을 따랐다).
 //
-// 답을 기다리는 동안 (LiveLine): 지금 단계만 한 줄로. 단계가 바뀌면 새 줄이 아래에서 올라오며 바뀐다
-//   ✶ 로그 그룹 조회 중… (12초)
+// 답을 기다리는 동안 (LiveLine): 지금 하는 일을 가벼운 말 한 줄로. 도구 이름 대신 종류만 말하고('도구 사용 중',
+// '계산 중'), 같은 단계가 이어지면 3초마다 다음 말로 넘어간다. 바뀔 때마다 새 글자가 아래에서 올라온다
+//   ✶ 데이터 살펴보는 중… (12초)
 //
 // 답이 온 뒤 (ProgressTrace): 답변 아래 '사고 과정'을 펼치면 전체 과정이 보인다
 //   ▸ ✻ 생각  로그 그룹부터 찾아야 한다…          ← 사고 요약. 첫 줄만 보이고 누르면 펼쳐진다
@@ -12,7 +13,7 @@
 //
 // 기다리는 동안에는 진행 상황(GET /llm1/progress)으로, 답이 온 뒤에는 답변의 inference.steps로 단계를 읽는다.
 import { useEffect, useState } from 'react';
-import type { TraceStep } from '@/utils/toolTrace';
+import { activityOf, type TraceStep } from '@/utils/toolTrace';
 
 // Claude Code의 작업 중 표시와 같은 글자들을 차례로 돌린다
 const SPINNER_FRAMES = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢'];
@@ -47,24 +48,92 @@ function useElapsedSeconds(since: string) {
 }
 
 // 지금 단계의 이름 (세부 내용 없이). 도구를 실행 중이면 그 도구, 아니면 모델이 생각하는 중이다
-function currentStep(steps: TraceStep[], phase: string): string {
+// 지금 하는 일 (단계). 도구를 실행 중이면 그 도구의 종류, 아니면 모델이 생각하는 때에 따라 나눈다
+type Stage = 'start' | 'search' | 'lookup' | 'cost' | 'draw' | 'change' | 'after';
+
+// 단계마다 돌아가며 보일 말 (첫 말부터 차례로, 끝에 이르면 마지막 말에 머문다). 도구 이름은 쓰지 않는다
+const STAGE_WORDS: Record<Stage, string[]> = {
+    start: ['생각하는 중', '질문 살펴보는 중', '방법 고르는 중'], // 도구를 쓰기 전
+    search: ['도구 찾는 중', '알맞은 도구 고르는 중'], // 도구 검색 뒤 (services/llm/tool_search.py)
+    lookup: ['도구 사용 중', '데이터 살펴보는 중', '기록 확인하는 중'], // 로그·지표·리소스·문서·CloudTrail 조회
+    cost: ['계산 중', '숫자 맞춰 보는 중'], // 비용·가격
+    draw: ['그리는 중', '모양 다듬는 중'], // 차트·다이어그램
+    change: ['확인 준비 중', '바뀔 내용 살피는 중'], // 변경 도구 (실행하지 않고 승인 요청을 만든다)
+    after: ['결과 정리하는 중', '답변 쓰는 중', '다듬는 중'], // 도구를 쓴 뒤 다시 생각
+};
+const WORD_MS = 3000; // 같은 단계에서 다음 말로 넘어가는 간격
+
+// 화면 읽기 프로그램에는 돌아가는 말 대신 단계가 바뀔 때만 알린다 (3초마다 읽으면 시끄럽다)
+const STAGE_ANNOUNCE: Record<Stage, string> = {
+    start: '생각하는 중',
+    search: '도구를 찾는 중',
+    lookup: '도구를 사용하는 중',
+    cost: '계산하는 중',
+    draw: '그리는 중',
+    change: '변경 내용을 확인하는 중',
+    after: '답변을 쓰는 중',
+};
+
+function currentStage(steps: TraceStep[], phase: string): Stage {
     const running = [...steps].reverse().find((step) => step.kind === 'tool' && step.status === 'running');
-    if (phase === 'tool' && running?.kind === 'tool') return `${running.label.replace(/ 요청$/, '')} 중`;
-    return '생각하는 중';
+    if (phase === 'tool' && running?.kind === 'tool') return activityOf(running.name);
+    const last = [...steps].reverse().find((step) => step.kind === 'tool');
+    if (!last) return 'start';
+    // 도구 검색은 모델 요청 안에서 일어나 '실행 중'으로 오지 않는다. 검색 직후면 찾은 도구를 고르는 중이다
+    return last.kind === 'tool' && last.name === 'tool_search' ? 'search' : 'after';
 }
 
-// 답을 기다리는 동안의 한 줄: 도는 별표 · 지금 단계 · 지난 시간.
-// 단계 글자가 바뀌면 key가 바뀌어 새로 그려지며, 아래에서 올라오는 전환 효과(trace-line-in)가 난다
+// 보일 단계. 도구 단계로는 바로 넘어가고, 생각 단계(start·search·after)로는 SETTLE_MS 넘게 이어질 때만 넘어간다.
+// 도구를 잇달아 부를 때 사이사이 모델이 잠깐 생각하는 틈마다 말이 번갈아 깜빡이지 않게 한다
+const SETTLE_MS = 1200;
+const THINKING_STAGES = new Set<Stage>(['start', 'search', 'after']);
+
+function useSettledStage(stage: Stage): Stage {
+    const [shown, setShown] = useState(stage);
+    useEffect(() => {
+        if (stage === shown) return;
+        if (!THINKING_STAGES.has(stage)) {
+            setShown(stage);
+            return;
+        }
+        const timer = window.setTimeout(() => setShown(stage), SETTLE_MS);
+        return () => window.clearTimeout(timer);
+    }, [stage, shown]);
+    return shown;
+}
+
+// 같은 단계가 이어진 시간에 따라 몇 번째 말을 보일지 (단계가 바뀌면 처음부터)
+function useStageWord(stage: Stage): string {
+    const [started, setStarted] = useState(() => ({ stage, at: Date.now() }));
+    const [now, setNow] = useState(() => Date.now());
+    if (started.stage !== stage) setStarted({ stage, at: Date.now() }); // 그리는 중에 단계가 바뀌었다
+    useEffect(() => {
+        const timer = window.setInterval(() => setNow(Date.now()), 500);
+        return () => window.clearInterval(timer);
+    }, []);
+    const words = STAGE_WORDS[stage];
+    const index = Math.min(Math.floor(Math.max(0, now - started.at) / WORD_MS), words.length - 1);
+    return words[index];
+}
+
+// 답을 기다리는 동안의 한 줄: 도는 별표 · 지금 하는 일 · 지난 시간.
+// 말이 바뀌면 key가 바뀌어 새로 그려지며, 아래에서 올라오는 전환 효과(trace-line-in)가 난다
 export function LiveLine({ steps, phase, since }: { steps: TraceStep[]; phase: string; since: string }) {
     const seconds = useElapsedSeconds(since);
-    const step = currentStep(steps, phase);
+    const stage = useSettledStage(currentStage(steps, phase));
+    const word = useStageWord(stage);
     return (
-        <div className="trace trace-live" role="status" aria-live="polite">
+        <div className="trace trace-live">
             <Spinner />
-            <span key={step} className="trace-verb trace-line-in">
-                {step}…
+            <span key={word} className="trace-verb trace-line-in" aria-hidden="true">
+                {word}…
             </span>
-            <span className="trace-time">({seconds}초)</span>
+            <span className="trace-time" aria-hidden="true">
+                ({seconds}초)
+            </span>
+            <span className="sr-only" role="status" aria-live="polite">
+                {STAGE_ANNOUNCE[stage]}
+            </span>
         </div>
     );
 }
