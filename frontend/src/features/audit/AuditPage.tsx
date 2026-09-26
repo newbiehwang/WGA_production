@@ -31,6 +31,7 @@ import {
     summaryOf,
     timeOf,
     type FacetId,
+    type GroupBy,
     type Selection,
 } from './auditModel';
 import { AuditSearch } from './AuditSearch';
@@ -154,6 +155,7 @@ export function AuditPage() {
     const [period, setPeriod] = useState<Period>(initial.period);
     const [selection, setSelection] = useState<Selection>(initial.selection);
     const [query, setQuery] = useState(initial.query);
+    const [groupBy, setGroupBy] = useState<GroupBy>(initial.groupBy); // 막대그래프 나눠 보기
     const [now, setNow] = useState(() => Date.now()); // '최근 n시간'의 끝. 새로 고침하면 지금으로
     const timeWindow = useMemo(() => windowOf(period, now), [period, now]);
 
@@ -171,9 +173,9 @@ export function AuditPage() {
 
     // 조건을 주소에 담는다 (뒤로 가기가 조건마다 쌓이지 않게 replace). 주소가 바뀌어도 다시 돌지 않게 조건만 지켜본다
     useEffect(() => {
-        const next = writeUrl(params, period, selection, query);
+        const next = writeUrl(params, period, selection, query, groupBy);
         if (next.toString() !== params.toString()) setParams(next, { replace: true });
-    }, [period, selection, query]);
+    }, [period, selection, query, groupBy]);
 
     // 기간 안의 기록 (받은 범위는 UTC 날짜 단위라 기간보다 넓다)
     const inWindow = useMemo(
@@ -334,10 +336,14 @@ export function AuditPage() {
                     {error ? null : (
                         <AuditHistogram
                             records={filtered}
+                            rankRecords={records}
                             window={timeWindow}
                             loading={listLoading}
                             highlightAt={pointAt}
+                            groupBy={groupBy}
+                            onGroupBy={setGroupBy}
                             onSelect={zoomTo}
+                            onFilter={(facet, values) => setSelection((prev) => ({ ...prev, [facet]: values }))}
                         />
                     )}
 

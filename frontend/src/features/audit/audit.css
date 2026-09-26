@@ -355,30 +355,80 @@
   border-radius: 12px;
 }
 
-.audit-histogram-legend {
+.audit-histogram-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 16px;
-  margin-bottom: 4px;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+
+.audit-histogram-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-histogram-group .audit-segment-btn {
+  height: 26px;
+  font-size: 0.76rem;
+}
+
+.audit-histogram-hint {
+  font-size: 12px;
+  color: #8a94a0;
+}
+
+/* 범례: 값마다 색 · 이름 · 건수. 누르면 그 값으로 거른다 (기타·도구 없음은 글자만) */
+.audit-histogram-legend {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
   font-size: 12px;
   color: #4a5561;
 }
 
-.audit-histogram-legend > span {
+.audit-histogram-legend button,
+.audit-histogram-legend li > span {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 220px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  color: inherit;
+}
+
+.audit-histogram-legend button {
+  cursor: pointer;
+}
+
+.audit-histogram-legend button:hover {
+  background: #f1f6fd;
+}
+
+.audit-histogram-legend button:focus-visible {
+  outline: 2px solid rgba(0, 123, 255, 0.32);
+  outline-offset: 1px;
+}
+
+.audit-histogram-legend-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .audit-histogram-legend strong {
   font-family: var(--font-label);
   color: #1f2933;
-}
-
-.audit-histogram-hint {
-  margin-left: auto;
-  color: #8a94a0;
 }
 
 .audit-histogram-plot {
