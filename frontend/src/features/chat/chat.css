@@ -52,24 +52,28 @@
 
 /* ---------------------------------------------------------------- 대화 목록 팝업창 */
 
-/* AXPI create-plan-model은 1140×940 크기의 생성 마법사다. 목록만 보이므로 폭과 높이를 줄였다 */
+/* AXPI create-plan-model은 1140×940 크기의 생성 마법사다. 목록만 보이므로 폭을 줄이고, 높이는 내용에 맞춘다
+   (대화가 적으면 작게, 많으면 680px까지 커지고 그 안에서 목록만 스크롤된다) */
 .create-plan-model.session-list-model {
   width: min(640px, calc(100vw - 28px));
-  height: min(680px, calc(100vh - 48px));
+  height: auto;
+  max-height: min(680px, calc(100vh - 48px));
   border-radius: 16px;
 }
 
+/* 제목 · 목록(남는 높이를 차지하고 스크롤) · 아래 버튼 줄 */
 .session-list-page {
   flex: 1;
   min-height: 0;
   padding: 0 6px;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 10px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
 }
 
-.session-list-page .create-plan-step-description {
-  margin-bottom: 4px;
+.session-list-page .create-plan-wizard-actions {
+  padding-top: 12px;
+  border-top: 1px solid #eef2f6;
 }
 
 .chat-session-list {
@@ -106,6 +110,7 @@
 }
 
 .chat-sessions-empty {
+  min-height: 160px;
   display: grid;
   place-items: center;
   border: 1px dashed #dde4ec;
