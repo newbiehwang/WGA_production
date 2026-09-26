@@ -1,17 +1,19 @@
 // 층 다이어그램: 7계층을 고리 모양의 순환 다이어그램으로 그린다. 도구 호출·변경 작업 행의 팝업창 맨 위에 보인다
 // (질문·사용자 관리 행에는 층이 없다).
 //
-//        ╭ 효과 ╮                     5 유입                         [이 기록]
+//   7계층 위치
+//        ╭ 효과 ╮                     [5] 유입 Ingress
 //     매개      유출 ▸               비용 조회의 결과가 모델에게 들어갔습니다
-//    경계   유입    체류              ─────────────
-//     ▸[유입]    판단                흔적
-//        ╰────╯                      ● 3 체류 · 의심 문구가 든 결과를 읽은 뒤 요청한 변경입니다 (1건)
+//    경계   유입    체류              ┌ 다른 계층에 남긴 흔적 ───────────────┐
+//     ▸[유입]    판단                │ 3 체류  의심 문구가 든 결과를 읽은 뒤 … │
+//        ╰────╯                      └──────────────────────────────┘
 //
 // - 고리는 조각 7개다. 조각 끝이 뾰족해(셰브런) 따로 화살표 없이 도는 방향이 보인다.
 //   차례는 역추적('층별로 따져 보기', services/llm/audit_trace.py)이 묻는 차례다 (맨 위 1 효과부터 시계 방향)
 // - 이 기록의 층(행의 locus): 파랑으로 채우고 바깥으로 조금 밀어낸다. 흔적이 있는 층: 옅은 주황.
 //   기록으로 남지 않는 층(판단: 모델 안, 매개: 앱 밖): 점선 테두리
-// - 오른쪽 설명 칸: 평소에는 이 기록이 한 일과 흔적. 조각에 마우스를 올리거나 키보드로 옮겨 가면 그 층의 설명으로 바뀐다
+// - 오른쪽 설명 칸: 평소에는 이 기록이 한 일과 흔적. 조각을 누르면(키보드는 Enter·Space) 그 층의 설명으로 바뀌고,
+//   이 기록의 조각을 누르거나 누른 조각을 다시 누르면 돌아온다. 제목 옆에는 영어 이름을 회색으로 (고리 안은 한글만)
 // - 이 기록의 층: 도구 반복이 정한다 (등록부에 없으면 경계, 변경 도구면 유출, 나머지는 유입. 변경 작업은 요청이 유출, 결정·실행이 효과)
 // - 흔적: 체류(승인 요청 행의 taintedBy), 유입(도구 행의 의심 문구), 매개(실행한 AWS API의 요청 ID)
 import { useState, type CSSProperties } from 'react';
@@ -112,7 +114,7 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
     return (
         <section className="audit-layers" aria-labelledby="audit-layers-title">
             <h4 id="audit-layers-title" className="audit-layers-title">
-                층 <span className="audit-muted">7계층에서 이 기록의 자리</span>
+                7계층 위치
             </h4>
 
             <div className="audit-cycle">
@@ -120,8 +122,7 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                     className="audit-cycle-svg"
                     viewBox={`${-POP} ${-POP} ${SIZE + POP * 2} ${SIZE + POP * 2}`}
                     role="group"
-                    aria-label="7계층 순환 다이어그램. 층을 짚으면 오른쪽에 설명이 나옵니다"
-                    onMouseLeave={() => setFocus(null)}
+                    aria-label="7계층 순환 다이어그램. 계층을 누르면 설명이 나옵니다"
                 >
                     {LAYERS.map((layer, index) => {
                         const isHere = index === hereIndex;
@@ -129,7 +130,10 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                         const offRecord = layer.recorded === 'none' || layer.recorded === 'outside';
                         const mid = rad(midOf(index));
                         const label = labelAt(index);
-                        const state = isHere ? '이 기록의 층' : isMarked ? '흔적' : offRecord ? '기록으로 남지 않음' : '';
+                        const state = isHere ? '이 기록의 계층' : isMarked ? '흔적' : offRecord ? '기록으로 남지 않음' : '';
+                        const selected = focus === layer.id;
+                        // 누르면 그 계층의 설명으로, 이 기록의 조각이나 이미 고른 조각을 누르면 이 기록으로 돌아온다
+                        const choose = () => setFocus(isHere || selected ? null : layer.id);
                         return (
                             <g
                                 key={layer.id}
@@ -145,10 +149,15 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                                     } as CSSProperties
                                 }
                                 tabIndex={0}
-                                aria-label={`${index + 1} ${layer.label}${state ? `, ${state}` : ''}`}
-                                onMouseEnter={() => setFocus(layer.id)}
-                                onFocus={() => setFocus(layer.id)}
-                                onBlur={() => setFocus(null)}
+                                role="button"
+                                aria-pressed={selected}
+                                aria-label={`${index + 1} ${layer.label} (${layer.en})${state ? `, ${state}` : ''}`}
+                                onClick={choose}
+                                onKeyDown={(event) => {
+                                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                                    event.preventDefault(); // Space로 본문이 스크롤되지 않게
+                                    choose();
+                                }}
                             >
                                 <path className="audit-cycle-shape" d={segmentPath(index)} />
                                 <text className="audit-cycle-no" x={label.x} y={label.y - 7} textAnchor="middle">
@@ -160,16 +169,11 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                             </g>
                         );
                     })}
-                    {/* 가운데: 이 기록의 층 */}
+                    {/* 가운데: 이 기록의 계층 이름 */}
                     {here ? (
-                        <g className="audit-cycle-center" aria-hidden="true">
-                            <text x={C} y={C - 8} textAnchor="middle" className="audit-cycle-kicker">
-                                이 기록
-                            </text>
-                            <text x={C} y={C + 17} textAnchor="middle" className="audit-cycle-name">
-                                {here.label}
-                            </text>
-                        </g>
+                        <text x={C} y={C + 8} textAnchor="middle" className="audit-cycle-name" aria-hidden="true">
+                            {here.label}
+                        </text>
                     ) : null}
                 </svg>
 
@@ -181,18 +185,15 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                                 {shownIndex + 1}
                             </span>
                             <strong>{shown.label}</strong>
-                            {showingHere ? (
-                                <span className="audit-cycle-tag">이 기록</span>
-                            ) : marks[shown.id] ? (
-                                <span className="audit-cycle-tag is-marked">흔적</span>
-                            ) : null}
+                            <span className="audit-cycle-en">{shown.en}</span>
+                            {!showingHere && marks[shown.id] ? <span className="audit-cycle-tag is-marked">흔적</span> : null}
                         </div>
                         <p className="audit-cycle-panel-text">{showingHere ? hereText(record) : shown.description}</p>
                         {marks[shown.id] ? <p className="audit-cycle-panel-mark">{marks[shown.id]}</p> : null}
                         {showingHere ? (
                             otherMarks.length ? (
                                 <div className="audit-cycle-traces">
-                                    <span className="audit-cycle-traces-title">다른 층에 남긴 흔적</span>
+                                    <span className="audit-cycle-traces-title">다른 계층에 남긴 흔적</span>
                                     <ul>
                                         {otherMarks.map((layer) => (
                                             <li key={layer.id}>
@@ -208,9 +209,6 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                         ) : (
                             <p className="audit-cycle-panel-note">{RECORDED_TEXT[shown.recorded]}</p>
                         )}
-                        <p className="audit-cycle-hint">
-                            {focus ? '마우스를 떼거나 다른 곳을 누르면 이 기록으로 돌아갑니다' : '층을 짚으면 그 층의 설명이 나옵니다 · 1 효과부터 역추적에서 따져 보는 차례'}
-                        </p>
                     </div>
                 ) : null}
             </div>

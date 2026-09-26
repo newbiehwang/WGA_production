@@ -51,16 +51,17 @@ export const locusOf = (value?: string) => LOCI.find((locus) => locus.value === 
 export const LAYERS: {
     id: TraceLayer;
     label: string;
+    en: string; // 영어 이름 (설명 칸의 제목 옆에 회색으로)
     description: string;
     recorded: 'row' | 'flag' | 'none' | 'outside';
 }[] = [
-    { id: 'effect', label: '효과', description: '승인·거절·실행·실패. AWS가 실제로 바뀌었는가', recorded: 'row' },
-    { id: 'egress', label: '유출', description: '변경 도구를 부르려 함. 실행하지 않고 승인을 요청한다', recorded: 'row' },
-    { id: 'residence', label: '체류', description: '의심 문구가 든 결과를 읽은 뒤 같은 질문에서 변경을 요청함', recorded: 'flag' },
-    { id: 'deliberation', label: '판단', description: '모델이 무엇을 할지 정함. 모델 안이라 기록할 수 없다', recorded: 'none' },
-    { id: 'ingress', label: '유입', description: '조회·결과물 도구의 결과가 모델에게 들어옴', recorded: 'row' },
-    { id: 'interface', label: '경계', description: '위험도 등록부에 없는 도구를 부름. 변경 도구로 다룬다', recorded: 'row' },
-    { id: 'mediation', label: '매개', description: 'AWS 쪽 기록(CloudTrail)과 맞는가. 앱 밖이라 대조할 요청 ID만 남긴다', recorded: 'outside' },
+    { id: 'effect', label: '효과', en: 'Effect', description: '승인·거절·실행·실패. AWS가 실제로 바뀌었는가', recorded: 'row' },
+    { id: 'egress', label: '유출', en: 'Egress', description: '변경 도구를 부르려 함. 실행하지 않고 승인을 요청한다', recorded: 'row' },
+    { id: 'residence', label: '체류', en: 'Residence', description: '의심 문구가 든 결과를 읽은 뒤 같은 질문에서 변경을 요청함', recorded: 'flag' },
+    { id: 'deliberation', label: '판단', en: 'Deliberation', description: '모델이 무엇을 할지 정함. 모델 안이라 기록할 수 없다', recorded: 'none' },
+    { id: 'ingress', label: '유입', en: 'Ingress', description: '조회·결과물 도구의 결과가 모델에게 들어옴', recorded: 'row' },
+    { id: 'interface', label: '경계', en: 'Interface', description: '위험도 등록부에 없는 도구를 부름. 변경 도구로 다룬다', recorded: 'row' },
+    { id: 'mediation', label: '매개', en: 'Mediation', description: 'AWS 쪽 기록(CloudTrail)과 맞는가. 앱 밖이라 대조할 요청 ID만 남긴다', recorded: 'outside' },
 ];
 export const layerLabel = (id: TraceLayer) => LAYERS.find((layer) => layer.id === id)?.label ?? id;
 
