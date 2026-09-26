@@ -540,6 +540,11 @@
   margin-bottom: 10px;
 }
 
+/* 로딩 상자 안의 스피너는 글자와 같은 가운데에 둔다 (블록이라 그대로 두면 왼쪽에 붙는다) */
+.plan-panel-loading .plan-inline-spinner {
+  margin: 0 auto 10px;
+}
+
 .plan-panel-error-title {
   margin: 0;
   font-family: var(--font-label);
