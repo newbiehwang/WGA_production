@@ -105,6 +105,19 @@ const LABELS: Record<string, string> = {
 const toSnake = (name: string) => name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 export const labelOf = (name: string) => LABELS[name] ?? LABELS[toSnake(name)] ?? name;
 
+// 도구가 하는 일의 종류 (답을 기다리는 동안의 한 줄에 쓴다. 도구 이름 대신 '도구 사용 중', '계산 중'처럼 보인다)
+//   search 도구 찾기 · lookup 조회(로그·지표·리소스·문서·CloudTrail) · cost 비용·가격 · draw 차트·다이어그램 · change 변경(승인 요청)
+export type ToolActivity = 'search' | 'lookup' | 'cost' | 'draw' | 'change';
+const COST_TOOLS = new Set(['cost-explorer', 'find_ec2_waste']);
+export function activityOf(name: string): ToolActivity {
+    const snake = toSnake(name);
+    if (name === 'tool_search') return 'search';
+    if (/^(set|enable)_/.test(snake)) return 'change'; // 변경 도구 (mcp/lambda_mcp/risk.py의 write)
+    if (/^generate_/.test(snake) || snake.includes('diagram')) return 'draw';
+    if (COST_TOOLS.has(name) || COST_TOOLS.has(snake) || snake.includes('pricing')) return 'cost';
+    return 'lookup'; // 모르는 도구도 조회로 본다 (보이는 글자만 정한다)
+}
+
 const MAX_VALUE = 40; // 값 하나의 최대 길이
 const MAX_DETAIL = 100; // 한 줄 전체의 최대 길이
 
