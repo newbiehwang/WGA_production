@@ -93,6 +93,11 @@ def trail_of(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return trail if isinstance(trail, dict) and trail.get("request_id") else None
 
 
+def _text_or_none(value: Any) -> Optional[str]:
+    """미리 보기의 글 값 (빈 값은 저장하지 않는다)."""
+    return str(value) if value not in (None, "") else None
+
+
 def public_view(item: Dict[str, Any]) -> Dict[str, Any]:
     """화면에 보여 줄 승인 요청 (답변의 pendingActions, GET /actions/{id})."""
     status = item.get("status")
@@ -110,7 +115,7 @@ def public_view(item: Dict[str, Any]) -> Dict[str, Any]:
         "createdAt": int(item.get("createdAt", 0)),
         "expiresAt": int(item.get("expiresAt", 0)),
     }
-    for key in ("decidedBy", "decidedAt", "result"):
+    for key in ("target", "warning", "decidedBy", "decidedAt", "result"):
         if item.get(key) is not None:
             view[key] = int(item[key]) if key == "decidedAt" else item[key]
     if item.get("taintedBy"):
@@ -143,6 +148,9 @@ class ApprovalStore:
             "args": json.dumps(args, ensure_ascii=False),
             "argsHash": args_hash(tool, args),
             "summary": str(preview.get("summary") or tool),
+            # 카드의 '대상' 칩과 영향 줄 (mcp/app.py의 _preview). 없으면 카드는 summary를 그대로 보인다
+            "target": _text_or_none(preview.get("target")),
+            "warning": _text_or_none(preview.get("warning")),
             "before": preview.get("before"),
             "after": preview.get("after"),
             "status": PENDING,

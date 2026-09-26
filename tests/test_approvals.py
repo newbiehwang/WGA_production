@@ -223,7 +223,13 @@ def test_preview_shows_the_change_without_running_it(env):
                                    meta={"wga/preview": True})
     data = json.loads(preview["content"][0]["text"])
     assert data["before"] == "30일" and data["after"] == "7일" and "지워질 수 있습니다" in data["summary"]
+    # 카드에 따로 보일 대상과 영향 (요약에는 영향을 괄호로 붙인다)
+    assert data["target"] == LOG_GROUP and data["warning"] == "지난 로그 일부가 지워질 수 있습니다"
+    assert data["summary"].endswith("(지난 로그 일부가 지워질 수 있습니다)")
     assert retention() == 30
+    longer = env["mcp"].call_tool("setLogRetention", {"log_group_name": LOG_GROUP, "retention_days": 60},
+                                  meta={"wga/preview": True})
+    assert "warning" not in json.loads(longer["content"][0]["text"])  # 늘리면 지워지는 로그가 없다
 
     alarm = env["mcp"].call_tool("setAlarmActions", {"alarm_name": ALARM, "enabled": False},
                                  meta={"wga/preview": True})
@@ -308,6 +314,9 @@ def test_model_calling_a_write_tool_creates_an_approval_request(env, monkeypatch
     assert stored["status"] == "pending" and stored["requesterId"] == "alice"
     assert json.loads(stored["args"]) == {"log_group_name": LOG_GROUP, "retention_days": 14}
     assert "30일 → 14일" in stored["summary"] and stored["expiresAt"] - stored["createdAt"] == 600
+    assert stored["target"] == LOG_GROUP and stored["warning"] == "지난 로그 일부가 지워질 수 있습니다"
+    view = env["approvals"].public_view(stored)
+    assert view["target"] == LOG_GROUP and view["warning"] == stored["warning"]
     assert client.approvals.created[0]["actionId"] == content["actionId"]
     assert audit_events("alice") == ["requested"]
 

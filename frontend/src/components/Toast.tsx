@@ -16,6 +16,7 @@
 // 입력 칸 옆의 확인 문구(기간 직접 입력, 초대 이메일, 로그인)와 내용 자리의 불러오기 실패 안내는 그 자리에 둔다 (알림이 아니다)
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
+import { DrawnMark } from './DrawnMark';
 
 export type ToastTone = 'success' | 'error';
 export interface ToastMessage {
@@ -99,15 +100,7 @@ function Toast({ toast, onDone }: { toast: ToastMessage | null; onDone: () => vo
             onMouseLeave={() => setHovered(false)}
         >
             {/* 기다림 카드의 원(28px, 테두리 3px)과 같은 자리·크기. 원이 한 바퀴 그려진 뒤 체크(또는 !)가 그려진다 */}
-            <svg className="panel-toast-icon" viewBox="0 0 28 28" width="28" height="28" aria-hidden="true">
-                <circle className="panel-toast-ring" cx="14" cy="14" r="12.5" />
-                <circle className="panel-toast-arc" cx="14" cy="14" r="12.5" pathLength={100} />
-                {toast.tone === 'error' ? (
-                    <path className="panel-toast-mark" d="M14 8.2v7.2M14 19.6v.1" pathLength={100} />
-                ) : (
-                    <path className="panel-toast-mark" d="M8.6 14.4l3.6 3.6 7.2-7.6" pathLength={100} />
-                )}
-            </svg>
+            <DrawnMark kind={toast.tone === 'error' ? 'alert' : 'check'} />
             <p className="panel-toast-text">{toast.text}</p>
         </div>
     );

@@ -1062,48 +1062,6 @@
   animation: panel-toast-out 180ms ease both;
 }
 
-/* 원: 옅은 고리 위에 진한 호가 한 바퀴 그려지고(기다림 카드의 도는 원과 같은 색·굵기), 이어서 체크나 !가 그려진다 */
-.panel-toast-icon {
-  display: block;
-  overflow: visible;
-}
-
-.panel-toast-ring,
-.panel-toast-arc,
-.panel-toast-mark {
-  fill: none;
-  stroke-width: 3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.panel-toast-ring {
-  stroke: rgba(0, 123, 255, 0.22);
-}
-
-.panel-toast-arc {
-  stroke: var(--color-primary);
-  stroke-dasharray: 100;
-  transform: rotate(-90deg);
-  transform-origin: 14px 14px;
-  animation: panel-toast-draw 420ms cubic-bezier(0.4, 0, 0.2, 1) 80ms both;
-}
-
-.panel-toast-mark {
-  stroke: var(--color-primary);
-  stroke-dasharray: 100;
-  animation: panel-toast-draw 260ms ease-out 440ms both;
-}
-
-.panel-toast.is-error .panel-toast-ring {
-  stroke: rgba(208, 59, 59, 0.22);
-}
-
-.panel-toast.is-error .panel-toast-arc,
-.panel-toast.is-error .panel-toast-mark {
-  stroke: #d03b3b;
-}
-
 .panel-toast-text {
   margin: 0;
   max-width: 100%;
@@ -1131,16 +1089,81 @@
   to { opacity: 0; transform: translate(-50%, -6px); }
 }
 
-@keyframes panel-toast-draw {
+@media (prefers-reduced-motion: reduce) {
+  .panel-toast,
+  .panel-toast.is-leaving {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------- 그려지는 원 표시 (components/DrawnMark.tsx: 알림, 끝난 승인 카드)
+   옅은 고리 위에 진한 호가 한 바퀴 그려지고(기다림 카드의 도는 원과 같은 색·굵기), 이어서 안쪽 표시가 그려진다.
+   색은 --mark(진한 호·표시)와 --mark-soft(옅은 고리)로 정한다: 체크·진행 파랑, ! 빨강, ✕·– 회색 */
+.drawn-mark {
+  --mark: var(--color-primary);
+  --mark-soft: rgba(0, 123, 255, 0.22);
+  display: block;
+  flex: none;
+  overflow: visible;
+}
+
+.drawn-mark.is-alert {
+  --mark: #d03b3b;
+  --mark-soft: rgba(208, 59, 59, 0.22);
+}
+
+.drawn-mark.is-cross,
+.drawn-mark.is-dash {
+  --mark: #7b8591;
+  --mark-soft: rgba(123, 133, 145, 0.22);
+}
+
+.drawn-mark-ring,
+.drawn-mark-arc,
+.drawn-mark-sign {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.drawn-mark-ring {
+  stroke: var(--mark-soft);
+}
+
+.drawn-mark-arc {
+  stroke: var(--mark);
+  stroke-dasharray: 100;
+  transform: rotate(-90deg);
+  transform-origin: 14px 14px;
+  animation: drawn-mark-draw 420ms cubic-bezier(0.4, 0, 0.2, 1) 80ms both;
+}
+
+.drawn-mark-sign {
+  stroke: var(--mark);
+  stroke-dasharray: 100;
+  animation: drawn-mark-draw 260ms ease-out 440ms both;
+}
+
+/* 진행 중: 기다림 카드처럼 호 한 토막이 계속 돈다 */
+.drawn-mark.is-busy .drawn-mark-arc {
+  stroke-dasharray: 26 74;
+  animation: drawn-mark-spin 0.85s linear infinite;
+}
+
+@keyframes drawn-mark-draw {
   from { stroke-dashoffset: 100; }
   to { stroke-dashoffset: 0; }
 }
 
+@keyframes drawn-mark-spin {
+  from { transform: rotate(-90deg); }
+  to { transform: rotate(270deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .panel-toast,
-  .panel-toast.is-leaving,
-  .panel-toast-arc,
-  .panel-toast-mark {
+  .drawn-mark-arc,
+  .drawn-mark-sign {
     animation: none;
   }
 }
