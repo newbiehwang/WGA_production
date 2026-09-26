@@ -1,21 +1,33 @@
 // 사용자 관리 화면 (관리자만): 권한(일반 사용자 · 결정자 · 관리자)을 정하고, 계정을 정지하거나 초대한다
 // (services/llm/user_admin.py).
-//   머리: 제목 · 새로 고침(아이콘)
-//   도구 줄: 이메일 검색 · 초대(이메일 → 임시 비밀번호 메일, 일반 사용자로 시작)
+//   머리: 제목 · 초대(+, 팝업창 InviteModal) · 새로 고침(아이콘)
+//   검색창(SearchBox, 감사 로그와 같다): 이메일·이름으로 찾기 ('/'로 이동, 띄어 쓰면 모두 들어 있는 사용자)
+//   필터(UsersFilter, 감사 로그의 필터와 같은 모양): 권한 · 계정(사용 중·정지) · 가입(초대됨·가입 완료), 걸린 조건은 칩 · 건수
 //   목록: 이메일(나 · 이름 · 초대됨) · 권한 · 가입일 · 계정(정지/정지 해제). 정지된 계정은 흐리게
+//
+// - 사용자를 모두 받아(서버는 50명씩, MAX_PAGES쪽까지) 검색·거르기·건수는 브라우저에서 계산한다 (감사 로그와 같다).
+//   서버의 이메일 앞부분 검색(q)은 쓰지 않는다: 이름·중간 글자로도 찾고, 거르기 건수를 세려면 전체가 필요하다
 //
 // - 관리자를 아래 권한으로 내리기와 정지는 한 번 더 눌러야 한다 (되돌릴 수 있지만 그 사람의 일이 바로 막힌다)
 // - 자기 권한 바꾸기·자기 정지는 버튼을 끄고, 서버도 막는다. 마지막 관리자도 서버가 막는다
 // - 바꾼 내용은 감사 로그의 '사용자 관리'에 남는다
 // - 권한을 바꿔도 그 사람의 화면·권한은 다시 로그인하거나 토큰이 갱신된 뒤(최대 1시간) 바뀐다
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { inviteUser, listUsers, setEnabled, setRole, userErrorText } from '@/api/users';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { listUsers, setEnabled, setRole, userErrorText } from '@/api/users';
 import { ROLE_LABELS } from '@/auth/authClient';
 import { LoadingCard, useMinimumVisible } from '@/components/LoadingCard';
 import { RefreshButton } from '@/components/RefreshButton';
+import { SearchBox } from '@/components/SearchBox';
+import { Toast, useToast } from '@/components/Toast';
+import { ResetButton } from '@/features/audit/FilterMenu';
 import type { ManagedUser, UserRole } from '@/types/users';
 import { formatKoreanDateTime } from '@/utils/formatters';
+import { InviteModal } from './InviteModal';
+import { UsersFilter, matchesSearch, matchesSelection, selectedCount, type UserSelection } from './UsersFilter';
+import '../audit/audit.css'; // 필터·칩·건수는 감사 로그의 모양을 쓴다
 import './users.css';
+
+const MAX_PAGES = 20; // 50명씩 20쪽 = 1,000명까지 받는다 (더 있으면 알린다)
 
 const ROLES: UserRole[] = ['member', 'decider', 'admin'];
 
@@ -101,128 +113,135 @@ function RoleSelect({ user, busy, onChange }: { user: ManagedUser; busy: boolean
 }
 
 export function UsersPage() {
-    const [query, setQuery] = useState('');
-    const [search, setSearch] = useState(''); // 입력을 멈춘 뒤의 검색어
+    const [query, setQuery] = useState(''); // 검색어 (SearchBox가 입력을 멈춘 뒤 알린다)
+    const [selection, setSelection] = useState<UserSelection>({});
+    const [resetNo, setResetNo] = useState(0); // 필터 초기화: 거르기 목록을 새로 그린다
     const [users, setUsers] = useState<ManagedUser[]>([]);
-    const [cursor, setCursor] = useState<string | null>(null);
-    const [loading, setLoading] = useState<'list' | 'more' | null>('list');
-    const listLoading = useMinimumVisible(loading === 'list'); // 목록 자리의 기다림 카드 (최소 1초)
-    const [error, setError] = useState<string | null>(null);
-    const [notice, setNotice] = useState<string | null>(null);
+    const [truncated, setTruncated] = useState(false); // MAX_PAGES쪽을 넘어 다 받지 못했다
+    const [loading, setLoading] = useState(true);
+    const listLoading = useMinimumVisible(loading); // 목록 자리의 기다림 카드 (최소 1초)
+    const [error, setError] = useState<string | null>(null); // 목록을 받지 못했을 때 (목록 자리에 남긴다)
+    // 바꾼 결과는 패널 위쪽 가운데의 알림으로 (성공·실패 모두, components/Toast)
+    const { toast, show: showToast, clear: clearToast } = useToast();
     const [busy, setBusy] = useState<string | null>(null); // 바꾸는 중인 사용자
-    const [inviteEmail, setInviteEmail] = useState('');
-    const [inviting, setInviting] = useState(false);
+    const [inviteOpen, setInviteOpen] = useState(false);
     const requestNo = useRef(0); // 마지막 조회의 응답만 쓴다
 
-    const load = useCallback(
-        async (next?: string | null) => {
-            const no = ++requestNo.current;
-            setLoading(next ? 'more' : 'list');
-            setError(null);
-            try {
-                const page = await listUsers(search, next);
+    // 모든 쪽을 차례로 받는다
+    const load = useCallback(async () => {
+        const no = ++requestNo.current;
+        setLoading(true);
+        setError(null);
+        try {
+            const all: ManagedUser[] = [];
+            let cursor: string | null | undefined;
+            for (let page = 0; page < MAX_PAGES; page += 1) {
+                const result = await listUsers('', cursor);
                 if (no !== requestNo.current) return;
-                setUsers((prev) => (next ? [...prev, ...page.users] : page.users));
-                setCursor(page.cursor ?? null);
-            } catch (err) {
-                if (no !== requestNo.current) return;
-                setError(userErrorText(err));
-                if (!next) setUsers([]);
-            } finally {
-                if (no === requestNo.current) setLoading(null);
+                all.push(...result.users);
+                cursor = result.cursor;
+                if (!cursor) break;
             }
-        },
-        [search],
-    );
+            setUsers(all);
+            setTruncated(Boolean(cursor));
+        } catch (err) {
+            if (no !== requestNo.current) return;
+            setError(userErrorText(err));
+            setUsers([]);
+        } finally {
+            if (no === requestNo.current) setLoading(false);
+        }
+    }, []);
 
     useEffect(() => {
         load();
     }, [load]);
 
-    // 입력을 0.3초 멈추면 검색한다
-    useEffect(() => {
-        const timer = window.setTimeout(() => setSearch(query.trim()), 300);
-        return () => window.clearTimeout(timer);
-    }, [query]);
+    // 거르는 순서: 검색어 → 거르기. 필터 창의 건수는 검색어까지 적용한 사용자에서 센다 (감사 로그와 같다)
+    const searched = useMemo(() => users.filter((user) => matchesSearch(user, query)), [users, query]);
+    const filtered = useMemo(() => searched.filter((user) => matchesSelection(user, selection)), [searched, selection]);
+    const conditions = Boolean(query.trim()) || selectedCount(selection) > 0;
+    const resetFilters = () => {
+        setQuery('');
+        setSelection({});
+        setResetNo((prev) => prev + 1);
+    };
 
     const change = async (user: ManagedUser, action: () => Promise<ManagedUser>, done: string) => {
         setBusy(user.username);
-        setError(null);
-        setNotice(null);
         try {
             const updated = await action();
             setUsers((prev) => prev.map((item) => (item.username === updated.username ? updated : item)));
-            setNotice(`${updated.email ?? updated.username}: ${done}`);
+            showToast('success', `${updated.email ?? updated.username}: ${done}`);
         } catch (err) {
-            setError(userErrorText(err));
+            showToast('error', userErrorText(err));
         } finally {
             setBusy(null);
         }
     };
 
-    const invite = async (event: FormEvent) => {
-        event.preventDefault();
-        const email = inviteEmail.trim();
-        if (!email) return;
-        setInviting(true);
-        setError(null);
-        setNotice(null);
-        try {
-            const created = await inviteUser(email);
-            setUsers((prev) => [created, ...prev.filter((item) => item.username !== created.username)]);
-            setInviteEmail('');
-            setNotice(`${email}에 초대 메일을 보냈습니다 (임시 비밀번호, 7일 동안 유효)`);
-        } catch (err) {
-            setError(userErrorText(err));
-        } finally {
-            setInviting(false);
-        }
+    // 초대 팝업창에서 초대했으면 목록 맨 위에 넣는다
+    const invited = (created: ManagedUser) => {
+        setUsers((prev) => [created, ...prev.filter((item) => item.username !== created.username)]);
+        showToast('success', `${created.email ?? created.username}에 초대 메일을 보냈습니다.`);
     };
 
     return (
         <section className="plan-panel users-panel" aria-label="사용자 관리">
             <div className="plan-panel-header">
                 <h1 className="plan-panel-eyebrow">사용자 관리</h1>
-                <RefreshButton onClick={() => load()} loading={loading !== null || listLoading} />
+                <div className="users-header-actions">
+                    {/* 초대: 팝업창에서 이메일을 넣는다 */}
+                    <button
+                        type="button"
+                        className="icon-button users-invite-button"
+                        onClick={() => setInviteOpen(true)}
+                        aria-label="사용자 초대"
+                        title="사용자 초대"
+                    >
+                        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                            <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        </svg>
+                    </button>
+                    <RefreshButton onClick={() => load()} loading={loading || listLoading} />
+                </div>
             </div>
 
-            <div className="users-toolbar">
-                <label className="users-search">
-                    <span className="audit-filter-label">검색</span>
-                    <input
-                        type="search"
-                        className="users-input"
-                        placeholder="이메일 앞부분"
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                        aria-label="이메일로 검색"
-                    />
-                </label>
-                <form className="users-invite" onSubmit={invite}>
-                    <input
-                        type="email"
-                        className="users-input"
-                        placeholder="초대할 이메일"
-                        value={inviteEmail}
-                        onChange={(event) => setInviteEmail(event.target.value)}
-                        aria-label="초대할 이메일"
-                        required
-                    />
-                    <button type="submit" className="plan-create-button" disabled={inviting || !inviteEmail.trim()}>
-                        {inviting ? '초대하는 중…' : '초대'}
-                    </button>
-                </form>
+            <SearchBox
+                value={query}
+                onChange={setQuery}
+                placeholder="이메일·이름으로 찾기"
+                label="사용자 검색. 띄어 쓰면 모두 들어 있는 사용자"
+                title="띄어 쓰면 모두 들어 있는 사용자만 (이메일·이름)"
+            />
+            <div className="audit-toolbar">
+                <UsersFilter
+                    users={searched}
+                    selection={selection}
+                    onChange={setSelection}
+                    onReset={resetFilters}
+                    canReset={conditions}
+                    resetNo={resetNo}
+                />
+                <p className="audit-count" role="status">
+                    {listLoading ? null : (
+                        <>
+                            <strong>{filtered.length.toLocaleString()}명</strong>
+                            {conditions ? <span className="audit-muted"> / {users.length.toLocaleString()}명</span> : null}
+                            {truncated ? (
+                                <span className="audit-truncated">
+                                    {(MAX_PAGES * 50).toLocaleString()}명까지만 불러왔습니다
+                                </span>
+                            ) : null}
+                        </>
+                    )}
+                </p>
             </div>
 
             {error ? (
                 <div className="plan-panel-error-inline" role="alert">
                     <p>{error}</p>
                 </div>
-            ) : null}
-            {notice ? (
-                <p className="users-notice" role="status">
-                    {notice}
-                </p>
             ) : null}
 
             <div className="plan-panel-body">
@@ -235,15 +254,22 @@ export function UsersPage() {
                     </div>
 
                     {/* 불러오는 동안 목록은 비워 두고, 카드는 흰 박스 전체의 가운데에 띄운다 (아래 plan-panel-loading) */}
-                    {listLoading ? null : users.length === 0 ? (
+                    {listLoading ? null : filtered.length === 0 ? (
                         error ? null : (
                             <div className="plan-panel-empty">
-                                <p>{search ? '이 검색어로 시작하는 이메일이 없습니다.' : '사용자가 없습니다.'}</p>
+                                {users.length ? (
+                                    <>
+                                        <p>조건에 맞는 사용자가 없습니다.</p>
+                                        <ResetButton onClick={resetFilters} disabled={false} title="검색어와 거르기를 모두 지웁니다" />
+                                    </>
+                                ) : (
+                                    <p>사용자가 없습니다.</p>
+                                )}
                             </div>
                         )
                     ) : (
                         <ul className="plan-table-body users-table-body" aria-label="사용자 목록">
-                            {users.map((user) => {
+                            {filtered.map((user) => {
                                 const rowBusy = busy === user.username;
                                 return (
                                     <li
@@ -268,7 +294,7 @@ export function UsersPage() {
                                                         change(
                                                             user,
                                                             () => setRole(user.username, role),
-                                                            `권한을 ${ROLE_LABELS[role]}로 바꿨습니다`,
+                                                            `권한을 ${ROLE_LABELS[role]}로 바꿨습니다.`,
                                                         )
                                                     }
                                                 />
@@ -285,7 +311,7 @@ export function UsersPage() {
                                                         disabled={rowBusy || user.isSelf}
                                                         title={user.isSelf ? '자기 계정은 정지할 수 없습니다' : '로그인과 갱신을 막습니다'}
                                                         onConfirm={() =>
-                                                            change(user, () => setEnabled(user.username, false), '정지했습니다')
+                                                            change(user, () => setEnabled(user.username, false), '정지했습니다.')
                                                         }
                                                     />
                                                 ) : (
@@ -294,7 +320,7 @@ export function UsersPage() {
                                                         className="users-account-button"
                                                         disabled={rowBusy}
                                                         onClick={() =>
-                                                            change(user, () => setEnabled(user.username, true), '정지를 풀었습니다')
+                                                            change(user, () => setEnabled(user.username, true), '정지를 풀었습니다.')
                                                         }
                                                     >
                                                         정지 해제
@@ -308,18 +334,6 @@ export function UsersPage() {
                         </ul>
                     )}
                 </div>
-                {cursor && !listLoading ? (
-                    <div className="audit-more">
-                        <button
-                            type="button"
-                            className="plan-reload-button"
-                            onClick={() => load(cursor)}
-                            disabled={loading !== null}
-                        >
-                            {loading === 'more' ? '불러오는 중…' : '더 보기'}
-                        </button>
-                    </div>
-                ) : null}
             </div>
 
             {listLoading ? (
@@ -327,6 +341,10 @@ export function UsersPage() {
                     <LoadingCard text="사용자를 불러오는 중…" />
                 </div>
             ) : null}
+
+            <Toast toast={toast} onDone={clearToast} />
+
+            {inviteOpen ? <InviteModal onInvited={invited} onClose={() => setInviteOpen(false)} /> : null}
         </section>
     );
 }

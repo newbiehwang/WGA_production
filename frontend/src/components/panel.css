@@ -1024,3 +1024,133 @@
   color: #fff;
   box-shadow: 0 8px 14px rgba(0, 123, 255, 0.2);
 }
+
+/* ---------------------------------------------------------------- 검색창 (components/SearchBox.tsx: 감사 로그·사용자 관리) */
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  margin-bottom: 10px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: #fff;
+  color: #8a94a0;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.search-box:focus-within {
+  border-color: rgba(0, 123, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+.search-box input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: #1f2933;
+}
+
+.search-box kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  background: #f5f8fc;
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: #6c757d;
+}
+
+/* ---------------------------------------------------------------- 상태 변경 알림 (components/Toast.tsx)
+   흰 패널(plan-panel, position: relative)의 위쪽 가운데에 작은 상자로 뜬다 */
+.panel-toast {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(520px, calc(100% - 32px));
+  padding: 8px 8px 8px 12px;
+  border: 1px solid #e3e9f1;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+  font-size: 13px;
+  color: #1f2933;
+  transform: translateX(-50%);
+  animation: panel-toast-in 220ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+.panel-toast.is-leaving {
+  animation: panel-toast-out 180ms ease both;
+}
+
+.panel-toast-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  color: #fff;
+}
+
+.panel-toast.is-success .panel-toast-icon {
+  background: var(--color-primary);
+}
+
+.panel-toast.is-error .panel-toast-icon {
+  background: #d03b3b;
+}
+
+.panel-toast-text {
+  min-width: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.panel-toast-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #9aa4ae;
+  cursor: pointer;
+}
+
+.panel-toast-close:hover {
+  background: #f1f4f8;
+  color: #5f6670;
+}
+
+@keyframes panel-toast-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@keyframes panel-toast-out {
+  from { opacity: 1; transform: translate(-50%, 0); }
+  to { opacity: 0; transform: translate(-50%, -6px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-toast,
+  .panel-toast.is-leaving {
+    animation: none;
+  }
+}
