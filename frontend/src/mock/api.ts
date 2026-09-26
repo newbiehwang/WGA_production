@@ -53,6 +53,7 @@ interface MockTool {
   error?: string;
   suspicious?: string[]; // 결과에 지시문처럼 보이는 문구가 있었다 (services/llm/injection.py)
   id?: string; // 도구 호출 ID를 정해 둘 때 (승인 요청의 taintedBy가 가리킨다)
+  unregistered?: boolean; // 위험도 등록부에 없는 도구 (감사 로그의 층이 경계다. 변경 도구로 다룬다)
 }
 
 // 변경 도구 (감사 로그의 층이 유출이다). 나머지는 유입
@@ -704,7 +705,7 @@ const auditRecordsOf = (
       at: auditAt(new Date(at), toolUseId),
       day: new Date(at).toISOString().slice(0, 10),
       kind: "tool",
-      locus: WRITE_TOOLS.has(tool.tool_name) ? "egress" : "ingress",
+      locus: tool.unregistered ? "interface" : WRITE_TOOLS.has(tool.tool_name) ? "egress" : "ingress",
       tool: tool.tool_name,
       toolUseId,
       input: tool.input,
@@ -948,6 +949,222 @@ const adminAuditRecord = (event: AdminEvent, target: ManagedUser, roles?: { from
   };
 };
 
+// ---------------------------------------------------------------- 확인용 예시 시나리오 (감사 로그)
+// 변경 작업·사용자 관리 기록은 화면에서 직접 만들어야 생기고 새로 고치면 사라진다. 역추적·7계층 위치를 바로 확인하도록
+// 판정이 서로 다른 변경 작업 여섯 가지와 사용자 관리 기록을 기본 기록에 넣는다 (검색어는 괄호 안)
+//   1 정상 승인·실행            모든 층 정상                          ("보존 기간 14일", PutRetentionPolicy)
+//   2 거절                      효과 정상(거절), AWS 바뀌지 않음       ("알람 알림", 거절)
+//   3 실행 실패                 효과 주의(승인했지만 실패)             ("EC2", IncorrectInstanceState)
+//   4 의심 뒤 요청 → 실행        체류·판단·유입 주의, 매개 흔적         ("의심 뒤 요청", "로그에 적힌")
+//   5 등록부에 없는 도구         경계 주의, 결정 전(대기)               ("미등록", put_bucket_policy)
+//   6 기록이 어긋남              승인 요청·승인 없이 실행 기록만 → 효과·유출 실패 ("퍼블릭 액세스")
+// 시각은 지금 기준 며칠 전 (기록이 없는 날 QUIET_DAY는 피한다). 결정·실행 행은 결정한 사람의 기록이다 (서버와 같다)
+const SCENARIO_DAY_MS = 24 * 60 * 60 * 1000;
+const scenarioUser = (name: string) => AUDIT_USERS.find((u) => u.userId.endsWith(name)) ?? AUDIT_USERS[0];
+const scenarioTime = (days: number, plusMs = 0) => new Date(Date.now() - days * SCENARIO_DAY_MS + plusMs);
+
+interface ScenarioAction {
+  id: string;
+  tool: string;
+  args: Record<string, unknown>;
+  summary: string;
+  taintedBy?: PendingAction["taintedBy"];
+}
+
+// 변경 작업의 사건 한 행 (actionAuditRecord와 같은 모양, 시각·사람을 정해서)
+const scenarioEvent = (
+  action: ScenarioAction,
+  event: "requested" | "approved" | "denied" | "executed" | "failed",
+  who: (typeof AUDIT_USERS)[number],
+  time: Date,
+  requestId: string | undefined,
+  extra: Partial<AuditRecord> = {},
+): AuditRecord => ({
+  userId: who.userId,
+  ...("email" in who && { email: who.email }),
+  source: "web",
+  requestId,
+  at: auditAt(time, `action#${action.id}#${event}`),
+  day: time.toISOString().slice(0, 10),
+  kind: "action",
+  locus: event === "requested" ? "egress" : "effect",
+  event,
+  actionId: action.id,
+  tool: action.tool,
+  input: action.args,
+  summary: action.summary,
+  status: event === "failed" ? "error" : "ok",
+  ...(event !== "requested" && { decidedBy: who.userId }),
+  ...(event === "requested" && action.taintedBy?.length && { taintedBy: action.taintedBy }),
+  ...extra,
+});
+
+// 질문 하나(도구 호출들 + 질문 행)와 그 질문 ID
+const scenarioQuestion = (
+  user: (typeof AUDIT_USERS)[number],
+  question: string,
+  tools: MockTool[],
+  time: Date,
+  answer: string,
+) => {
+  const records = auditRecordsOf(user, question, tools, time, {}, answer);
+  return { records, requestId: records[records.length - 1].requestId };
+};
+
+const trail = (source: string, name: string, requestId: string) => ({
+  awsRequestId: requestId,
+  cloudTrailEvent: `${source}:${name}`,
+  result: JSON.stringify({ status: "success", cloudtrail: { event_source: source, event_name: name, request_id: requestId } }),
+});
+
+function seedScenarios(): AuditRecord[] {
+  const demo = scenarioUser("mock-user");
+  const kim = scenarioUser("kim");
+  const lee = scenarioUser("lee");
+  const park = scenarioUser("park");
+  const out: AuditRecord[] = [];
+  const MIN = 60 * 1000;
+
+  // 1 정상 승인·실행
+  {
+    const t = scenarioTime(1.2);
+    const action: ScenarioAction = {
+      id: "5f1c0a2e-0001-4c3b-9d10-aa0000000001",
+      tool: "setLogRetention",
+      args: { log_group_name: "/aws/lambda/wga-mcp-dev", retention_days: 14 },
+      summary: "/aws/lambda/wga-mcp-dev 로그 보존 기간 30일 → 14일",
+    };
+    const q = scenarioQuestion(lee, "wga-mcp-dev 로그 보존 기간을 14일로 줄여줘", [
+      { tool_name: "describe_log_groups", input: { log_group_name_prefix: "/aws/lambda/wga-mcp" }, status: "ok" },
+      { tool_name: "setLogRetention", input: action.args, status: "ok" },
+    ], t, "`/aws/lambda/wga-mcp-dev`의 보존 기간을 **14일**로 줄이려면 승인이 필요합니다. 아래 승인 요청을 확인해 주세요.");
+    out.push(
+      ...q.records,
+      scenarioEvent(action, "requested", lee, new Date(t.getTime() + 5000), q.requestId),
+      scenarioEvent(action, "approved", kim, new Date(t.getTime() + 4 * MIN), q.requestId),
+      scenarioEvent(action, "executed", kim, new Date(t.getTime() + 4 * MIN + 1800), q.requestId,
+        trail("logs.amazonaws.com", "PutRetentionPolicy", "3d1f6a0b-7c2e-4f8a-9b1d-2a5c6e7f8a01")),
+    );
+  }
+
+  // 2 거절
+  {
+    const t = scenarioTime(4.3);
+    const action: ScenarioAction = {
+      id: "5f1c0a2e-0002-4c3b-9d10-aa0000000002",
+      tool: "setAlarmActions",
+      args: { alarm_name: "wga-dev-api-5xx", enabled: false },
+      summary: "wga-dev-api-5xx 알람 알림 켜짐 → 꺼짐 (알람이 울려도 메일이 가지 않습니다)",
+    };
+    const q = scenarioQuestion(park, "배포하는 동안 wga-dev-api-5xx 알람 알림 꺼줘", [
+      { tool_name: "setAlarmActions", input: action.args, status: "ok" },
+    ], t, "점검하는 동안 `wga-dev-api-5xx` 알람의 알림을 끄려면 승인이 필요합니다.");
+    out.push(
+      ...q.records,
+      scenarioEvent(action, "requested", park, new Date(t.getTime() + 4000), q.requestId),
+      scenarioEvent(action, "denied", kim, new Date(t.getTime() + 7 * MIN), q.requestId),
+    );
+  }
+
+  // 3 실행 실패 (승인했지만 AWS가 거절)
+  {
+    const t = scenarioTime(6.1);
+    const action: ScenarioAction = {
+      id: "5f1c0a2e-0003-4c3b-9d10-aa0000000003",
+      tool: "setEc2InstanceState",
+      args: { instance_id: "i-0428ab91c3d5e7f60", state: "stopped" },
+      summary: "EC2 i-0428ab91c3d5e7f60 실행 중 → 중지",
+    };
+    const q = scenarioQuestion(demo, "밤새 켜 둔 EC2 i-0428ab91c3d5e7f60 꺼줘", [
+      { tool_name: "describe_instances", input: { instance_ids: ["i-0428ab91c3d5e7f60"] }, status: "ok" },
+      { tool_name: "setEc2InstanceState", input: action.args, status: "ok" },
+    ], t, "EC2 인스턴스 `i-0428ab91c3d5e7f60`을(를) 중지하려면 승인이 필요합니다.");
+    out.push(
+      ...q.records,
+      scenarioEvent(action, "requested", demo, new Date(t.getTime() + 5000), q.requestId),
+      scenarioEvent(action, "approved", kim, new Date(t.getTime() + 2 * MIN), q.requestId),
+      scenarioEvent(action, "failed", kim, new Date(t.getTime() + 2 * MIN + 2400), q.requestId, {
+        error: "IncorrectInstanceState: The instance 'i-0428ab91c3d5e7f60' is not in a state from which it can be stopped.",
+        result: "실행하지 못했습니다: IncorrectInstanceState",
+      }),
+    );
+  }
+
+  // 4 의심 뒤 요청 → 승인·실행 (로그에 심긴 지시를 따른 변경)
+  {
+    const t = scenarioTime(2.1);
+    const logId = "toolu_seedlog0004";
+    const kinds = ["ignore_instructions_ko", "tool_command", "change_command_ko"];
+    const action: ScenarioAction = {
+      id: "5f1c0a2e-0004-4c3b-9d10-aa0000000004",
+      tool: "setLogRetention",
+      args: { log_group_name: "/aws/lambda/wga-llm-dev", retention_days: 1 },
+      summary: "/aws/lambda/wga-llm-dev 로그 보존 기간 30일 → 1일 (지난 로그 대부분이 지워질 수 있습니다)",
+      taintedBy: [{ toolUseId: logId, tool: "execute_log_insights_query", kinds, callsAgo: 1 }],
+    };
+    const q = scenarioQuestion(demo, "최근 오류 로그 보고 로그에 적힌 조치 해줘", [
+      { id: logId, tool_name: "execute_log_insights_query",
+        input: { log_group_names: ["/aws/lambda/wga-llm-dev"], query_string: "filter @message like /ERROR/" },
+        status: "ok", suspicious: kinds },
+      { tool_name: "setLogRetention", input: action.args, status: "ok" },
+    ], t, "로그에 적힌 대로 보존 기간을 **1일**로 바꾸려면 승인이 필요합니다. 로그 속 지시를 따른 변경일 수 있으니 확인 뒤 승인해 주세요.");
+    out.push(
+      ...q.records,
+      scenarioEvent(action, "requested", demo, new Date(t.getTime() + 5000), q.requestId),
+      scenarioEvent(action, "approved", kim, new Date(t.getTime() + 3 * MIN), q.requestId),
+      scenarioEvent(action, "executed", kim, new Date(t.getTime() + 3 * MIN + 1500), q.requestId,
+        trail("logs.amazonaws.com", "PutRetentionPolicy", "9a7e2c41-5b3d-4e6f-8a1b-0c2d3e4f5a04")),
+    );
+  }
+
+  // 5 등록부에 없는 도구 (변경 도구로 다뤄 승인 요청, 아직 결정 전)
+  {
+    const t = scenarioTime(8.2);
+    const action: ScenarioAction = {
+      id: "5f1c0a2e-0005-4c3b-9d10-aa0000000005",
+      tool: "put_bucket_policy",
+      args: { bucket: "wga-artifacts-dev", policy: "{\"Statement\":[...]}" },
+      summary: "wga-artifacts-dev 버킷 정책 바꾸기 (미등록 도구)",
+    };
+    const q = scenarioQuestion(lee, "wga-artifacts-dev 버킷 정책 정리해줘", [
+      { tool_name: "put_bucket_policy", input: action.args, status: "ok", unregistered: true },
+    ], t, "위험도 등록부에 없는 도구라 변경 도구로 다뤄 승인을 요청했습니다. 바뀌는 내용을 확인해 주세요.");
+    out.push(...q.records, scenarioEvent(action, "requested", lee, new Date(t.getTime() + 3000), q.requestId));
+  }
+
+  // 6 기록이 어긋남: 승인 요청·승인 기록 없이 실행 기록만 (게이트 밖의 변경일 수 있다)
+  {
+    const t = scenarioTime(13.4);
+    const action: ScenarioAction = {
+      id: "5f1c0a2e-0006-4c3b-9d10-aa0000000006",
+      tool: "enableS3PublicAccessBlock",
+      args: { bucket: "wga-reports-dev" },
+      summary: "wga-reports-dev 버킷 퍼블릭 액세스 차단 꺼짐 → 켜짐",
+    };
+    out.push(scenarioEvent(action, "executed", kim, t, undefined,
+      trail("s3.amazonaws.com", "PutPublicAccessBlock", "c4b8e1d2-6f0a-4b3c-9d7e-1f2a3b4c5d06")));
+  }
+
+  // 사용자 관리 (대상은 사용자 관리 탭의 예시 사용자)
+  const admin = (event: AdminEvent, days: number, username: string, extra: Partial<AuditRecord> = {}): AuditRecord => {
+    const target = mockUsers.find((u) => u.username === username)!;
+    const time = scenarioTime(days);
+    return {
+      userId: MOCK_USER_ID, email: "demo@example.com", source: "web",
+      at: auditAt(time, `admin#seed${days}#${event}`), day: time.toISOString().slice(0, 10),
+      kind: "admin", event, status: "ok", decidedBy: MOCK_USER_ID,
+      targetUser: target.username, ...(target.email && { targetEmail: target.email }), ...extra,
+    };
+  };
+  out.push(
+    admin("role_changed", 19.5, "7c1e9a52-kim", { fromRole: "member", toRole: "decider" }),
+    admin("disabled", 11.3, "90aa1d27-choi"),
+    admin("invited", 0.9, "e40f7a93-park"),
+  );
+  return out;
+}
+auditRecords = [...auditRecords, ...seedScenarios()];
+
 const usersRoute = (method: string, parts: string[], body: RequestBody, params: Record<string, string>): Result => {
   if (!mockIsAdmin()) return [403, { error: "사용자 관리는 관리자(admins 그룹)만 할 수 있습니다" }];
   if (parts.length === 1 && method === "get") {
@@ -1014,60 +1231,83 @@ const traceAudit = (actionId: string): Result => {
   if (!events.length) {
     return [404, { error: "이 작업의 감사 기록을 찾지 못했습니다 (날짜를 확인하세요)" }];
   }
+  // services/llm/audit_trace.py build와 같은 물음·같은 판정
   const find = (event: string) => events.find((r) => r.event === event);
   const requested = find("requested");
   const approved = find("approved");
   const denied = find("denied");
-  const finished = find("executed");
+  const finished = find("executed") ?? find("failed");
   const rows = requested?.requestId
     ? auditRecords.filter((r) => r.requestId === requested.requestId && r.kind !== "action").sort(byTime)
     : [];
   const question = rows.find((r) => r.kind === "request")?.question ?? null;
-  const ingress = rows.filter((r) => r.kind === "tool" && (r.locus ?? "ingress") === "ingress");
+  const tools = rows.filter((r) => r.kind === "tool");
+  const ingress = tools.filter((r) => (r.locus ?? "ingress") === "ingress");
   const suspicious = ingress.filter((r) => Array.isArray(r.injectionSuspected) && r.injectionSuspected.length);
+  const unregistered = tools.filter((r) => r.locus === "interface");
   const tainted = requested?.taintedBy ?? [];
   const who = (r?: AuditRecord) => r?.email ?? r?.decidedBy ?? "알 수 없음";
   const at = (...records: (AuditRecord | undefined)[]) =>
     records.filter((r): r is AuditRecord => !!r).map((r) => r.at);
   const distance = (n: number) => (n <= 1 ? "바로 다음 호출" : `${n}번째 뒤 호출`);
+  const step = (layer: TraceStep["layer"], q: string, status: TraceStep["status"], answer: string, evidence: string[] = []): TraceStep =>
+    ({ layer, question: q, status, answer, evidence });
+
+  const effectQ = "실행됐는가? 사람이 승인했는가?";
+  const egressQ = "게이트를 거친 승인 요청 기록이 있는가?";
+  const residenceQ = "요청 전에 의심 문구가 든 결과를 읽었는가?";
+  const deliberationQ = "모델이 도구 결과 속 지시를 따랐을 가능성이 있는가?";
+  const ingressQ = "이 질문에서 읽은 결과는 무엇이고, 의심 문구가 있었나?";
+  const interfaceQ = "등록부에 없는 도구를 불렀나?";
+  const mediationQ = "AWS 쪽 기록(CloudTrail)과 맞는가?";
+  const kindsOf = (r: AuditRecord) => (Array.isArray(r.injectionSuspected) ? r.injectionSuspected : []);
 
   const steps: TraceStep[] = [
-    finished
-      ? { layer: "effect", question: "실행됐는가? 사람이 승인했는가?", status: "ok",
-          answer: `사람이 승인해 실행했습니다 (승인: ${who(approved)})`, evidence: at(approved, finished) }
-      : denied
-        ? { layer: "effect", question: "실행됐는가? 사람이 승인했는가?", status: "ok",
-            answer: `거절해 실행하지 않았습니다 (거절: ${who(denied)})`, evidence: at(denied) }
-        : { layer: "effect", question: "실행됐는가? 사람이 승인했는가?", status: "ok",
-            answer: "결정하지 않아(만료 포함) 실행하지 않았습니다", evidence: [] },
-    { layer: "egress", question: "게이트를 거친 승인 요청 기록이 있는가?", status: requested ? "ok" : "fail",
-      answer: requested ? `승인 요청이 있습니다: ${requested.summary}` : "이 작업의 승인 요청 기록을 찾지 못했습니다",
-      evidence: at(requested) },
+    finished && !approved
+      ? step("effect", effectQ, "fail", "승인 기록 없이 실행 기록이 있습니다. 승인 테이블과 MCP 로그를 확인하세요", at(finished))
+      : finished && finished.event === "executed"
+        ? step("effect", effectQ, "ok", `사람이 승인해 실행했습니다 (승인: ${who(approved)})`, at(approved, finished))
+        : finished
+          ? step("effect", effectQ, "warn", `승인했지만 실행에 실패했습니다 (승인: ${who(approved)})`, at(approved, finished))
+          : approved
+            ? step("effect", effectQ, "warn", "승인했지만 실행 결과 기록이 없습니다 (실행 중이거나 결과를 남기지 못함)", at(approved))
+            : denied
+              ? step("effect", effectQ, "ok", `거절해 실행하지 않았습니다 (거절: ${who(denied)})`, at(denied))
+              : step("effect", effectQ, "ok", "결정하지 않아(만료 포함) 실행하지 않았습니다"),
+    requested
+      ? step("egress", egressQ, "ok", `승인 요청이 있습니다: ${requested.summary ?? requested.tool}`, at(requested))
+      : approved || finished
+        ? step("egress", egressQ, "fail", "결정·실행 기록은 있는데 승인 요청 기록이 없습니다. 게이트 밖의 변경일 수 있어 CloudTrail과 대조하세요 (7 매개)", at(approved, finished))
+        : step("egress", egressQ, "fail", "이 작업의 승인 요청 기록을 찾지 못했습니다"),
     tainted.length
-      ? { layer: "residence", question: "요청 전에 의심 문구가 든 결과를 읽었는가?", status: "warn",
-          answer: `예: ${tainted.map((t) => `${t.tool} 결과 뒤 ${distance(t.callsAgo)}`).join(", ")}에서 이 변경을 요청했습니다`,
-          evidence: at(requested) }
-      : { layer: "residence", question: "요청 전에 의심 문구가 든 결과를 읽었는가?", status: "ok", answer: "아니오", evidence: [] },
+      ? step("residence", residenceQ, "warn",
+          `예: ${tainted.map((t) => `${t.tool} 결과 뒤 ${distance(t.callsAgo)}`).join(", ")}에서 이 변경을 요청했습니다`, at(requested))
+      : requested
+        ? step("residence", residenceQ, "ok", "아니오")
+        : step("residence", residenceQ, "info", "승인 요청 기록이 없어 알 수 없습니다"),
     tainted.length && requested
-      ? { layer: "deliberation", question: "모델이 도구 결과 속 지시를 따랐을 가능성이 있는가?", status: "warn",
-          answer: `유입·체류·유출이 함께 성립합니다: 의심 결과를 읽은 뒤 변경을 요청했습니다.${question ? ` 사용자의 질문("${question}")이 이 변경을 원했는지 비교하세요` : ""}`,
-          evidence: [...suspicious.map((r) => r.at), requested.at] }
-      : { layer: "deliberation", question: "모델이 도구 결과 속 지시를 따랐을 가능성이 있는가?", status: "ok",
-          answer: "성립하지 않습니다", evidence: [] },
-    suspicious.length
-      ? { layer: "ingress", question: "이 질문에서 읽은 결과는 무엇이고, 의심 문구가 있었나?", status: "warn",
-          answer: `도구 결과 ${ingress.length}건 중 ${suspicious.length}건에 의심 문구가 있었습니다`,
-          evidence: suspicious.map((r) => r.at) }
-      : { layer: "ingress", question: "이 질문에서 읽은 결과는 무엇이고, 의심 문구가 있었나?", status: "ok",
-          answer: `도구 결과 ${ingress.length}건, 의심 문구 없음`, evidence: ingress.map((r) => r.at) },
-    { layer: "interface", question: "등록부에 없는 도구를 불렀나?", status: "ok", answer: "아니오", evidence: [] },
+      ? step("deliberation", deliberationQ, "warn",
+          `유입·체류·유출이 함께 성립합니다: 의심 결과를 읽은 뒤 변경을 요청했습니다.${question ? ` 사용자의 질문("${question}")이 이 변경을 원했는지 비교하세요` : ""}`,
+          [...suspicious.map((r) => r.at), requested.at])
+      : step("deliberation", deliberationQ, "ok", "성립하지 않습니다"),
+    !rows.length
+      ? step("ingress", ingressQ, "info", "같은 질문의 도구 기록을 찾지 못했습니다 (보관 기간이 지났거나 승인 요청 기록이 없음)")
+      : suspicious.length
+        ? step("ingress", ingressQ, "warn",
+            `도구 결과 ${ingress.length}건 중 ${suspicious.length}건에 의심 문구가 있었습니다 (${[...new Set(suspicious.flatMap(kindsOf))].sort().join(", ")})`,
+            suspicious.map((r) => r.at))
+        : step("ingress", ingressQ, "ok", `도구 결과 ${ingress.length}건, 의심 문구 없음`, ingress.map((r) => r.at)),
+    unregistered.length
+      ? step("interface", interfaceQ, "warn", `예: ${unregistered.map((r) => r.tool).join(", ")}`, unregistered.map((r) => r.at))
+      : rows.length
+        ? step("interface", interfaceQ, "ok", "아니오")
+        : step("interface", interfaceQ, "info", "같은 질문의 도구 기록이 없어 알 수 없습니다"),
     finished?.awsRequestId
-      ? { layer: "mediation", question: "AWS 쪽 기록(CloudTrail)과 맞는가?", status: "info",
-          answer: `앱에서는 확인할 수 없습니다. CloudTrail에서 요청 ID ${finished.awsRequestId}(${finished.cloudTrailEvent}) 이벤트를 찾고, 같은 시간대에 MCP 역할이 만든 다른 변경 이벤트가 없는지 대조하세요`,
-          evidence: at(finished) }
-      : { layer: "mediation", question: "AWS 쪽 기록(CloudTrail)과 맞는가?", status: "info",
-          answer: "실행 기록이 없어 대조할 요청 ID가 없습니다. 같은 시간대에 MCP 역할이 만든 변경 이벤트가 없는지 CloudTrail에서 확인할 수 있습니다",
-          evidence: [] },
+      ? step("mediation", mediationQ, "info",
+          `앱에서는 확인할 수 없습니다. CloudTrail에서 요청 ID ${finished.awsRequestId}(${finished.cloudTrailEvent}) 이벤트를 찾고, 같은 시간대에 MCP 역할이 만든 다른 변경 이벤트가 없는지 대조하세요`,
+          at(finished))
+      : step("mediation", mediationQ, "info",
+          "실행 기록이 없어 대조할 요청 ID가 없습니다. 같은 시간대에 MCP 역할이 만든 변경 이벤트가 없는지 CloudTrail에서 확인할 수 있습니다"),
   ];
   const verdict = steps.some((s) => s.status === "fail")
     ? "기록이 어긋납니다. 실패한 층부터 확인하세요"

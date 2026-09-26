@@ -350,6 +350,9 @@ const searchTextOf = (record: AuditRecord) => {
             record.cloudTrailEvent,
             record.targetEmail,
             record.targetUser,
+            // 표시 배지 (의심 문구 · 의심 뒤 요청 · 미등록 도구 · 가림)와 층 이름: 배지·층으로도 찾게
+            ...flagsOf(record).map((flag) => FLAG_LABELS[flag] ?? flag),
+            locusOf(record.locus)?.label,
         ]
             .filter(Boolean)
             .join('\n')
