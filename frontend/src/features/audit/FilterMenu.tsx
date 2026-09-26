@@ -2,15 +2,14 @@
 // 늘 펼쳐 두지 않고, '필터' 버튼을 누를 때만 아래에 연다. 걸린 조건은 버튼 옆에 조각(칩)으로 보여, 창을 열지 않아도 안다.
 //   [필터 2 ▾]  기간: 최근 7일   그룹 기준: 요청자 ✕   결과: 실패 ✕
 //   ┌──────────────────────────────────────────────────────────┐
-//   │ 기간       [1시간][4시간][1일][7일][30일][직접]              │
-//   │ 그룹 기준  [결과][종류][요청자][도구]  막대그래프를 무엇으로 묶어 색을 나눌지 │
+//   │ 기간       [1시간][4시간][1일][7일][30일][직접]           ✕ │   ← ✕: 다른 팝업창과 같은 닫기
+//   │ 그룹 기준  [결과][종류][요청자][도구]                          │
 //   │ ─────────────────────────────────────────                  │
 //   │ ▾ 종류        ▾ 요청자        ▾ 도구                         │   ← 여러 단으로. 값마다 건수, 체크로 고르고 풀기
 //   │ ☑ 질문  119   ☐ demo…  101    ☐ 로그 분석  24                │
-//   │                                                   [닫기]  │
 //   └──────────────────────────────────────────────────────────┘
 // - 고르면 바로 목록·그래프에 적용된다 (적용 버튼 없음). 건수는 다른 조건을 적용한 채 센다
-// - 바깥을 누르거나 Esc, '닫기'로 닫는다. 모두 처음으로 되돌리기는 줄 오른쪽 끝의 '필터 초기화'
+// - 바깥을 누르거나 Esc, 오른쪽 위 ✕로 닫는다. 모두 처음으로 되돌리기는 줄 오른쪽 끝의 '필터 초기화'
 // - 칩: 기간은 늘 보인다(처음 값이 아니면 ✕로 최근 7일로). 그룹 기준은 결과가 아닐 때, 거르기는 고른 값마다
 import { useEffect, useRef, useState } from 'react';
 import type { AuditRecord } from '@/types/audit';
@@ -158,6 +157,20 @@ export function FilterMenu({
 
             {open ? (
                 <div id="audit-filter-panel" className="audit-filter-panel" role="dialog" aria-label="필터 세부 선택">
+                    {/* 닫기: 이 앱의 다른 팝업창과 같은 오른쪽 위 ✕ */}
+                    <button
+                        className="vdt-model-close"
+                        type="button"
+                        onClick={() => {
+                            setOpen(false);
+                            button.current?.focus(); // 닫으면 필터 버튼으로 (키보드로 이어서)
+                        }}
+                        aria-label="필터 닫기"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                            <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        </svg>
+                    </button>
                     <div className="audit-filter-options">
                         <div className="audit-filter-option">
                             <span className="audit-filter-label">기간</span>
@@ -178,15 +191,9 @@ export function FilterMenu({
                                     </button>
                                 ))}
                             </div>
-                            <span className="audit-filter-hint">막대그래프를 무엇으로 묶어 색을 나눌지</span>
                         </div>
                     </div>
                     <FacetSidebar key={resetNo} records={records} selection={selection} onChange={onChange} />
-                    <div className="audit-filter-panel-foot">
-                        <button type="button" onClick={() => setOpen(false)}>
-                            닫기
-                        </button>
-                    </div>
                 </div>
             ) : null}
         </div>
