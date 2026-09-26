@@ -37,7 +37,17 @@ import { AuditSearch } from './AuditSearch';
 import { readUrl, writeUrl } from './auditUrl';
 import { FacetSidebar } from './FacetSidebar';
 import { PeriodPicker } from './PeriodPicker';
-import { DEFAULT_PERIOD, containsRange, fetchRangeOf, isPreset, windowOf, type Period } from './timeWindow';
+import {
+    DEFAULT_PERIOD,
+    PRESETS,
+    containsRange,
+    fetchRangeOf,
+    formatWindow,
+    isPreset,
+    windowOf,
+    type Period,
+    type TimeWindow,
+} from './timeWindow';
 import { MAX_RECORDS, useAuditRecords } from './useAuditRecords';
 import './audit.css';
 
@@ -47,9 +57,20 @@ const RENDER_STEP = 100; // 목록은 이만큼씩 그린다 (2,000행을 한 �
 const rowButtonOf = (key: string) =>
     document.querySelector<HTMLButtonElement>(`.audit-row-button[data-key="${CSS.escape(key)}"]`);
 
-// 목록 한 행. 누르면 팝업창으로 자세히 본다
-function AuditRow({ record, selected, onOpen }: { record: AuditRecord; selected: boolean; onOpen: () => void }) {
+// 목록 한 행. 누르면 팝업창으로 자세히 본다. 마우스를 올리거나 키보드로 오면 막대그래프에서 그 기록의 칸을 짚는다
+function AuditRow({
+    record,
+    selected,
+    onOpen,
+    onPoint,
+}: {
+    record: AuditRecord;
+    selected: boolean;
+    onOpen: () => void;
+    onPoint: (at: number | null) => void;
+}) {
     const summary = summaryOf(record);
+    const at = Date.parse(timeOf(record));
     return (
         <li className={`audit-row${selected ? ' is-selected' : ''}`}>
             <button
@@ -59,6 +80,10 @@ function AuditRow({ record, selected, onOpen }: { record: AuditRecord; selected:
                 aria-haspopup="dialog"
                 aria-current={selected ? 'true' : undefined}
                 onClick={onOpen}
+                onMouseEnter={() => onPoint(at)}
+                onMouseLeave={() => onPoint(null)}
+                onFocus={() => onPoint(at)}
+                onBlur={() => onPoint(null)}
             >
                 <span className="audit-col-time">{formatKoreanDateTimeSeconds(timeOf(record))}</span>
                 <span className="audit-col-user" title={record.userId}>
@@ -205,11 +230,34 @@ export function AuditPage() {
         setQuery(id);
     };
     const onlyFacet = (id: FacetId, value: string) => setSelection((prev) => ({ ...prev, [id]: [value] }));
+    // 막대그래프로 좁히기: 좁히기 전 기간을 쌓아 두고 '이전 기간'으로 하나씩 돌아간다.
+    // 기간 고르기(1시간~30일·직접)나 필터 초기화로 기간을 새로 정하면 쌓은 것을 비운다
+    const [zoomStack, setZoomStack] = useState<Period[]>([]);
+    const zoomTo = (next: TimeWindow) => {
+        setZoomStack((prev) => [...prev, period]);
+        setPeriod(next);
+    };
+    const zoomBack = () => {
+        const last = zoomStack[zoomStack.length - 1];
+        if (!last) return;
+        setZoomStack(zoomStack.slice(0, -1));
+        setPeriod(last);
+    };
+    const choosePeriod = (next: Period) => {
+        setZoomStack([]);
+        setPeriod(next);
+    };
+    const periodText = (p: Period) =>
+        isPreset(p) ? `최근 ${PRESETS.find((preset) => preset.id === p.preset)?.label ?? ''}` : formatWindow(p);
+
+    // 목록에서 마우스를 올린 기록의 시각 (막대그래프가 그 칸을 짚는다)
+    const [pointAt, setPointAt] = useState<number | null>(null);
+
     // 필터 초기화: 처음 화면으로 (거르기·검색어를 지우고 기간을 최근 7일로)
     const resetFilters = () => {
         setSelection({});
         setQuery('');
-        setPeriod(DEFAULT_PERIOD);
+        choosePeriod(DEFAULT_PERIOD);
     };
 
     return (
@@ -237,7 +285,27 @@ export function AuditPage() {
                 <div className="audit-results">
                     <AuditSearch value={query} onChange={setQuery} />
                     <div className="audit-toolbar">
-                        <PeriodPicker period={period} window={timeWindow} onChange={setPeriod} />
+                        <PeriodPicker period={period} window={timeWindow} onChange={choosePeriod} />
+                        {zoomStack.length ? (
+                            <button
+                                type="button"
+                                className="audit-zoom-back"
+                                onClick={zoomBack}
+                                title={`돌아갈 기간: ${periodText(zoomStack[zoomStack.length - 1])}`}
+                            >
+                                <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                                    <path
+                                        d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    />
+                                </svg>
+                                이전 기간
+                            </button>
+                        ) : null}
                         <button
                             type="button"
                             className="audit-facets-button"
@@ -264,7 +332,13 @@ export function AuditPage() {
 
                     {/* 다시 불러오는 동안에도 앞 그래프·목록을 흐리게 남겨 둔다 (자리가 들썩이지 않게) */}
                     {error ? null : (
-                        <AuditHistogram records={filtered} window={timeWindow} loading={listLoading} onSelect={setPeriod} />
+                        <AuditHistogram
+                            records={filtered}
+                            window={timeWindow}
+                            loading={listLoading}
+                            highlightAt={pointAt}
+                            onSelect={zoomTo}
+                        />
                     )}
 
                     <div className={`plan-table audit-table${listLoading ? ' is-loading' : ''}`}>
@@ -303,6 +377,7 @@ export function AuditPage() {
                                             record={record}
                                             selected={openKey === key}
                                             onOpen={() => setOpenKey(key)}
+                                            onPoint={setPointAt}
                                         />
                                     );
                                 })}

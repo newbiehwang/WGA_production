@@ -10,7 +10,10 @@
 // - 칸마다 실패(아래)·성공(위)을 쌓는다. 실패를 바닥에 두어 칸끼리 실패 건수를 비교하기 쉽게
 // - 가로 눈금은 막대 수와 상관없이 '보기 좋은 시각'에 찍는다 (10분·3시간·하루·5일 등, timeWindow.ticksOf)
 // - 기록이 없으면 그래프 자리에 '이 기간에 기록이 없습니다'. 불러오는 동안에는 앞 그래프를 흐리게 남겨 둔다
-// - 마우스를 올리면 그 칸의 시각과 건수를 보이고, 드래그하면 그 구간으로, 한 칸을 누르면 그 칸으로 기간을 좁힌다
+// - 마우스를 올리면 그 칸의 시각과 건수를 막대 옆 말풍선으로 보인다 (그래프 안에 두어 위의 버튼을 가리지 않게)
+// - 드래그하면 그 구간으로, 한 칸을 누르면 그 칸으로 기간을 좁힌다. 드래그하는 동안 고른 구간의 시각을 위에 보인다
+//   (좁힌 뒤 돌아가는 '이전 기간'은 AuditPage가 쌓아 둔다)
+// - 목록의 행에 마우스를 올리면(highlightAt) 그 기록이 든 칸을 옅게 칠하고 바닥선 바로 아래에 파란 줄을 긋는다
 // - 키보드: 그래프에 포커스를 두고 ←/→로 칸을 옮기고 Enter로 그 칸만 본다. 칸의 내용은 화면 읽기 프로그램에도 알린다
 // - 색: 성공 #4a8fe0, 실패 #d03b3b (흰 바탕에서 색각 이상 구분·대비 검사를 통과한 값). 색만으로 구분하지 않게
 //   범례와 말풍선에 이름을 함께 적는다
@@ -68,11 +71,13 @@ export function AuditHistogram({
     records,
     window,
     loading,
+    highlightAt,
     onSelect,
 }: {
     records: AuditRecord[];
     window: TimeWindow;
     loading: boolean; // 다시 불러오는 중: 앞 그래프를 흐리게 남겨 둔다
+    highlightAt: number | null; // 목록에서 마우스를 올린 기록의 시각
     onSelect: (window: TimeWindow) => void;
 }) {
     const wrap = useRef<HTMLDivElement>(null);
@@ -182,7 +187,32 @@ export function AuditHistogram({
 
     const shown = active !== null && interactive ? buckets[active] : null;
     const rangeText = (bucket: Bucket) => `${formatShort(bucket.start)} ~ ${formatShort(bucket.start + size)}`;
-    const tooltipLeft = active !== null ? Math.min(Math.max(xOf(active) + barW / 2, 90), Math.max(90, width - 90)) : 0;
+    // 말풍선: 막대 오른쪽에 붙인다. 오른쪽 끝에 가까우면 왼쪽으로 뒤집는다
+    const TOOLTIP_W = 180;
+    const tooltipStyle =
+        active !== null
+            ? xOf(active) + barW + 10 + TOOLTIP_W <= width
+                ? { left: xOf(active) + barW + 10, top: TOP + 4 }
+                : { left: xOf(active) - 10, top: TOP + 4, transform: 'translateX(-100%)' }
+            : undefined;
+
+    // 드래그하는 동안: 고를 구간(칸 단위로 맞춘 것)의 시각
+    const dragRange = drag
+        ? (() => {
+              const a = indexAt(Math.min(drag.x0, drag.x1));
+              const b = indexAt(Math.max(drag.x0, drag.x1));
+              return {
+                  x: (Math.min(drag.x0, drag.x1) + Math.max(drag.x0, drag.x1)) / 2,
+                  text: `${formatShort(Math.max(window.from, buckets[a].start))} ~ ${formatShort(
+                      Math.min(window.to, buckets[b].start + size),
+                  )}`,
+              };
+          })()
+        : null;
+
+    // 목록에서 가리킨 기록이 든 칸
+    const marked =
+        highlightAt !== null && total > 0 ? Math.floor((highlightAt - first) / size) : -1;
     const summary = (bucket: Bucket) =>
         `${rangeText(bucket)}: ${[...series].reverse().map((s) => `${s.label} ${bucket.counts[s.key] ?? 0}건`).join(', ')}`;
 
@@ -252,6 +282,20 @@ export function AuditHistogram({
                             );
                         })}
 
+                        {/* 목록에서 가리킨 기록이 든 칸: 옅은 바탕 + 바닥의 파란 줄 */}
+                        {marked >= 0 && marked < buckets.length && !shown ? (
+                            <g>
+                                <rect x={GUTTER + marked * slot} y={TOP} width={slot} height={PLOT_H} className="audit-histogram-hover" />
+                                <line
+                                    x1={GUTTER + marked * slot + 1}
+                                    x2={GUTTER + (marked + 1) * slot - 1}
+                                    y1={baseY + 3}
+                                    y2={baseY + 3}
+                                    className="audit-histogram-mark"
+                                />
+                            </g>
+                        ) : null}
+
                         {/* 가리킨 칸의 옅은 바탕 */}
                         {shown ? (
                             <rect
@@ -302,8 +346,14 @@ export function AuditHistogram({
                     </svg>
                 ) : null}
 
+                {dragRange ? (
+                    <div className="audit-histogram-brush-label" style={{ left: dragRange.x }} aria-hidden="true">
+                        {dragRange.text}
+                    </div>
+                ) : null}
+
                 {shown && !drag ? (
-                    <div className="audit-histogram-tooltip" style={{ left: tooltipLeft }} aria-hidden="true">
+                    <div className="audit-histogram-tooltip" style={tooltipStyle} aria-hidden="true">
                         <div className="audit-histogram-tooltip-time">{rangeText(shown)}</div>
                         {[...series].reverse().map((s) => (
                             <div key={s.key}>
