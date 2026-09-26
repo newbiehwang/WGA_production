@@ -2,6 +2,7 @@
 // AXPI 패널 하나를 대화가 다 쓴다. 패널 머리 작은 제목 자리에 대화 제목, 오른쪽에 '대화 목록'(팝업) · '+ 새 대화'.
 import { useEffect, useRef, useState } from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { ToastHost, useToast } from '@/components/Toast';
 import { EXAMPLE_QUESTIONS } from '@/features/home/examples';
 import { useChatStore } from '@/stores/chatStore';
 import { ChatMessage } from './ChatMessage';
@@ -22,6 +23,14 @@ export function ChatPage() {
     const messagesRef = useRef<HTMLDivElement>(null);
     const stickToBottom = useRef(true);
     const messages = currentSession?.messages ?? [];
+    const { show: showToast } = useToast();
+
+    // 대화 오류(보내기·불러오기 실패)는 패널 위쪽 가운데의 알림으로 띄우고 스토어에서는 지운다 (components/Toast)
+    useEffect(() => {
+        if (!error) return;
+        showToast('error', error);
+        useChatStore.getState().setError(null);
+    }, [error, showToast]);
 
     useEffect(() => {
         if (!useChatStore.getState().loaded) useChatStore.getState().fetchSessions().catch(() => {});
@@ -77,14 +86,7 @@ export function ChatPage() {
                 </div>
             </div>
 
-            {error ? (
-                <div className="plan-panel-error-inline chat-error" role="alert">
-                    <p>{error}</p>
-                    <button type="button" aria-label="닫기" onClick={() => useChatStore.getState().setError(null)}>
-                        ×
-                    </button>
-                </div>
-            ) : null}
+            <ToastHost />
 
             <div className="chat-body">
                 <div className="chat-conversation">

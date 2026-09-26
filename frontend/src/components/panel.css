@@ -598,22 +598,6 @@
   color: #8f3b44;
 }
 
-.plan-panel-error-inline {
-  margin: 0 0 12px;
-  border: 1px solid #f3c2c7;
-  border-radius: 10px;
-  background: #fdf1f2;
-  padding: 10px 12px;
-}
-
-.plan-panel-error-inline p {
-  margin: 0;
-  font-family: var(--font-body);
-  font-size: 0.82rem;
-  line-height: 1.45;
-  color: #8f3b44;
-}
-
 .plan-loading-bubble {
   border: 1px solid #dfe6ee;
   border-radius: 12px;
@@ -909,22 +893,6 @@
   opacity: 0.7;
 }
 
-.plan-panel-error-inline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.plan-panel-error-inline button {
-  border: 0;
-  background: transparent;
-  color: #8f3b44;
-  font-size: 1.1rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
 /* ---------------------------------------------------------------- AXPI 추진계획서 생성 팝업창 (닫기 버튼·본문·제목·아래 버튼) */
 
 .vdt-model-close {
@@ -1068,7 +1036,7 @@
   color: #6c757d;
 }
 
-/* ---------------------------------------------------------------- 상태 변경 알림 (components/Toast.tsx)
+/* ---------------------------------------------------------------- 알림 (components/Toast.tsx: 모든 탭의 상태 변경·경고·오류)
    흰 패널(plan-panel, position: relative)의 위쪽 가운데에 작은 상자로 뜬다 */
 .panel-toast {
   position: absolute;

@@ -2,6 +2,7 @@
 //   큰 글씨 2줄(가는 글씨 · 굵은 파랑) → 작은 글씨 설명 → 큰 입력창
 // 예시 질문은 입력칸을 누르면 입력칸 아래에 펼쳐진다 (Composer의 suggestions). 지난 대화는 대화 탭의 '대화 목록'에서 본다.
 import { useNavigate } from 'react-router-dom';
+import { ToastHost } from '@/components/Toast';
 import { Composer } from '@/features/chat/Composer';
 import { useChatStore } from '@/stores/chatStore';
 import { EXAMPLE_QUESTIONS } from './examples';
@@ -22,6 +23,8 @@ export function HomePage() {
 
     return (
         <section className="plan-panel home-panel" aria-label="홈">
+            {/* 알림 자리 (다른 탭과 같다, components/Toast) */}
+            <ToastHost />
             <div className="home-hero">
                 {/* 읽는 순서대로 한 줄씩 떠오른다. 지연 시간을 줄마다 적어 두어 순서가 마크업에 보이게 했다 (FinGate-X) */}
                 <h1 className="home-headline">
