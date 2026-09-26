@@ -1,5 +1,5 @@
 // 대화 목록 팝업창. 모양은 AXPI의 추진계획서 생성 팝업창(create-plan-model)을 그대로 쓴다:
-// 오른쪽 위 ✕, 큰 제목과 설명, 가운데 내용, 아래 오른쪽 버튼. 닫을 때는 접히는 효과를 보여 준 뒤 사라진다.
+// 오른쪽 위 ✕, 큰 제목, 가운데 내용, 아래 오른쪽 버튼 (설명 문단은 두지 않는다). 닫을 때는 접히는 효과를 보여 준 뒤 사라진다.
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useChatStore } from '@/stores/chatStore';
@@ -16,7 +16,6 @@ export function SessionListModal({
     onSelect: (sessionId: string) => void; // 대화를 고르면 부른다 (옮기기 확인은 부르는 쪽이 한다)
     onNewChat: () => void;
 }) {
-    const count = useChatStore((s) => s.sessions.length);
     const waiting = useChatStore((s) => s.waitingForResponse);
     const [isClosing, setIsClosing] = useState(false);
 
@@ -59,9 +58,6 @@ export function SessionListModal({
                 <div className="create-plan-expanded-model-body">
                     <div className="session-list-page">
                         <h3 className="create-plan-step-heading">대화 목록</h3>
-                        <p className="create-plan-step-description">
-                            대화 {count}개 · 대화를 누르면 열립니다. ··· 메뉴로 이름을 바꾸거나 삭제합니다.
-                        </p>
                         <SessionList
                             onSelect={(sessionId) => close(() => onSelect(sessionId))}
                             actions={
