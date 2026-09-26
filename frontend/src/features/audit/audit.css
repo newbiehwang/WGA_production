@@ -892,23 +892,6 @@
   color: #1f2933;
 }
 
-.audit-kind-request {
-  color: var(--color-secondary);
-}
-
-.audit-kind-action {
-  color: #9a5b00;
-}
-
-.audit-kind-admin {
-  color: #007bff;
-}
-
-/* 목록의 도구 칸은 종류(질문·변경 작업·사용자 관리)와 상관없이 검은 글자 (색은 기록 팝업창 제목에만) */
-.audit-row-button .audit-col-tool > span {
-  color: inherit;
-}
-
 .audit-event-requested {
   background: rgba(255, 153, 0, 0.16);
   color: #9a5b00;
