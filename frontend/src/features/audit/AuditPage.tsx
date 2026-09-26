@@ -37,7 +37,7 @@ import { AuditSearch } from './AuditSearch';
 import { readUrl, writeUrl } from './auditUrl';
 import { FacetSidebar } from './FacetSidebar';
 import { PeriodPicker } from './PeriodPicker';
-import { containsRange, fetchRangeOf, windowOf, type Period } from './timeWindow';
+import { DEFAULT_PERIOD, containsRange, fetchRangeOf, isPreset, windowOf, type Period } from './timeWindow';
 import { MAX_RECORDS, useAuditRecords } from './useAuditRecords';
 import './audit.css';
 
@@ -79,6 +79,31 @@ function AuditRow({ record, selected, onOpen }: { record: AuditRecord; selected:
                 </span>
             </button>
         </li>
+    );
+}
+
+// 필터 초기화 버튼 (기간·건수 줄의 오른쪽 끝, 조건에 맞는 기록이 없을 때의 안내). 처음 화면이면 꺼 둔다
+function ResetButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
+    return (
+        <button
+            type="button"
+            className="audit-reset"
+            onClick={onClick}
+            disabled={disabled}
+            title="거르기·검색어를 지우고 기간을 최근 7일로 되돌립니다"
+        >
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                <path
+                    d="M4 12a8 8 0 1 0 2.34-5.66M4 4v5h5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                />
+            </svg>
+            필터 초기화
+        </button>
     );
 }
 
@@ -144,6 +169,8 @@ export function AuditPage() {
     const searched = useMemo(() => inWindow.filter((record) => matchesQuery(record, parsed)), [inWindow, parsed]);
     const filtered = useMemo(() => searched.filter((record) => matches(record, selection)), [searched, selection]);
     const conditions = activeCount(selection) + (query.trim() ? 1 : 0);
+    // 처음 화면(최근 7일, 거르기·검색어 없음)과 다른가: '필터 초기화'를 켠다
+    const customized = conditions > 0 || !isPreset(period) || period.preset !== (DEFAULT_PERIOD as { preset: string }).preset;
 
     // 조건이나 기록이 바뀌면 목록을 처음 묶음부터 그린다
     useEffect(() => setLimit(RENDER_STEP), [filtered]);
@@ -178,9 +205,11 @@ export function AuditPage() {
         setQuery(id);
     };
     const onlyFacet = (id: FacetId, value: string) => setSelection((prev) => ({ ...prev, [id]: [value] }));
-    const clearAll = () => {
+    // 필터 초기화: 처음 화면으로 (거르기·검색어를 지우고 기간을 최근 7일로)
+    const resetFilters = () => {
         setSelection({});
         setQuery('');
+        setPeriod(DEFAULT_PERIOD);
     };
 
     return (
@@ -230,11 +259,7 @@ export function AuditPage() {
                                 </>
                             )}
                         </p>
-                        {conditions ? (
-                            <button type="button" className="audit-clear-all" onClick={clearAll}>
-                                조건 모두 지우기
-                            </button>
-                        ) : null}
+                        <ResetButton onClick={resetFilters} disabled={!customized} />
                     </div>
 
                     {listLoading || error ? null : (
@@ -256,10 +281,15 @@ export function AuditPage() {
                             <div className="plan-panel-empty">
                                 {inWindow.length === 0 ? (
                                     <p>이 기간에 기록이 없습니다. 질문을 보내면 도구 호출마다 기록이 남습니다.</p>
-                                ) : query.trim() ? (
-                                    <p>'{query.trim()}'에 맞는 기록이 없습니다.</p>
                                 ) : (
-                                    <p>이 조건에 맞는 기록이 없습니다.</p>
+                                    <div className="audit-empty-reset">
+                                        <p>
+                                            {query.trim()
+                                                ? `'${query.trim()}'에 맞는 기록이 없습니다.`
+                                                : '이 조건에 맞는 기록이 없습니다.'}
+                                        </p>
+                                        <ResetButton onClick={resetFilters} disabled={!customized} />
+                                    </div>
                                 )}
                             </div>
                         ) : (
