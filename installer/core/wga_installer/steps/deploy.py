@@ -5,7 +5,7 @@
    20~40분 걸리는 배포를 시작했다가 중간에 실패하지 않도록, 결과가 뻔한 실패는 먼저 걸러 낸다.
    특히 할당량: cloudformation/llm.yaml이 통합 타임아웃을 120000ms로 설정하므로 할당량이 그보다 작으면
    LLM 스택 생성·업데이트가 실패한다.
-2. 승인 후 `AWS_REGION=<리전> [ALARM_EMAIL=<이메일>] ./deploy.sh <env>`를 저장소 루트에서 실행.
+2. 승인 후 `AWS_REGION=<리전> [ALARM_EMAIL=<이메일>] [ADMIN_EMAIL=<이메일>] ./deploy.sh <env>`를 저장소 루트에서 실행.
    출력은 한 줄씩 log 이벤트로 내보내고, 구분 줄은 progress 이벤트로 바꾼다 (ProgressParser).
 3. 실패하면 CloudFormation 스택 이벤트에서 이번 배포 중 실패한 리소스와 이유를 모아 error 이벤트로 보여 준다.
 4. 취소(Ctrl+C)하면 Runner가 deploy.sh와 그 자식 프로세스 전체에 중단 신호를 보낸다.
@@ -95,6 +95,11 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
     else:
         emitter.log("알람 이메일 없음 (--alarm-email로 지정하면 CloudWatch 알람을 메일로 받습니다)",
                     stream="info")
+    if ctx.admin_email:
+        extra_env["ADMIN_EMAIL"] = ctx.admin_email
+    else:
+        emitter.log("관리자 이메일 없음 (--admin-email로 지정하면 그 사용자가 변경 작업을 승인하고 모든 감사 로그를 봅니다)",
+                    stream="info")
 
     parser = ProgressParser(emitter)
     started_at = datetime.now(timezone.utc)
@@ -127,6 +132,9 @@ def run(ctx: Context, runner: Runner, emitter: Emitter) -> int:
     if ctx.alarm_email:
         emitter.log(f"{ctx.alarm_email}로 온 구독 확인 메일(AWS Notification - Subscription Confirmation)의 "
                     "링크를 눌러야 알람 메일을 받습니다", stream="info")
+    if ctx.admin_email:
+        emitter.log(f"관리자 계정({ctx.admin_email})을 새로 만들었다면 임시 비밀번호가 든 초대 메일이 갑니다. "
+                    "이미 가입한 계정이면 권한(admins·approvers 그룹)만 더했습니다", stream="info")
     emitter.step_finished(STEP, STEP_OK, "배포 완료")
     return 0
 

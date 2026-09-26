@@ -7,6 +7,9 @@ set -e
 # 환경 변수 설정
 ENV=${1:-dev}  # 기본값: dev
 ALARM_EMAIL=${ALARM_EMAIL:-}  # CloudWatch 알람 수신 이메일 (선택, 예: ALARM_EMAIL=me@example.com ./deploy.sh dev)
+# 관리자 계정 이메일 (선택). 이 이메일의 사용자를 admins·approvers 그룹에 넣는다. 없으면 만들고 초대 메일을 보낸다
+# (예: ADMIN_EMAIL=admin@example.com ./deploy.sh dev). 일반 사용자는 로그인 페이지에서 스스로 가입한다
+ADMIN_EMAIL=${ADMIN_EMAIL:-}
 ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
 # 리전 우선순위: AWS_REGION 환경 변수(CI의 OIDC 포함) → CLI 프로필 설정 → 기본값 서울(ap-northeast-2)
 REGION=${AWS_REGION:-$(aws configure get region || true)}
@@ -17,6 +20,12 @@ MCP_IMAGE_URI="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/wga-mcp-$ENV:latest"
 # ENV 값 검증
 if [[ "$ENV" != "dev" && "$ENV" != "test" && "$ENV" != "prod" ]]; then
   echo "❌ 오류: ENV 값은 'dev', 'test', 'prod' 중 하나여야 합니다. 현재 값: '$ENV'"
+  exit 1
+fi
+
+# 관리자 이메일 검증: 잘못 적었으면 아무것도 바꾸기 전에 멈춘다
+if [ -n "$ADMIN_EMAIL" ] && ! [[ "$ADMIN_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+  echo "❌ 오류: ADMIN_EMAIL이 이메일 모양이 아닙니다. 현재 값: '$ADMIN_EMAIL'"
   exit 1
 fi
 
@@ -87,6 +96,45 @@ cfn_update() {
 # LLM Lambda가 질문마다 하는 것과 같은 순서로 부른다: initialize → tools/list(여기서 공식 서버를 불러온다) → 세션 삭제.
 # - 효과는 배포 직후 잠깐이다. Lambda는 한동안 요청이 없으면 실행 환경을 정리하고, 동시에 온 요청은 새 환경에서 돈다.
 # - 미리 깨우지 못해도 서비스에는 문제가 없으므로(첫 질문이 느릴 뿐) 실패해도 배포는 계속한다.
+# 관리자 계정 ($1: User Pool ID, $2: 이메일). 이메일이 없으면 건너뛴다.
+# - 사용자가 없으면 만든다: Cognito가 임시 비밀번호가 든 초대 메일을 보내고, 처음 로그인할 때 새 비밀번호를 정한다
+# - 이미 있으면(스스로 가입한 경우 등) 그대로 두고 그룹만 넣는다. 어떤 경우에도 사용자를 지우지 않는다
+# - admins(모든 사람의 감사 로그), approvers(AI가 요청한 변경 작업 승인) 두 그룹에 넣는다. 이미 들어 있으면 그대로다
+# - CloudFormation으로 만들지 않는다: 이미 가입한 이메일이면 스택 전체가 실패하고, 이메일을 바꾸면 사용자를 지운다
+# 실패해도 배포는 계속한다 (인프라는 이미 배포됐다). 대신 직접 실행할 명령을 알려 준다
+ensure_admin_account() {
+    local pool="$1" email="$2" error
+    if [ -z "$email" ]; then
+        echo "관리자 이메일(ADMIN_EMAIL)이 없어 관리자 계정은 건너뜁니다."
+        echo "  변경 작업을 승인할 사람이 없습니다. ADMIN_EMAIL=<이메일>로 다시 배포하거나 직접 그룹에 넣으세요:"
+        echo "  aws cognito-idp admin-add-user-to-group --user-pool-id $pool --username <이메일> --group-name approvers"
+        return 0
+    fi
+    if error=$(aws cognito-idp admin-get-user --user-pool-id "$pool" --username "$email" 2>&1 >/dev/null); then
+        echo "관리자 계정($email)이 이미 있습니다. 그룹만 확인합니다."
+    elif [[ "$error" == *UserNotFoundException* ]]; then
+        if ! error=$(aws cognito-idp admin-create-user --user-pool-id "$pool" --username "$email" \
+                --user-attributes Name=email,Value="$email" Name=email_verified,Value=true \
+                --desired-delivery-mediums EMAIL 2>&1 >/dev/null); then
+            echo "⚠️ 관리자 계정($email)을 만들지 못했습니다 (배포는 계속합니다): $error" >&2
+            return 0
+        fi
+        echo "✅ 관리자 계정($email)을 만들었습니다. 임시 비밀번호가 든 초대 메일을 확인하세요 (7일 동안 유효)."
+    else
+        echo "⚠️ 관리자 계정($email)을 확인하지 못했습니다 (배포는 계속합니다): $error" >&2
+        return 0
+    fi
+    local group
+    for group in admins approvers; do
+        if ! error=$(aws cognito-idp admin-add-user-to-group --user-pool-id "$pool" --username "$email" \
+                --group-name "$group" 2>&1 >/dev/null); then
+            echo "⚠️ 관리자 계정($email)을 $group 그룹에 넣지 못했습니다 (배포는 계속합니다): $error" >&2
+            return 0
+        fi
+    done
+    echo "✅ 관리자 계정($email): admins·approvers 그룹"
+}
+
 warm_up_mcp() {
     local function_name="$1"
     local response session_id tool_count started
@@ -789,6 +837,9 @@ dotenv_set "$ROOT_ENV_FILE" COGNITO_CLIENT_ID "$USER_POOL_CLIENT_ID"
 # Cognito 도메인은 앞부분만 (https://<앞부분>.auth.<리전>.amazoncognito.com)
 dotenv_set "$ROOT_ENV_FILE" COGNITO_DOMAIN "$(echo "$USER_POOL_DOMAIN" | sed -E 's#https://([^.]*)\..*#\1#')"
 echo "환경 파일($ROOT_ENV_FILE)이 업데이트되었습니다."
+
+# 관리자 계정: User Pool이 생긴 뒤에 만든다 (ADMIN_EMAIL이 있을 때만)
+ensure_admin_account "$USER_POOL_ID" "$ADMIN_EMAIL"
 
 #################################################
 # 6. 프론트엔드 빌드 및 배포

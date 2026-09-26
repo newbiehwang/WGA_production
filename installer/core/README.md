@@ -10,7 +10,7 @@ installer/core/wga-installer check                     # 사전 점검 (터미�
 installer/core/wga-installer check --json              # JSON Lines 출력 (다른 도구에서 읽을 때)
 installer/core/wga-installer check --profile wga-dev   # 기존 AWS CLI 프로필 사용
 installer/core/wga-installer setup                     # 할당량 요청, SSM 비밀 값 등록
-installer/core/wga-installer deploy --alarm-email me@example.com
+installer/core/wga-installer deploy --alarm-email me@example.com --admin-email admin@example.com
 installer/core/wga-installer verify                    # 배포 검증
 installer/core/wga-installer oidc --env dev --block-test   # GitHub Actions 자동 배포 설정
 installer/core/wga-installer teardown --env dev            # 정리 (되돌릴 수 없음)
@@ -80,6 +80,7 @@ macOS 기본 `/usr/bin/python3`는 3.9라서 이 도구를 실행할 수 없고,
 | `--profile` | AWS CLI 프로필. 지정하면 환경 변수의 `AWS_ACCESS_KEY_ID` 등은 자식 명령에 넘기지 않음 |
 | `--repo` | 저장소 경로. 없으면 현재 폴더부터 상위로 `deploy.sh`와 `cloudformation/`을 찾음 |
 | `--alarm-email` | (`deploy`·`oidc`) CloudWatch 알람을 받을 이메일. `oidc`에서는 저장소 변수 `ALARM_EMAIL`로 등록 |
+| `--admin-email` | (`deploy`·`oidc`) 관리자 계정 이메일. 배포할 때 이 사용자를 `admins`·`approvers` 그룹에 넣고, 없으면 만들어 초대 메일을 보낸다. `oidc`에서는 저장소 변수 `ADMIN_EMAIL`로 등록 |
 | `--github-repo` | (`oidc`·`teardown`) GitHub 저장소 owner/repo. 없으면 저장소 폴더의 git remote로 알아냄 |
 | `--test-run`, `--block-test` | (`oidc`) 시험 배포 실행 / main 외 브랜치 배포가 막히는지 확인 |
 | `--allow-prod` | (`teardown`) prod 삭제 허용 |

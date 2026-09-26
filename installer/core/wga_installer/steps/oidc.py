@@ -4,7 +4,7 @@ main에 push하면 GitHub Actions(.github/workflows/deploy.yml)가 장기 Access
 
 1. oidc_role           cloudformation/github-oidc.yaml로 배포 Role 스택(wga-github-oidc-<env>)을 배포한다.
 2. github_environment  GitHub Environment(<env>)를 만들고 배포 브랜치를 main으로 제한한다. prod는 본인을 필수 검토자로.
-3. github_variables    저장소 변수 AWS_REGION, (ALARM_EMAIL), AWS_DEPLOY_ROLE_ARN_<ENV>를 등록한다.
+3. github_variables    저장소 변수 AWS_REGION, (ALARM_EMAIL), (ADMIN_EMAIL), AWS_DEPLOY_ROLE_ARN_<ENV>를 등록한다.
                        Role 변수가 등록되는 순간부터 main push가 실제 배포를 일으킨다 (그래서 마지막에 한다).
 4. workflow_test       (--test-run) main으로 워크플로를 실행해 dev 배포 작업이 성공하는지 본다.
 5. block_test          (--block-test) 임시 브랜치에서 실행해 Environment 보호 규칙이 배포를 막는지 본다.
@@ -334,6 +334,8 @@ def _variables(ctx: Context, runner: Runner, emitter: Emitter, repo: str, role_a
     wanted = [("AWS_REGION", ctx.region, "배포 리전 (dev·prod 배포 작업이 함께 씁니다)")]
     if ctx.alarm_email:
         wanted.append(("ALARM_EMAIL", ctx.alarm_email, "CloudWatch 알람 수신 이메일 (dev·prod 공통)"))
+    if ctx.admin_email:
+        wanted.append(("ADMIN_EMAIL", ctx.admin_email, "관리자 계정 이메일: 배포할 때 admins·approvers 그룹에 넣는다 (dev·prod 공통)"))
     role_var = github.role_variable(ctx.env)
     wanted.append((role_var, role_arn, f"주의: 이 변수가 등록되면 이후 main에 push할 때마다 {ctx.env} 배포가 "
                                        "자동으로 시작됩니다 (AWS 비용 발생)"))

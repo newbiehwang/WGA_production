@@ -45,6 +45,7 @@ class Context:
     aws_profile: str | None           # None이면 AWS CLI 기본 규칙(환경 변수·default 프로필)을 따른다
     base_environ: dict[str, str]      # 설치 마법사를 실행한 환경 변수 (자식 명령 환경의 바탕)
     alarm_email: str | None = None    # deploy·oidc: CloudWatch 알람을 받을 이메일 (deploy.sh의 ALARM_EMAIL)
+    admin_email: str | None = None    # deploy·oidc: 관리자 계정(admins·approvers 그룹) 이메일 (deploy.sh의 ADMIN_EMAIL)
     github_repo: str | None = None    # oidc·teardown: owner/repo. 없으면 저장소 폴더의 git remote로 알아낸다
     allow_prod: bool = False          # teardown: prod 삭제를 허용 (없으면 prod는 거부)
     test_run: bool = False            # oidc: 설정 후 main으로 배포 워크플로를 한 번 실행해 본다
@@ -120,7 +121,7 @@ def _profile_region(profile: str | None, environ: dict[str, str]) -> str | None:
 
 def build_context(*, env: str, region: str | None, profile: str | None, repo: str | None,
                   environ: dict[str, str], cwd: Path, alarm_email: str | None = None,
-                  github_repo: str | None = None, allow_prod: bool = False, test_run: bool = False,
+                  admin_email: str | None = None, github_repo: str | None = None, allow_prod: bool = False, test_run: bool = False,
                   block_test: bool = False) -> Context:
     """명령줄 옵션과 환경 변수로 Context를 만든다."""
     requested = Path(repo).expanduser().resolve() if repo else None
@@ -132,5 +133,5 @@ def build_context(*, env: str, region: str | None, profile: str | None, repo: st
     region_value, region_source = resolve_region(region, environ, profile)
     return Context(env=env, region=region_value, region_source=region_source, repo_root=repo_root,
                    repo_requested=requested, aws_profile=profile, base_environ=dict(environ),
-                   alarm_email=alarm_email, github_repo=github_repo, allow_prod=allow_prod,
+                   alarm_email=alarm_email, admin_email=admin_email, github_repo=github_repo, allow_prod=allow_prod,
                    test_run=test_run, block_test=block_test)

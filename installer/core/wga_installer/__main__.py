@@ -34,16 +34,23 @@ def _alarm_email(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--alarm-email", help="CloudWatch 알람을 받을 이메일 (deploy.sh의 ALARM_EMAIL)")
 
 
+def _admin_email(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--admin-email",
+                        help="관리자 계정 이메일 (deploy.sh의 ADMIN_EMAIL). admins·approvers 그룹에 넣고, 없으면 만들어 초대 메일을 보낸다")
+
+
 def _github_repo(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--github-repo", help="GitHub 저장소 owner/repo (기본: 저장소 폴더의 git remote)")
 
 
 def _deploy_options(parser: argparse.ArgumentParser) -> None:
     _alarm_email(parser)
+    _admin_email(parser)
 
 
 def _oidc_options(parser: argparse.ArgumentParser) -> None:
     _alarm_email(parser)
+    _admin_email(parser)
     _github_repo(parser)
     parser.add_argument("--test-run", action="store_true",
                         help="설정 후 main으로 배포 워크플로를 실행해 dev 배포 작업이 성공하는지 확인 (실제 배포)")
@@ -114,6 +121,7 @@ def main(argv: list[str] | None = None, *, stdin: TextIO | None = None, stdout: 
         ctx = build_context(env=args.env, region=args.region, profile=args.profile, repo=args.repo,
                             environ=environ, cwd=cwd or Path.cwd(),
                             alarm_email=getattr(args, "alarm_email", None),
+                            admin_email=getattr(args, "admin_email", None),
                             github_repo=getattr(args, "github_repo", None),
                             allow_prod=getattr(args, "allow_prod", False),
                             test_run=getattr(args, "test_run", False),

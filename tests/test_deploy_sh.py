@@ -349,3 +349,107 @@ def test_installer_reads_dotenv_like_deploy_sh(tmp_path, text):
     expected = dotenv.read_value(tmp_path / "repo", "ANTHROPIC_API_KEY")
     _, _, put = run_sync(tmp_path, text)
     assert (put["Value"] if put else None) == expected
+
+
+# ---------------------------------------------------------------- 관리자 계정 (ADMIN_EMAIL)
+
+POOL = "ap-northeast-2_POOL"
+ADMIN = "admin@example.com"
+
+
+def run_admin(tmp_path, email, *, get_user="exists", create="ok", group="ok"):
+    """ensure_admin_account를 가짜 aws로 실행한다. get_user: exists | missing | denied"""
+    log = tmp_path / "cognito.log"
+    responses = {
+        "exists": "echo '{}'",
+        "missing": "echo 'An error occurred (UserNotFoundException) when calling the AdminGetUser operation: "
+                   "User does not exist.' >&2; exit 254",
+        "denied": "echo 'An error occurred (AccessDeniedException) when calling the AdminGetUser operation' >&2; "
+                  "exit 254",
+    }
+    fail = "echo 'An error occurred (LimitExceededException)' >&2; exit 254"
+    script = tmp_path / "aws"
+    script.write_text(textwrap.dedent(f"""\
+        #!/bin/bash
+        echo "$*" >> "{log}"
+        case "$*" in
+          *"admin-get-user"*) {responses[get_user]} ;;
+          *"admin-create-user"*) {"echo '{}'" if create == "ok" else fail} ;;
+          *"admin-add-user-to-group"*) {"exit 0" if group == "ok" else fail} ;;
+        esac
+        """))
+    script.chmod(0o755)
+    body = "set -e\n" + extract_function("ensure_admin_account") + f'ensure_admin_account {POOL} "{email}"\necho "계속 진행"\n'
+    result = subprocess.run(["bash", "-c", body], capture_output=True, text=True,
+                            env={"PATH": f"{tmp_path}:/usr/bin:/bin"})
+    calls = [line.split()[1] for line in log.read_text().splitlines()] if log.exists() else []
+    return result, calls, (log.read_text() if log.exists() else "")
+
+
+def test_admin_account_is_created_and_put_in_both_groups(tmp_path):
+    result, calls, log = run_admin(tmp_path, ADMIN, get_user="missing")
+    assert result.returncode == 0 and "계속 진행" in result.stdout and "초대 메일" in result.stdout
+    assert calls == ["admin-get-user", "admin-create-user", "admin-add-user-to-group", "admin-add-user-to-group"]
+    # 이메일을 아이디로 만들고, 인증된 이메일로 표시하고, 초대 메일로 임시 비밀번호를 보낸다
+    assert (f"admin-create-user --user-pool-id {POOL} --username {ADMIN} --user-attributes Name=email,Value={ADMIN} "
+            "Name=email_verified,Value=true --desired-delivery-mediums EMAIL") in log
+    assert "--group-name admins" in log and "--group-name approvers" in log
+
+
+def test_existing_account_only_gets_the_groups(tmp_path):
+    # 스스로 가입한 계정: 비밀번호·속성은 그대로 두고 권한만 더한다
+    result, calls, _ = run_admin(tmp_path, ADMIN, get_user="exists")
+    assert result.returncode == 0 and "이미 있습니다" in result.stdout
+    assert calls == ["admin-get-user", "admin-add-user-to-group", "admin-add-user-to-group"]
+
+
+def test_no_admin_email_changes_nothing(tmp_path):
+    result, calls, _ = run_admin(tmp_path, "")
+    assert result.returncode == 0 and calls == [] and "승인할 사람이 없습니다" in result.stdout
+
+
+@pytest.mark.parametrize("case, expected_calls", [
+    ({"get_user": "denied"}, ["admin-get-user"]),  # 권한이 없으면 만들려고 하지 않는다
+    ({"get_user": "missing", "create": "fail"}, ["admin-get-user", "admin-create-user"]),
+    ({"group": "fail"}, ["admin-get-user", "admin-add-user-to-group"]),
+])
+def test_admin_account_failure_does_not_stop_the_deploy(tmp_path, case, expected_calls):
+    # 인프라는 이미 배포됐다: 경고만 남기고 이어서 프론트엔드를 배포한다
+    result, calls, _ = run_admin(tmp_path, ADMIN, **case)
+    assert result.returncode == 0 and "계속 진행" in result.stdout and "⚠️" in result.stderr
+    assert calls == expected_calls
+
+
+def test_deploy_never_deletes_users_and_runs_admin_after_the_user_pool():
+    assert "admin-delete-user" not in DEPLOY_SH and "admin-remove-user-from-group" not in DEPLOY_SH
+    # User Pool ID를 읽은 뒤에 부른다
+    assert DEPLOY_SH.index('USER_POOL_ID=$(aws ssm get-parameter') < DEPLOY_SH.index(
+        'ensure_admin_account "$USER_POOL_ID" "$ADMIN_EMAIL"')
+
+
+@pytest.mark.parametrize("email", ["not-an-email", "a@b", "a b@example.com", "admin@example.com; rm -rf /"])
+def test_bad_admin_email_stops_before_anything_changes(tmp_path, email):
+    log = tmp_path / "calls.log"
+    script = tmp_path / "aws"
+    script.write_text(f'#!/bin/bash\necho "$*" >> "{log}"\necho 123456789012\n')
+    script.chmod(0o755)
+    result = subprocess.run(["bash", str(ROOT / "deploy.sh"), "dev"], capture_output=True, text=True, cwd=tmp_path,
+                            env={"PATH": f"{tmp_path}:/usr/bin:/bin", "ADMIN_EMAIL": email})
+    assert result.returncode == 1 and "ADMIN_EMAIL" in result.stdout
+    # 계정 확인(sts)과 리전 조회만 하고 멈춘다
+    assert all(line.split()[0] in ("sts", "configure") for line in log.read_text().splitlines())
+
+
+def test_ci_passes_admin_email_to_both_deploys():
+    workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text()
+    assert workflow.count("ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}") == 2
+
+
+def test_self_signup_stays_open_and_invite_has_the_required_placeholders():
+    import yaml
+    from test_injection import CfnLoader
+    pool = yaml.load((ROOT / "cloudformation" / "base.yaml").read_text(encoding="utf-8"), Loader=CfnLoader)[
+        "Resources"]["UserPool"]["Properties"]["AdminCreateUserConfig"]
+    assert pool["AllowAdminCreateUserOnly"] is False  # 일반 사용자는 스스로 가입한다
+    message = pool["InviteMessageTemplate"]["EmailMessage"]  # 관리자 초대 메일. Cognito는 두 자리가 모두 있어야 받는다
+    assert "{username}" in message and "{####}" in message

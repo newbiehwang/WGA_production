@@ -78,7 +78,7 @@ def write_deploy(repo, body):
 
 SUCCESS_SCRIPT = """\
 echo "ran" > ran.txt
-echo "env: $1 region=$AWS_REGION alarm=$ALARM_EMAIL"
+echo "env: $1 region=$AWS_REGION alarm=$ALARM_EMAIL admin=$ADMIN_EMAIL"
 echo "====== 1. CloudFormation 템플릿 업로드 ======"
 echo "====== 2. 기본 스택 배포 시작 ======"
 echo "경고 한 줄" >&2
@@ -110,15 +110,19 @@ def deploy_cli(fake, repo, *extra, input=""):
 def test_successful_deploy(fake, repo):
     write_deploy(repo, SUCCESS_SCRIPT)
     ready_account(fake)
-    result = deploy_cli(fake, repo, "--alarm-email", "me@example.com", input=approve_deploy())
+    result = deploy_cli(fake, repo, "--alarm-email", "me@example.com", "--admin-email", "admin@example.com",
+                        input=approve_deploy())
     evts = events(result.stdout)
     assert result.returncode == 0, result.stdout + result.stderr
 
     confirm = next(e for e in evts if e["type"] == "confirm_required")
-    assert confirm["command"] == "AWS_REGION=ap-northeast-2 ALARM_EMAIL=me@example.com ./deploy.sh dev"
+    assert confirm["command"] == ("AWS_REGION=ap-northeast-2 ALARM_EMAIL=me@example.com ADMIN_EMAIL=admin@example.com "
+                                  "./deploy.sh dev")
 
     logs = [(e["stream"], e["line"]) for e in evts if e["type"] == "log"]
-    assert ("stdout", "env: dev region=ap-northeast-2 alarm=me@example.com") in logs
+    assert ("stdout", "env: dev region=ap-northeast-2 alarm=me@example.com admin=admin@example.com") in logs
+    # 관리자 계정은 새로 만들면 초대 메일이 가고, 이미 있으면 권한만 더한다
+    assert any(stream == "info" and "admin@example.com" in line and "초대 메일" in line for stream, line in logs)
     assert ("stderr", "경고 한 줄") in logs
     assert [(e["phase"], e["label"]) for e in evts if e["type"] == "progress"] == [
         ("1/6", "CloudFormation 템플릿 업로드"), ("2/6", "기본 스택 배포 시작"),

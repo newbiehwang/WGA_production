@@ -113,7 +113,7 @@ WeGoAWS 팀 프로젝트입니다. 본인([@newbiehwang](https://github.com/newb
 - **추가만**: 같은 키를 덮어쓰지 않고(조건부 쓰기), LLM Lambda에는 수정·삭제 권한을 주지 않습니다.
 - **조회** (`GET /audit`): 일반 사용자는 자기 기록만 봅니다. Cognito `admins` 그룹이면 모든 사람의 기록(`scope=all`)이나 특정 사람의 기록(`user=<sub>`)을 봅니다. 기간(`from`·`to`, 최대 31일), 도구(`tool`), 결과(`status`), 종류(`kind`)로 거를 수 있고 `cursor`로 이어 읽습니다.
 - **화면**: 위쪽 내비게이션의 '감사 로그' 탭(`/audit`). 관리자에게는 '모든 사용자' 전환이 보이고, 행을 누르면 도구 입력·오류·질문 ID·가린 값의 수를 펼쳐 봅니다.
-- **관리자 지정**: 가입만으로는 관리자가 될 수 없고, 운영자가 그룹에 넣습니다.
+- **관리자 지정**: 가입만으로는 관리자가 될 수 없습니다. 배포할 때 `ADMIN_EMAIL`로 정하거나(설치 4단계), 운영자가 그룹에 넣습니다.
 
 ```bash
 aws cognito-idp admin-add-user-to-group --user-pool-id <UserPoolId> --username <이메일> --group-name admins
@@ -267,6 +267,9 @@ deploy.sh는 키 값을 명령 인자에 넣지 않고 권한 600 임시 파일�
 
 # 알람을 이메일로 받으려면 (구독 확인 메일의 링크를 눌러야 활성화됨)
 ALARM_EMAIL=you@example.com ./deploy.sh dev
+
+# 관리자 계정을 함께 만들려면 (admins·approvers 그룹. 없으면 만들고 임시 비밀번호가 든 초대 메일을 보냄)
+ADMIN_EMAIL=admin@example.com ./deploy.sh dev
 ```
 
 재배포 동작:
@@ -284,8 +287,17 @@ ALARM_EMAIL=you@example.com ./deploy.sh dev
 
 추가로, SSM Parameter 정보도 제공됩니다.
 
-### 4단계: 승인자 지정
-사용자는 로그인 페이지에서 스스로 가입합니다. 가입한 사용자는 조회만 할 수 있고, AI가 요청한 변경 작업은 `approvers` 그룹만 승인합니다. 승인할 사람(dev에서 혼자 시험할 때는 본인)을 그룹에 넣습니다. User Pool ID는 SSM 파라미터 `/wga/<env>/UserPoolId` 또는 Cognito 콘솔에서 확인합니다.
+### 4단계: 관리자 계정
+일반 사용자는 로그인 페이지에서 스스로 가입하고, 어느 그룹에도 속하지 않습니다(질문·조회만). 관리자는 배포할 때 `ADMIN_EMAIL`로 정합니다.
+
+| 계정 | 만드는 방법 | 할 수 있는 것 |
+|:--|:--|:--|
+| 일반 사용자 | 로그인 페이지에서 스스로 가입 | 질문·조회, 자기 감사 기록 보기, 자기 변경 요청 거절 |
+| 관리자 (`ADMIN_EMAIL`) | `deploy.sh`가 만들거나(초대 메일, 임시 비밀번호 7일) 이미 가입한 계정에 권한을 더함 | 위에 더해 변경 작업 승인(`approvers`), 모든 사람의 감사 로그(`admins`) |
+
+- `deploy.sh`는 User Pool이 생긴 뒤 그 이메일의 사용자가 있는지 보고, 없으면 만들고, 두 그룹에 넣습니다. 사용자를 지우지는 않습니다. 다시 배포해도 그대로이고(이미 들어 있으면 넘어감), 관리자를 바꾸려면 새 이메일로 배포한 뒤 예전 계정은 콘솔에서 그룹을 빼거나 지웁니다.
+- CloudFormation으로 만들지 않은 이유: 이미 가입한 이메일이면 스택 전체가 실패하고, 이메일을 바꾸면 CloudFormation이 예전 사용자를 지웁니다.
+- 실패해도(권한 부족 등) 배포는 계속하고, 직접 실행할 명령을 알려 줍니다. 승인자를 더 두려면 직접 그룹에 넣습니다. User Pool ID는 SSM 파라미터 `/wga/<env>/UserPoolId`에 있습니다.
 
 ```bash
 aws cognito-idp admin-add-user-to-group --user-pool-id <UserPoolId> --username <이메일> --group-name approvers
@@ -496,6 +508,7 @@ main 머지 ──▶ dev 배포 (OIDC Role: wga-github-deploy-dev) ──▶ �
 | `AWS_DEPLOY_ROLE_ARN_PROD` | prod OIDC 스택의 `DeployRoleArn` |
 | `AWS_REGION` | 배포 리전 (선택, 기본 `ap-northeast-2` 서울) |
 | `ALARM_EMAIL` | CloudWatch 알람 수신 이메일 (선택) |
+| `ADMIN_EMAIL` | 관리자 계정 이메일 (선택, `admins`·`approvers` 그룹) |
 
 **배포 Role 권한 범위**: `PowerUserAccess`(IAM 제외 전 서비스) + `wga-*` Role에 한정한 IAM 관리 권한입니다. 관리형 정책은 템플릿에서 쓰는 목록만 연결할 수 있고, 배포 Role 자신은 수정할 수 없습니다. Role 신뢰 정책은 이 저장소의 해당 GitHub Environment에서 실행된 작업만 허용하고(`sub` 조건), Environment의 브랜치 제한과 승인 규칙이 그 작업을 실행할 수 있는 코드와 사람을 제한합니다.
 
