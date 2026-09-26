@@ -21,10 +21,6 @@
   flex-shrink: 0;
 }
 
-.chat-error {
-  margin-bottom: 12px;
-}
-
 /* 새 대화·다른 대화로 바꿀 때: AXPI 탭 전환(slide-forward-new)처럼 오른쪽에서 살짝 밀려 들어오며 나타난다 */
 .chat-stage {
   animation: chat-stage-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -1155,8 +1151,7 @@
 }
 
 .approval-status,
-.approval-result,
-.approval-error {
+.approval-result {
   margin: 0;
   font-size: 0.84rem;
   line-height: 1.45;
@@ -1172,8 +1167,7 @@
   color: #3f8a61;
 }
 
-.approval-result,
-.approval-error {
+.approval-result {
   color: #b02a37;
   overflow-wrap: anywhere;
 }

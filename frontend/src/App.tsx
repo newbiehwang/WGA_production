@@ -7,6 +7,7 @@ import { useAuthStore } from './auth/authStore';
 import { LoginPage } from './components/layout/LoginPage';
 import { LogoutOverlay } from './components/layout/LogoutOverlay';
 import { Navigation } from './components/layout/Navigation';
+import { ToastProvider } from './components/Toast';
 import { AuditPage } from './features/audit/AuditPage';
 import { ChatPage } from './features/chat/ChatPage';
 import { HomePage } from './features/home/HomePage';
@@ -64,6 +65,8 @@ export default function App() {
     if (status === 'signedOut' || !user) return <LoginPage errorMessage={loginError} onSignedIn={refresh} />;
 
     return (
+        // 알림(토스트)은 모든 탭이 같이 쓴다: 띄우는 곳은 useToast, 보이는 곳은 각 탭 패널의 ToastHost
+        <ToastProvider>
         <div className="app-shell">
             <Navigation user={user} onLogout={handleLogout} isLoggingOut={isLoggingOut} />
             <main className="main-content">
@@ -81,5 +84,6 @@ export default function App() {
             </main>
             {isLoggingOut ? <LogoutOverlay /> : null}
         </div>
+        </ToastProvider>
     );
 }

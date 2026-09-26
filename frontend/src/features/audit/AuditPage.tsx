@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { LoadingCard, useMinimumVisible } from '@/components/LoadingCard';
 import { RefreshButton } from '@/components/RefreshButton';
+import { ToastHost, useToast } from '@/components/Toast';
 import type { AuditRecord } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
 import { KindLabel, ResultBadge } from './AuditDetails';
@@ -116,6 +117,11 @@ export function AuditPage() {
     const wanted = fetchRangeOf(baseWindow);
     const [fetchRange, setFetchRange] = useState(wanted);
     const { records, loading, truncated, error, reload } = useAuditRecords(fetchRange);
+    // 불러오지 못하면 패널 위쪽 가운데의 알림으로 (components/Toast). 목록 자리에는 짧은 안내만 남긴다
+    const { show: showToast } = useToast();
+    useEffect(() => {
+        if (error) showToast('error', error);
+    }, [error, showToast]);
     const oldest = records.length ? Date.parse(timeOf(records[records.length - 1])) : Infinity;
     useEffect(() => {
         const missing = !containsRange(fetchRange, wanted) || (truncated && !loading && baseWindow.from < oldest);
@@ -220,11 +226,7 @@ export function AuditPage() {
                 />
             </div>
 
-            {error ? (
-                <div className="plan-panel-error-inline" role="alert">
-                    <p>{error}</p>
-                </div>
-            ) : null}
+            <ToastHost />
 
             <div className="audit-explorer">
                 <div className="audit-results">
@@ -282,7 +284,11 @@ export function AuditPage() {
                         </div>
 
                         {/* 처음 불러올 때는 목록을 비워 두고, 카드는 흰 박스 전체의 가운데에 띄운다 (아래 plan-panel-loading) */}
-                        {error || (listLoading && filtered.length === 0) ? null : filtered.length === 0 ? (
+                        {error && !listLoading ? (
+                            <div className="plan-panel-empty">
+                                <p>감사 로그를 불러오지 못했습니다. 새로 고침을 눌러 다시 시도해 주세요.</p>
+                            </div>
+                        ) : error || (listLoading && filtered.length === 0) ? null : filtered.length === 0 ? (
                             <div className="plan-panel-empty">
                                 {inWindow.length === 0 ? (
                                     <p>이 기간에 기록이 없습니다. 질문을 보내면 도구 호출마다 기록이 남습니다.</p>

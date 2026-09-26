@@ -18,7 +18,7 @@ import { ROLE_LABELS } from '@/auth/authClient';
 import { LoadingCard, useMinimumVisible } from '@/components/LoadingCard';
 import { RefreshButton } from '@/components/RefreshButton';
 import { SearchBox } from '@/components/SearchBox';
-import { Toast, useToast } from '@/components/Toast';
+import { ToastHost, useToast } from '@/components/Toast';
 import { ResetButton } from '@/features/audit/FilterMenu';
 import type { ManagedUser, UserRole } from '@/types/users';
 import { formatKoreanDateTime } from '@/utils/formatters';
@@ -120,9 +120,9 @@ export function UsersPage() {
     const [truncated, setTruncated] = useState(false); // MAX_PAGES쪽을 넘어 다 받지 못했다
     const [loading, setLoading] = useState(true);
     const listLoading = useMinimumVisible(loading); // 목록 자리의 기다림 카드 (최소 1초)
-    const [error, setError] = useState<string | null>(null); // 목록을 받지 못했을 때 (목록 자리에 남긴다)
-    // 바꾼 결과는 패널 위쪽 가운데의 알림으로 (성공·실패 모두, components/Toast)
-    const { toast, show: showToast, clear: clearToast } = useToast();
+    const [error, setError] = useState<string | null>(null); // 목록을 받지 못했을 때 (알림을 띄우고, 목록 자리에 짧게 남긴다)
+    // 바꾼 결과와 오류는 패널 위쪽 가운데의 알림으로 (components/Toast)
+    const { show: showToast } = useToast();
     const [busy, setBusy] = useState<string | null>(null); // 바꾸는 중인 사용자
     const [inviteOpen, setInviteOpen] = useState(false);
     const requestNo = useRef(0); // 마지막 조회의 응답만 쓴다
@@ -147,11 +147,12 @@ export function UsersPage() {
         } catch (err) {
             if (no !== requestNo.current) return;
             setError(userErrorText(err));
+            showToast('error', userErrorText(err));
             setUsers([]);
         } finally {
             if (no === requestNo.current) setLoading(false);
         }
-    }, []);
+    }, [showToast]);
 
     useEffect(() => {
         load();
@@ -238,11 +239,6 @@ export function UsersPage() {
                 </p>
             </div>
 
-            {error ? (
-                <div className="plan-panel-error-inline" role="alert">
-                    <p>{error}</p>
-                </div>
-            ) : null}
 
             <div className="plan-panel-body">
                 <div className="plan-table users-table">
@@ -255,7 +251,11 @@ export function UsersPage() {
 
                     {/* 불러오는 동안 목록은 비워 두고, 카드는 흰 박스 전체의 가운데에 띄운다 (아래 plan-panel-loading) */}
                     {listLoading ? null : filtered.length === 0 ? (
-                        error ? null : (
+                        error ? (
+                            <div className="plan-panel-empty">
+                                <p>사용자를 불러오지 못했습니다. 새로 고침을 눌러 다시 시도해 주세요.</p>
+                            </div>
+                        ) : (
                             <div className="plan-panel-empty">
                                 {users.length ? (
                                     <>
@@ -342,7 +342,7 @@ export function UsersPage() {
                 </div>
             ) : null}
 
-            <Toast toast={toast} onDone={clearToast} />
+            <ToastHost />
 
             {inviteOpen ? <InviteModal onInvited={invited} onClose={() => setInviteOpen(false)} /> : null}
         </section>

@@ -13,6 +13,7 @@
 // - 승인 버튼 하나로 실행된다: 카드 자체가 무엇이 바뀌는지 보여 주는 확인 단계다.
 import { useEffect, useState } from 'react';
 import { actionErrorText, decideAction, getAction } from '@/api/actions';
+import { useToast } from '@/components/Toast';
 import { useChatStore } from '@/stores/chatStore';
 import type { PendingAction, TaintedBy } from '@/types/actions';
 import { labelOf } from '@/utils/toolTrace';
@@ -47,7 +48,7 @@ const distanceText = (seen: TaintedBy) => (seen.callsAgo <= 1 ? '바로 다음 �
 export function ApprovalCard({ action: initial }: { action: PendingAction }) {
     const [action, setAction] = useState(initial);
     const [busy, setBusy] = useState<'approve' | 'deny' | null>(null);
-    const [error, setError] = useState<string | null>(null);
+    const { show: showToast } = useToast(); // 결정하지 못하면 패널 위쪽 가운데의 알림으로 (components/Toast)
     const waiting = useChatStore((s) => s.waitingForResponse);
     const remaining = useRemainingSeconds(action.expiresAt, action.status === 'pending');
     const status = action.status === 'pending' && remaining === 0 ? 'expired' : action.status;
@@ -67,7 +68,6 @@ export function ApprovalCard({ action: initial }: { action: PendingAction }) {
 
     const decide = async (decision: 'approve' | 'deny') => {
         setBusy(decision);
-        setError(null);
         try {
             const latest = await decideAction(action.actionId, decision);
             setAction(latest);
@@ -76,7 +76,7 @@ export function ApprovalCard({ action: initial }: { action: PendingAction }) {
                 useChatStore.getState().explainAction(latest.actionId, `승인: ${latest.summary}`);
             }
         } catch (err) {
-            setError(actionErrorText(err));
+            showToast('error', actionErrorText(err));
             // 이미 결정되었거나 만료된 요청이면 지금 상태로 바꿔 둔다
             getAction(action.actionId).then(setAction).catch(() => {});
         } finally {
@@ -175,11 +175,6 @@ export function ApprovalCard({ action: initial }: { action: PendingAction }) {
                 // 앱의 승인 기록과 AWS의 변경 기록(CloudTrail)을 잇는 열쇠. 보통 몇 분 뒤 CloudTrail에서 조회된다
                 <p className="approval-trail">
                     CloudTrail: {action.cloudtrail.event_name} · 요청 ID <code>{action.cloudtrail.request_id}</code>
-                </p>
-            ) : null}
-            {error ? (
-                <p className="approval-error" role="alert">
-                    {error}
                 </p>
             ) : null}
         </section>

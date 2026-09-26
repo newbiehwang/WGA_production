@@ -598,22 +598,6 @@
   color: #8f3b44;
 }
 
-.plan-panel-error-inline {
-  margin: 0 0 12px;
-  border: 1px solid #f3c2c7;
-  border-radius: 10px;
-  background: #fdf1f2;
-  padding: 10px 12px;
-}
-
-.plan-panel-error-inline p {
-  margin: 0;
-  font-family: var(--font-body);
-  font-size: 0.82rem;
-  line-height: 1.45;
-  color: #8f3b44;
-}
-
 .plan-loading-bubble {
   border: 1px solid #dfe6ee;
   border-radius: 12px;
@@ -909,22 +893,6 @@
   opacity: 0.7;
 }
 
-.plan-panel-error-inline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.plan-panel-error-inline button {
-  border: 0;
-  background: transparent;
-  color: #8f3b44;
-  font-size: 1.1rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
 /* ---------------------------------------------------------------- AXPI 추진계획서 생성 팝업창 (닫기 버튼·본문·제목·아래 버튼) */
 
 .vdt-model-close {
@@ -1068,78 +1036,93 @@
   color: #6c757d;
 }
 
-/* ---------------------------------------------------------------- 상태 변경 알림 (components/Toast.tsx)
-   흰 패널(plan-panel, position: relative)의 위쪽 가운데에 작은 상자로 뜬다 */
+/* ---------------------------------------------------------------- 알림 (components/Toast.tsx: 모든 탭의 상태 변경·경고·오류)
+   모양은 기다림 카드(.loading-card)와 같다: 같은 폭·모서리·바탕·그림자, 원 아래 굵은 한 줄, 위에서 살짝 내려오며 나타남.
+   자리는 흰 패널(plan-panel, position: relative)의 위쪽 가운데 */
 .panel-toast {
   position: absolute;
   top: 14px;
   left: 50%;
   z-index: 40;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  max-width: min(520px, calc(100% - 32px));
-  padding: 8px 8px 8px 12px;
-  border: 1px solid #e3e9f1;
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
-  font-size: 13px;
-  color: #1f2933;
+  width: min(320px, calc(100% - 32px));
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 18px 16px;
+  border: 1px solid rgba(223, 230, 238, 0.92);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 20px 34px rgba(15, 23, 42, 0.24);
+  cursor: pointer;
   transform: translateX(-50%);
-  animation: panel-toast-in 220ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  animation: panel-toast-in 160ms ease both;
 }
 
 .panel-toast.is-leaving {
   animation: panel-toast-out 180ms ease both;
 }
 
+/* 원: 옅은 고리 위에 진한 호가 한 바퀴 그려지고(기다림 카드의 도는 원과 같은 색·굵기), 이어서 체크나 !가 그려진다 */
 .panel-toast-icon {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  color: #fff;
+  display: block;
+  overflow: visible;
 }
 
-.panel-toast.is-success .panel-toast-icon {
-  background: var(--color-primary);
+.panel-toast-ring,
+.panel-toast-arc,
+.panel-toast-mark {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.panel-toast.is-error .panel-toast-icon {
-  background: #d03b3b;
+.panel-toast-ring {
+  stroke: rgba(0, 123, 255, 0.22);
+}
+
+.panel-toast-arc {
+  stroke: var(--color-primary);
+  stroke-dasharray: 100;
+  transform: rotate(-90deg);
+  transform-origin: 14px 14px;
+  animation: panel-toast-draw 420ms cubic-bezier(0.4, 0, 0.2, 1) 80ms both;
+}
+
+.panel-toast-mark {
+  stroke: var(--color-primary);
+  stroke-dasharray: 100;
+  animation: panel-toast-draw 260ms ease-out 440ms both;
+}
+
+.panel-toast.is-error .panel-toast-ring {
+  stroke: rgba(208, 59, 59, 0.22);
+}
+
+.panel-toast.is-error .panel-toast-arc,
+.panel-toast.is-error .panel-toast-mark {
+  stroke: #d03b3b;
 }
 
 .panel-toast-text {
-  min-width: 0;
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font-label);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   line-height: 1.45;
+  text-align: center;
+  color: #1f4f86;
   overflow-wrap: anywhere;
 }
 
-.panel-toast-close {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #9aa4ae;
-  cursor: pointer;
-}
-
-.panel-toast-close:hover {
-  background: #f1f4f8;
-  color: #5f6670;
+.panel-toast.is-error .panel-toast-text {
+  color: #8f2330;
 }
 
 @keyframes panel-toast-in {
-  from { opacity: 0; transform: translate(-50%, -8px); }
+  from { opacity: 0; transform: translate(-50%, -6px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
@@ -1148,9 +1131,16 @@
   to { opacity: 0; transform: translate(-50%, -6px); }
 }
 
+@keyframes panel-toast-draw {
+  from { stroke-dashoffset: 100; }
+  to { stroke-dashoffset: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .panel-toast,
-  .panel-toast.is-leaving {
+  .panel-toast.is-leaving,
+  .panel-toast-arc,
+  .panel-toast-mark {
     animation: none;
   }
 }
