@@ -57,7 +57,7 @@
 .audit-reset:focus-visible,
 .audit-filter-button:focus-visible,
 .audit-filter-chips button:focus-visible,
-.audit-filter-panel-head button:focus-visible {
+.audit-filter-panel-foot button:focus-visible {
   outline: 2px solid rgba(0, 123, 255, 0.32);
   outline-offset: 2px;
 }
@@ -160,6 +160,17 @@
   color: #1f4f86;
 }
 
+/* 처음 값인 기간 칩: 뺄 수 없어 ✕가 없다. 회색으로 */
+.audit-filter-chips li.is-fixed {
+  padding-right: 10px;
+  background: #f1f4f8;
+  color: #4a5561;
+}
+
+.audit-filter-chips li.is-fixed .audit-filter-chip-facet {
+  color: #6c757d;
+}
+
 .audit-filter-chip-facet {
   color: #4a6f9a;
 }
@@ -209,44 +220,69 @@
   animation: menu-in 140ms ease both;
 }
 
-.audit-filter-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px 10px;
+/* 창 위쪽: 기간 · 그룹 기준 (소제목 없이 이름표와 버튼만) */
+.audit-filter-options {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px 12px;
   border-bottom: 1px solid #edf1f6;
 }
 
-.audit-filter-panel-head strong {
-  font-family: var(--font-label);
-  font-size: 0.9rem;
-  color: #1f2933;
-}
-
-.audit-filter-panel-head div {
+.audit-filter-option {
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  align-items: flex-start; /* '직접' 입력이 열려도 이름표는 버튼 줄 높이에 */
+  gap: 8px 12px;
 }
 
-.audit-filter-panel-head button {
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  padding: 4px 8px;
+.audit-filter-option > .audit-filter-label,
+.audit-filter-option > .audit-filter-hint {
+  line-height: 34px; /* 버튼 묶음(.audit-segment)의 높이 */
+}
+
+.audit-filter-option > .audit-filter-label {
+  width: 64px;
+  flex-shrink: 0;
+}
+
+.audit-filter-hint {
+  font-size: 12px;
+  color: #8a94a0;
+}
+
+/* 창 안의 기간 '직접' 입력: 떠 있는 창이 아니라 기간 버튼 아래에 붙여 연다 */
+.audit-filter-panel .audit-period-popover {
+  position: static;
+  width: min(320px, 100%);
+  margin-top: 8px;
+  box-shadow: none;
+  background: #f9fbfe;
+}
+
+/* 창 아래쪽: 닫기 */
+.audit-filter-panel-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border-top: 1px solid #edf1f6;
+}
+
+.audit-filter-panel-foot button {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: #fff;
   font-family: var(--font-label);
   font-size: 12px;
   font-weight: 600;
-  color: var(--color-primary);
+  color: #3c4650;
   cursor: pointer;
 }
 
-.audit-filter-panel-head button:hover:not(:disabled) {
-  background: #f1f6fd;
-}
-
-.audit-filter-panel-head button:disabled {
-  cursor: default;
-  color: #9aa4ae;
+.audit-filter-panel-foot button:hover {
+  border-color: rgba(0, 123, 255, 0.4);
+  color: var(--color-primary);
 }
 
 /* ---------------------------------------------------------------- 거르기 목록 (FacetSidebar, 세부 선택 창 안) */
@@ -530,27 +566,8 @@
   border-radius: 12px;
 }
 
-.audit-histogram-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px 12px;
-  margin-bottom: 8px;
-}
-
-.audit-histogram-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.audit-histogram-group .audit-segment-btn {
-  height: 26px;
-  font-size: 0.76rem;
-}
-
 .audit-histogram-hint {
+  margin-left: auto;
   font-size: 12px;
   color: #8a94a0;
 }

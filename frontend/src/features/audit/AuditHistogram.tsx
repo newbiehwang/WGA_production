@@ -1,5 +1,5 @@
 // 감사 로그 목록 위의 시간대별 건수 막대그래프 (Datadog Audit Trail의 막대그래프를 따랐다).
-//   나눠 보기 [결과][종류][요청자][도구]                         드래그하거나 막대를 눌러 기간 좁히기
+//                                                             드래그하거나 막대를 눌러 기간 좁히기
 //   ■ 성공 471  ■ 실패 43 · 8.4%                               ← 범례: 누르면 그 값으로 거른다
 //   30 ┤─────────────────────────────────          ← 가는 가로 눈금선 (0 · 중간 · 윗값)
 //   20 ┤──────────────▅──────────────────
@@ -8,7 +8,7 @@
 //        9/24     06:00     12:00     18:00    9/25      ← 날이 바뀌는 눈금은 날짜(굵게), 나머지는 시각
 //
 // - 목록과 같은 기록(기간·검색어·거르기를 적용한 것)을 칸마다 센다. 칸은 기간에 따라 1분~하루 (timeWindow.bucketSizeOf)
-// - 나눠 보기(Datadog의 group by): 칸마다 무엇으로 나눠 쌓을지 고른다 (seriesOf)
+// - 그룹 기준(Datadog의 group by): 칸마다 무엇으로 묶어 색을 나눠 쌓을지. 필터 창(FilterMenu)에서 고른다 (seriesOf)
 //   · 결과: 실패(아래)·성공(위). 실패를 바닥에 두어 칸끼리 실패 건수를 비교하기 쉽게. 범례에 실패율
 //   · 종류: 도구 호출·질문·변경 작업·사용자 관리
 //   · 요청자·도구: 받은 기록 전체에서 많은 순 5개 + 기타 (도구는 도구 없는 기록을 '도구 없음'으로 따로)
@@ -26,7 +26,6 @@
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import type { AuditRecord } from '@/types/audit';
 import {
-    GROUP_OPTIONS,
     KIND_LABELS,
     requesterOf,
     timeOf,
@@ -36,7 +35,7 @@ import {
 } from './auditModel';
 import { bucketSizeOf, bucketStart, formatShort, ticksOf, type TimeWindow } from './timeWindow';
 
-// ---------------------------------------------------------------- 나눠 보기
+// ---------------------------------------------------------------- 그룹 기준
 
 // 쌓는 계열 하나 (아래부터 쌓는다). facet·values: 범례를 누르면 왼쪽 거르기를 이 값들로 (없으면 누를 수 없다)
 interface Series {
@@ -158,7 +157,6 @@ export function AuditHistogram({
     loading,
     highlightAt,
     groupBy,
-    onGroupBy,
     onSelect,
     onFilter,
 }: {
@@ -168,7 +166,6 @@ export function AuditHistogram({
     loading: boolean; // 다시 불러오는 중: 앞 그래프를 흐리게 남겨 둔다
     highlightAt: number | null; // 목록에서 마우스를 올린 기록의 시각
     groupBy: GroupBy;
-    onGroupBy: (groupBy: GroupBy) => void;
     onSelect: (window: TimeWindow) => void;
     onFilter: (facet: FacetId, values: string[]) => void; // 범례를 눌렀다
 }) {
@@ -317,27 +314,6 @@ export function AuditHistogram({
 
     return (
         <div className={`audit-histogram${loading ? ' is-loading' : ''}`}>
-            <div className="audit-histogram-head">
-                <div className="audit-histogram-group" role="group" aria-label="나눠 보기">
-                    <span className="audit-filter-label" aria-hidden="true">
-                        나눠 보기
-                    </span>
-                    <div className="audit-segment">
-                        {GROUP_OPTIONS.map((option) => (
-                            <button
-                                key={option.value}
-                                type="button"
-                                className={`audit-segment-btn${option.value === groupBy ? ' is-active' : ''}`}
-                                aria-pressed={option.value === groupBy}
-                                onClick={() => onGroupBy(option.value)}
-                            >
-                                {option.label}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-                {total > 0 ? <span className="audit-histogram-hint">드래그하거나 막대를 눌러 기간 좁히기</span> : null}
-            </div>
             <ul className="audit-histogram-legend" aria-label="범례">
                 {legend.map((s) => {
                     const count = totals[s.key] ?? 0;
@@ -369,6 +345,11 @@ export function AuditHistogram({
                         </li>
                     );
                 })}
+                {total > 0 ? (
+                    <li className="audit-histogram-hint" aria-hidden="true">
+                        드래그하거나 막대를 눌러 기간 좁히기
+                    </li>
+                ) : null}
             </ul>
             <div ref={wrap} className="audit-histogram-plot">
                 {width > 0 ? (

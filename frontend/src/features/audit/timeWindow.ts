@@ -26,12 +26,18 @@ export const PRESETS: { id: PresetId; label: string; ms: number }[] = [
 export const DEFAULT_PERIOD: Period = { preset: '7d' };
 
 export const isPreset = (period: Period): period is { preset: PresetId } => 'preset' in period;
+export const isDefaultPeriod = (period: Period) =>
+    isPreset(period) && period.preset === (DEFAULT_PERIOD as { preset: PresetId }).preset;
 
 export const windowOf = (period: Period, now: number): TimeWindow => {
     if (!isPreset(period)) return period;
     const preset = PRESETS.find((p) => p.id === period.preset) ?? PRESETS[3];
     return { from: now - preset.ms, to: now };
 };
+
+// 기간 이름 (필터 칩): '최근 7일' 또는 직접 정한 구간(9. 21. 09:00 ~ 9. 22. 18:00)
+export const periodLabel = (period: Period) =>
+    isPreset(period) ? `최근 ${PRESETS.find((p) => p.id === period.preset)?.label ?? ''}` : formatWindow(period);
 
 // ---------------------------------------------------------------- 받아 올 범위 (UTC 날짜)
 
