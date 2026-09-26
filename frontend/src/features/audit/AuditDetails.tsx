@@ -1,10 +1,9 @@
-// 감사 기록 한 건을 자세히 보이는 조각들: 항목 표(Details), 역추적 열기(TraceSection), 결과 배지, 종류 이름, 표시 배지.
+// 감사 기록 한 건을 자세히 보이는 조각들: 항목 표(Details, 맨 위에 7계층 위치와 역추적), 결과 배지, 종류 이름, 표시 배지.
 // 목록 행(AuditPage)과 기록 팝업창(AuditDetailModal)이 같이 쓴다
-import { Fragment, useState, type ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import type { AuditRecord } from '@/types/audit';
 import { labelOf } from '@/utils/toolTrace';
 import { AuditLayers } from './AuditLayers';
-import { AuditTrace } from './AuditTrace';
 import {
     ACTION_EVENTS,
     ADMIN_EVENTS,
@@ -152,28 +151,7 @@ export function Details({ record }: { record: AuditRecord }) {
                     </Fragment>
                 ))}
             </dl>
-            {record.kind === 'action' && record.actionId ? (
-                <TraceSection actionId={record.actionId} day={record.day} />
-            ) : null}
         </>
-    );
-}
-
-// 변경 작업 행: 누르면 역추적을 연다 (누를 때만 서버에 묻는다)
-function TraceSection({ actionId, day }: { actionId: string; day: string }) {
-    const [open, setOpen] = useState(false);
-    return (
-        <div className="audit-trace-section">
-            <button
-                type="button"
-                className="plan-reload-button"
-                aria-expanded={open}
-                onClick={() => setOpen((prev) => !prev)}
-            >
-                {open ? '역추적 닫기' : '층별로 따져 보기'}
-            </button>
-            {open ? <AuditTrace actionId={actionId} day={day} /> : null}
-        </div>
     );
 }
 
