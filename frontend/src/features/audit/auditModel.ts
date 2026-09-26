@@ -1,7 +1,7 @@
 // 감사 기록을 화면에 보이기 위한 이름표·요약과, 왼쪽 거르기 목록(facet)의 계산.
 // 화면(React)과 떨어진 순수 함수만 둔다. AuditPage·AuditDetails·FacetSidebar·AuditDetailModal이 같이 쓴다.
 import { ROLE_LABELS, type Role } from '@/auth/authClient';
-import type { AuditKind, AuditLocus, AuditRecord, TokenCounts } from '@/types/audit';
+import type { AuditKind, AuditLocus, AuditRecord, TokenCounts, TraceLayer } from '@/types/audit';
 import { labelOf, summarize } from '@/utils/toolTrace';
 
 // ---------------------------------------------------------------- 이름표
@@ -44,6 +44,26 @@ export const LOCI: { value: AuditLocus; label: string; description: string }[] =
     { value: 'effect', label: '효과', description: '승인·거절·실행·실패' },
 ];
 export const locusOf = (value?: string) => LOCI.find((locus) => locus.value === value);
+
+// 7계층: 역추적(services/llm/audit_trace.py)과 같은 차례·같은 이름. 기록마다의 층(LOCI)은 이 중 기록으로 남길 수 있는 다섯이다.
+// recorded: 'row' 행으로 남는다 · 'flag' 행이 따로 없고 다른 행의 표시로 남는다(체류: 승인 요청 행의 taintedBy)
+//           'none' 모델 안이라 기록할 수 없다(판단) · 'outside' 앱 밖이라 대조할 단서만 남긴다(매개: CloudTrail)
+export const LAYERS: {
+    id: TraceLayer;
+    label: string;
+    en: string; // 영어 이름 (설명 칸의 제목 옆에 회색으로)
+    description: string;
+    recorded: 'row' | 'flag' | 'none' | 'outside';
+}[] = [
+    { id: 'effect', label: '효과', en: 'Effect', description: '승인·거절·실행·실패. AWS가 실제로 바뀌었는가', recorded: 'row' },
+    { id: 'egress', label: '유출', en: 'Egress', description: '변경 도구를 부르려 함. 실행하지 않고 승인을 요청한다', recorded: 'row' },
+    { id: 'residence', label: '체류', en: 'Residence', description: '의심 문구가 든 결과를 읽은 뒤 같은 질문에서 변경을 요청함', recorded: 'flag' },
+    { id: 'deliberation', label: '판단', en: 'Deliberation', description: '모델이 무엇을 할지 정함. 모델 안이라 기록할 수 없다', recorded: 'none' },
+    { id: 'ingress', label: '유입', en: 'Ingress', description: '조회·결과물 도구의 결과가 모델에게 들어옴', recorded: 'row' },
+    { id: 'interface', label: '경계', en: 'Interface', description: '위험도 등록부에 없는 도구를 부름. 변경 도구로 다룬다', recorded: 'row' },
+    { id: 'mediation', label: '매개', en: 'Mediation', description: 'AWS 쪽 기록(CloudTrail)과 맞는가. 앱 밖이라 대조할 요청 ID만 남긴다', recorded: 'outside' },
+];
+export const layerLabel = (id: TraceLayer) => LAYERS.find((layer) => layer.id === id)?.label ?? id;
 
 // 변경 작업의 사건 → 결과 열에 보일 이름과 모양
 export const ACTION_EVENTS: Record<string, { label: string; className: string }> = {

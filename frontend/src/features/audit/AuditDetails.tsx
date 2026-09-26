@@ -3,13 +3,13 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import type { AuditRecord } from '@/types/audit';
 import { labelOf } from '@/utils/toolTrace';
+import { AuditLayers } from './AuditLayers';
 import { AuditTrace } from './AuditTrace';
 import {
     ACTION_EVENTS,
     ADMIN_EVENTS,
     GROUP_NAMES,
     REDACTED_LABELS,
-    locusOf,
     redactedTotal,
     roleText,
     TOKEN_LABELS,
@@ -23,14 +23,6 @@ import {
 
 export function Details({ record }: { record: AuditRecord }) {
     const rows: [string, ReactNode][] = [];
-    const locus = locusOf(record.locus);
-    if (locus)
-        rows.push([
-            '층',
-            <span key="locus">
-                {locus.label} <span className="audit-muted">({locus.description})</span>
-            </span>,
-        ]);
     if (record.kind === 'tool') {
         rows.push(['도구 이름', <code key="tool">{record.tool}</code>]);
         rows.push([
@@ -150,6 +142,8 @@ export function Details({ record }: { record: AuditRecord }) {
 
     return (
         <>
+            {/* 층: 7계층에서 이 기록의 자리를 맨 위에 (도구 호출·변경 작업. 질문·사용자 관리 행에는 층이 없다) */}
+            {record.locus ? <AuditLayers record={record} /> : null}
             <dl className="audit-details">
                 {rows.map(([name, value]) => (
                     <Fragment key={name}>
