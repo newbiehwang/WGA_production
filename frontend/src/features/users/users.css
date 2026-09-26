@@ -1,29 +1,85 @@
-/* 사용자 관리 화면. 패널·목록 행·상태 배지·버튼은 AXPI(components/panel.css)와 감사 로그(audit.css)의 것을 쓰고,
-   여기에는 열 너비, 도구 줄, 권한 토글, 계정 버튼만 둔다 */
+/* 사용자 관리 화면. 패널·목록 행·상태 배지·버튼·검색창은 AXPI(components/panel.css)의 것을, 필터·칩·건수는
+   감사 로그(audit.css)의 것을 쓰고, 여기에는 머리 버튼, 초대 팝업창, 열 너비, 권한 토글, 계정 버튼만 둔다 */
 
 .users-panel {
   gap: 0;
 }
 
-.users-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px 18px;
-  margin-bottom: 14px;
-}
-
-.users-search,
-.users-invite {
+/* 머리: 초대(+) · 새로 고침 */
+.users-header-actions {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 
+/* 필터 창: 거르기가 셋뿐이라 감사 로그보다 좁게, 위 줄에는 필터 초기화만 */
+.audit-filter-panel.users-filter-panel {
+  width: min(620px, 100%);
+}
+
+.audit-filter-top.users-filter-top {
+  justify-content: flex-end;
+  padding: 12px 48px 10px 16px;
+}
+
+/* 초대 팝업창 (create-plan-model을 작게) */
+.create-plan-model.users-invite-model {
+  width: min(460px, calc(100vw - 28px));
+  height: auto;
+  border-radius: 16px;
+}
+
+.users-invite-head {
+  padding: 22px 56px 6px 24px;
+  display: grid;
+  gap: 8px;
+}
+
+.users-invite-head h3 {
+  margin: 0;
+}
+
+.users-invite-head p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #5f6670;
+}
+
+.users-invite-form {
+  display: grid;
+  gap: 10px;
+  padding: 12px 24px 22px;
+}
+
+.users-invite-field {
+  display: grid;
+  gap: 6px;
+}
+
+.users-invite-field > span {
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 700;
+  color: #5f6670;
+}
+
+.users-invite-error {
+  margin: 0;
+  font-size: 13px;
+  color: #b02a37;
+}
+
+.users-invite-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 .users-input {
-  height: 34px;
-  min-width: 220px;
+  height: 38px;
+  min-width: 0;
   border: 1px solid var(--color-line);
   border-radius: 10px;
   background: #fff;
@@ -221,14 +277,4 @@
   .users-row-grid > span:nth-child(2) { grid-area: roles; }
   .users-row-grid > span:nth-child(3) { grid-area: date; font-size: 12px; }
   .users-row-grid > span:nth-child(4) { grid-area: account; }
-
-  .users-search,
-  .users-invite {
-    width: 100%;
-  }
-
-  .users-input {
-    min-width: 0;
-    flex: 1;
-  }
 }

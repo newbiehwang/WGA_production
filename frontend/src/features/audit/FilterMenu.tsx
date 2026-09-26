@@ -38,16 +38,19 @@ const chipLabel = (id: FacetId, value: string, records: AuditRecord[]) => {
     return value;
 };
 
-// 필터 초기화 버튼 (필터 창 오른쪽 위, 조건에 맞는 기록이 없을 때의 안내). 처음 화면이면 꺼 둔다
-export function ResetButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
+// 필터 초기화 버튼 (필터 창 오른쪽 위, 조건에 맞는 기록이 없을 때의 안내). 처음 화면이면 꺼 둔다.
+// 사용자 관리 화면도 쓴다 (title: 그 화면에서 무엇을 되돌리는지)
+export function ResetButton({
+    onClick,
+    disabled,
+    title = '처음 화면으로 되돌립니다 (거르기·검색어를 지우고, 기간은 전체, 그룹 기준은 결과)',
+}: {
+    onClick: () => void;
+    disabled: boolean;
+    title?: string;
+}) {
     return (
-        <button
-            type="button"
-            className="audit-reset"
-            onClick={onClick}
-            disabled={disabled}
-            title="처음 화면으로 되돌립니다 (거르기·검색어를 지우고, 기간은 전체, 그룹 기준은 결과)"
-        >
+        <button type="button" className="audit-reset" onClick={onClick} disabled={disabled} title={title}>
             <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
                 <path
                     d="M4 12a8 8 0 1 0 2.34-5.66M4 4v5h5"
