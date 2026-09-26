@@ -80,15 +80,6 @@
   color: #1f2933;
 }
 
-.login-hint {
-  margin: 12px 0 0;
-  font-size: 0.8rem;
-  line-height: 1.5;
-  color: var(--color-neutral);
-  text-align: center;
-  word-break: keep-all; /* 한국어 단어 중간에서 줄을 바꾸지 않는다 */
-}
-
 .login-description {
   margin: 4px 0 0;
   font-size: 0.9rem;

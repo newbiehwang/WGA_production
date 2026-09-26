@@ -544,12 +544,6 @@ def test_only_the_mcp_role_can_change_resources_and_only_wga_ones():
 def test_approvers_group_and_pending_table_exist():
     base = yaml.load((ROOT / "cloudformation" / "base.yaml").read_text(encoding="utf-8"), Loader=CfnLoader)
     assert base["Resources"]["ApproversGroup"]["Properties"]["GroupName"] == "approvers"
-    # 자체 가입을 막는다: 로그인한 사용자는 계정 정보를 조회할 수 있어 운영자만 사용자를 만든다 (R2)
-    admin_only = base["Resources"]["UserPool"]["Properties"]["AdminCreateUserConfig"]
-    assert admin_only["AllowAdminCreateUserOnly"] is True
-    # Cognito는 초대 메일에 아이디와 임시 비밀번호 자리가 모두 있어야 받는다
-    message = admin_only["InviteMessageTemplate"]["EmailMessage"]
-    assert "{username}" in message and "{####}" in message
     llm = yaml.load((ROOT / "cloudformation" / "llm.yaml").read_text(encoding="utf-8"), Loader=CfnLoader)
     table = llm["Resources"]["PendingActionsTable"]["Properties"]
     assert table["TimeToLiveSpecification"] == {"AttributeName": "ttl", "Enabled": True}

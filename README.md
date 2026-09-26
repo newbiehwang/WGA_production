@@ -146,7 +146,7 @@ aws cognito-idp admin-add-user-to-group --user-pool-id <UserPoolId> --username <
 - **지표**: `WGA/Governance` 네임스페이스에 EMF(로그 한 줄)로 발행합니다 (`services/llm/metrics.py`): 도구 호출·실패, 인젝션 의심, 가린 값, 승인 요청·승인·거절, 실행 실패. 서비스 대시보드 아래에 거버넌스 줄을 추가했습니다.
 - **알람**: 인젝션 의심 5분에 3건 이상, 승인 거절 15분에 3번 이상. 거버넌스 알람(`wga-<env>-governance-*`)은 AI가 요청하는 알람 알림 변경으로 끌 수 없습니다 (도구 코드 + IAM 명시적 Deny).
 
-7~10번 기능이 무엇을 막는지, 각각을 어떤 테스트로 확인하는지, 아직 막지 못한 위험(EC2 중지·시작의 IAM 대상 제한 없음, 요청 수·비용 한도 없음 등)은 [위협 모델](docs/threat-model.md)에 정리했습니다.
+7~10번 기능이 무엇을 막는지, 각각을 어떤 테스트로 확인하는지, 아직 막지 못한 위험(가입한 누구나 계정 정보를 조회할 수 있음, 요청 수·비용 한도 없음 등)은 [위협 모델](docs/threat-model.md)에 정리했습니다.
 
 ### 11. 간편한 배포
 - **단일 스크립트 배포**: `deploy.sh` 하나로 전체 인프라와 프론트엔드 배포
@@ -284,14 +284,10 @@ ALARM_EMAIL=you@example.com ./deploy.sh dev
 
 추가로, SSM Parameter 정보도 제공됩니다.
 
-### 4단계: 사용자 만들기
-자체 가입은 막혀 있습니다(로그인하면 이 계정의 IAM 정책·버킷 목록·비용을 조회할 수 있어서). 운영자가 사용자를 만들면 임시 비밀번호가 든 초대 메일이 가고, 처음 로그인할 때 새 비밀번호를 정합니다. User Pool ID는 SSM 파라미터 `/wga/<env>/UserPoolId` 또는 Cognito 콘솔에서 확인합니다.
+### 4단계: 승인자 지정
+사용자는 로그인 페이지에서 스스로 가입합니다. 가입한 사용자는 조회만 할 수 있고, AI가 요청한 변경 작업은 `approvers` 그룹만 승인합니다. 승인할 사람(dev에서 혼자 시험할 때는 본인)을 그룹에 넣습니다. User Pool ID는 SSM 파라미터 `/wga/<env>/UserPoolId` 또는 Cognito 콘솔에서 확인합니다.
 
 ```bash
-# 사용자 만들기 (초대 메일 발송, 임시 비밀번호는 7일 동안 유효)
-aws cognito-idp admin-create-user --user-pool-id <UserPoolId> --username <이메일> \
-    --user-attributes Name=email,Value=<이메일> Name=email_verified,Value=true
-# 변경 작업을 승인할 사람은 approvers 그룹에 넣는다 (dev에서 혼자 시험할 때도 필요)
 aws cognito-idp admin-add-user-to-group --user-pool-id <UserPoolId> --username <이메일> --group-name approvers
 ```
 
@@ -360,7 +356,7 @@ GuardDuty에서 감지된 보안 이벤트가 있나요?
 React 18과 TypeScript로 채팅 화면을 만들었습니다. 화면 디자인은 이전에 만든 다른 프로젝트(AXPI)의 CSS를 가져와 색만 바꿔 썼습니다(위쪽 내비게이션, 패널, 목록 행, 확인창). 대화 목록과 메시지 상태는 Zustand store(`chatStore`)로 관리하고, AI 응답은 타이핑하듯 조금씩 보여 줍니다. 답변을 만들며 부른 MCP 도구는 답변 위에 목록으로 표시합니다. 대화 기록은 Chat History API(`/sessions/*`)를 통해 DynamoDB에 저장되어 이전 대화를 다시 불러올 수 있습니다. 마크다운은 직접 만든 파서(`utils/markdown.ts`)로 코드 블록, 표, 링크를 표시하고, 차트는 도구가 돌려준 그릴 내용으로 브라우저에서 ECharts(SVG)로 그려 확대해도 선명하고 값을 짚어 볼 수 있으며, 다이어그램은 S3 이미지로 표시합니다. 답변에는 `artifact://` 참조만 들어 있고 실제 주소는 답변 정보(`inference.artifacts`)로 받습니다. ECharts는 차트가 있는 답변을 열 때만 불러옵니다(첫 화면 번들에 넣지 않음). 모델이 쓴 이미지 주소는 열지 않고 링크로만 보여 줍니다(이미지 주소에 데이터를 실어 보내는 반출 방지). 홈은 큰 제목과 설명 아래에 큰 입력칸을 둔 첫 화면이고(구성과 등장 효과는 다른 프로젝트인 FinGate-X 첫 화면을 참고), 입력칸을 누르면 예시 질문이 펼쳐집니다. 대화 화면에서는 대화 목록을 팝업창으로 엽니다.
 
 ### Cognito 인증
-로그인 화면의 로그인 버튼을 누르면 Cognito 로그인 페이지(Hosted UI)로 이동해 로그인하고 앱으로 돌아옵니다(OAuth 2.0 Authorization Code + PKCE). 처음 로그인할 때 새 비밀번호 정하기와 비밀번호 찾기도 Cognito 페이지에서 처리하므로 앱은 비밀번호를 다루지 않습니다. 자체 가입은 막혀 있고, 운영자가 사용자를 만듭니다(아래 '사용자 만들기'). 돌아온 뒤 code를 토큰으로 바꾸고 저장·갱신하는 일은 Amplify Auth(`signInWithRedirect`)가 맡고, API 요청에는 ID 토큰을 붙여 API Gateway의 Cognito Authorizer가 확인합니다. API가 401을 돌려주면 로그인 화면으로 돌아갑니다.
+로그인 화면의 로그인 버튼을 누르면 Cognito 로그인 페이지(Hosted UI)로 이동해 로그인하고 앱으로 돌아옵니다(OAuth 2.0 Authorization Code + PKCE). 회원가입, 이메일 인증, 비밀번호 찾기도 Cognito 페이지에서 처리하므로 앱은 비밀번호를 다루지 않습니다. 돌아온 뒤 code를 토큰으로 바꾸고 저장·갱신하는 일은 Amplify Auth(`signInWithRedirect`)가 맡고, API 요청에는 ID 토큰을 붙여 API Gateway의 Cognito Authorizer가 확인합니다. API가 401을 돌려주면 로그인 화면으로 돌아갑니다.
 
 ### Lambda 기반 MCP 서버 및 클라이언트 구현
 MCP의 HTTP+SSE(Server-Sent Events) 방식은 연결을 오래 유지해야 해서 Lambda와 맞지 않아, 요청-응답 방식(Streamable HTTP)으로 MCP 서버와 클라이언트를 직접 만들었습니다. MCP 서버는 Lambda Function URL(IAM 인증)로 열고, 세션은 DynamoDB에 둡니다(`mcp/lambda_mcp/`).
