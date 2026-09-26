@@ -8,6 +8,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { fetchAudit } from '@/api/audit';
 import { ROLE_LABELS, type Role } from '@/auth/authClient';
+import { LoadingCard } from '@/components/LoadingCard';
 import { RefreshButton } from '@/components/RefreshButton';
 import type { AuditKind, AuditLocus, AuditRecord, AuditStatus } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
@@ -508,11 +509,8 @@ export function AuditPage() {
                     </div>
 
                     {loading === 'list' ? (
-                        <div className="plan-panel-loading" role="status">
-                            <div>
-                                <div className="plan-inline-spinner" />
-                                <p>감사 로그를 불러오는 중…</p>
-                            </div>
+                        <div className="plan-panel-loading">
+                            <LoadingCard text="감사 로그를 불러오는 중…" />
                         </div>
                     ) : items.length === 0 ? (
                         error ? null : (

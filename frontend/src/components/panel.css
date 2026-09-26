@@ -510,7 +510,6 @@
   animation: menu-in 140ms ease both;
 }
 
-.plan-panel-loading,
 .plan-panel-empty,
 .plan-panel-error {
   border: 1px dashed #dde4ec;
@@ -522,7 +521,6 @@
   text-align: center;
 }
 
-.plan-panel-loading p,
 .plan-panel-empty p {
   margin: 0;
   font-family: var(--font-label);
@@ -540,9 +538,43 @@
   margin-bottom: 10px;
 }
 
-/* 로딩 상자 안의 스피너는 글자와 같은 가운데에 둔다 (블록이라 그대로 두면 왼쪽에 붙는다) */
-.plan-panel-loading .plan-inline-spinner {
-  margin: 0 auto 10px;
+/* 목록을 불러오는 동안: 빈 목록 자리 가운데에 기다림 카드(.loading-card)를 띄운다 */
+.plan-panel-loading {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+/* 기다림 카드 (components/LoadingCard.tsx). 로그아웃 중 화면과 목록 로딩이 같이 쓴다 */
+.loading-card {
+  width: min(320px, calc(100% - 32px));
+  border-radius: 14px;
+  border: 1px solid rgba(223, 230, 238, 0.92);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 20px 34px rgba(15, 23, 42, 0.24);
+  padding: 18px 16px;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+
+.loading-card-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 3px solid rgba(0, 123, 255, 0.22);
+  border-top-color: var(--color-primary);
+  animation: spin 0.85s linear infinite;
+}
+
+.loading-card-text {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #1f4f86;
 }
 
 .plan-panel-error-title {
@@ -869,20 +901,6 @@
 .icon-button:disabled {
   cursor: wait;
   opacity: 0.7;
-}
-
-.refresh-button.is-loading svg {
-  animation: refresh-spin 0.9s linear infinite;
-}
-
-@keyframes refresh-spin {
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .refresh-button.is-loading svg {
-    animation: none;
-  }
 }
 
 .plan-panel-error-inline {

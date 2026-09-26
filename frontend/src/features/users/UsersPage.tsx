@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { inviteUser, listUsers, setEnabled, setRole, userErrorText } from '@/api/users';
 import { ROLE_LABELS } from '@/auth/authClient';
+import { LoadingCard } from '@/components/LoadingCard';
 import { RefreshButton } from '@/components/RefreshButton';
 import type { ManagedUser, UserRole } from '@/types/users';
 import { formatKoreanDateTime } from '@/utils/formatters';
@@ -233,11 +234,8 @@ export function UsersPage() {
                     </div>
 
                     {loading === 'list' ? (
-                        <div className="plan-panel-loading" role="status">
-                            <div>
-                                <div className="plan-inline-spinner" />
-                                <p>사용자를 불러오는 중…</p>
-                            </div>
+                        <div className="plan-panel-loading">
+                            <LoadingCard text="사용자를 불러오는 중…" />
                         </div>
                     ) : users.length === 0 ? (
                         error ? null : (
