@@ -52,6 +52,27 @@ export interface AuditPage {
     to: string;
 }
 
+// 역추적 (GET /audit?trace=<actionId>, services/llm/audit_trace.py): 변경 작업 하나를 층 하나씩 아래에서 위로 묻는다
+export type TraceLayer = 'effect' | 'egress' | 'residence' | 'deliberation' | 'ingress' | 'interface' | 'mediation';
+export type TraceStatus = 'ok' | 'warn' | 'fail' | 'info';
+
+export interface TraceStep {
+    layer: TraceLayer;
+    question: string;
+    status: TraceStatus;
+    answer: string;
+    evidence: string[]; // 근거가 된 행의 at (events·rows 안에 있다)
+}
+
+export interface AuditTrace {
+    actionId: string;
+    steps: TraceStep[]; // 효과 → 유출 → 체류 → 판단 → 유입 → 경계 → 매개
+    verdict: string;
+    question?: string | null; // 이 변경을 낳은 사용자의 질문
+    events: AuditRecord[]; // 작업의 사건 (요청자·승인자)
+    rows: AuditRecord[]; // 같은 질문의 질문·도구 행
+}
+
 export interface AuditQuery {
     from?: string;
     to?: string;

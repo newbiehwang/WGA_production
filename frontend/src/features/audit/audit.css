@@ -266,6 +266,200 @@
   padding: 6px 0 2px;
 }
 
+/* ---------------------------------------------------------------- 역추적 (AuditTrace) */
+
+.audit-trace-section {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed #e1e7ef;
+}
+
+.audit-trace {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  font-size: 13px;
+}
+
+.audit-trace-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #6c757d;
+}
+
+.audit-trace-error {
+  margin: 0;
+  color: #b02a37;
+}
+
+.audit-trace-verdict {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-family: var(--font-label);
+  font-weight: 700;
+}
+
+.audit-trace-verdict.is-ok {
+  background: rgba(88, 167, 121, 0.12);
+  color: #3f8a61;
+}
+
+.audit-trace-verdict.is-warn {
+  background: rgba(255, 153, 0, 0.14);
+  color: #9a5b00;
+}
+
+.audit-trace-verdict.is-fail {
+  background: rgba(220, 53, 69, 0.12);
+  color: #b02a37;
+}
+
+.audit-trace-question {
+  margin: 0;
+  color: #3c4650;
+  overflow-wrap: anywhere;
+}
+
+.audit-trace-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.audit-trace-step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #e8edf3;
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.audit-trace-step.is-ok { border-left-color: rgba(88, 167, 121, 0.7); }
+.audit-trace-step.is-warn { border-left-color: rgba(255, 153, 0, 0.85); }
+.audit-trace-step.is-fail { border-left-color: rgba(220, 53, 69, 0.8); }
+.audit-trace-step.is-info { border-left-color: #c3cbd6; }
+
+.audit-trace-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #f0f3f7;
+  color: #5f6670;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.audit-trace-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.audit-trace-head {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.audit-trace-layer {
+  font-family: var(--font-label);
+  color: #1f2933;
+}
+
+.audit-trace-q {
+  color: #3c4650;
+}
+
+.audit-trace-status {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.audit-trace-status.is-ok { background: rgba(88, 167, 121, 0.15); color: #3f8a61; }
+.audit-trace-status.is-warn { background: rgba(255, 153, 0, 0.16); color: #9a5b00; }
+.audit-trace-status.is-fail { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
+.audit-trace-status.is-info { background: rgba(120, 120, 120, 0.12); color: #5f6670; }
+
+.audit-trace-answer {
+  margin: 0;
+  color: #1f2933;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.audit-trace-subtitle {
+  margin: 4px 0 0;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 700;
+  color: #6c757d;
+}
+
+.audit-trace-timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+
+.audit-trace-timeline li {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 160px) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: #3c4650;
+}
+
+.audit-trace-timeline li.is-cited {
+  background: #f5f8fc;
+}
+
+.audit-trace-time,
+.audit-trace-who {
+  font-size: 12px;
+  color: #6c757d;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-trace-what {
+  overflow-wrap: anywhere;
+}
+
+.audit-trace-cited {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #e8eef6;
+  color: #4a5563;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 /* ---------------------------------------------------------------- 좁은 화면: 행을 두 줄로 */
 
 @media (max-width: 860px) {
@@ -298,4 +492,18 @@
   .audit-details dd {
     margin-bottom: 8px;
   }
+
+  .audit-trace-timeline li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "what cited"
+      "time time"
+      "who who";
+    gap: 0 8px;
+  }
+
+  .audit-trace-timeline .audit-trace-what { grid-area: what; }
+  .audit-trace-timeline .audit-trace-cited { grid-area: cited; }
+  .audit-trace-timeline .audit-trace-time { grid-area: time; }
+  .audit-trace-timeline .audit-trace-who { grid-area: who; }
 }
