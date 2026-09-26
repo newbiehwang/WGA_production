@@ -10,13 +10,11 @@
 //
 // - 고리는 조각 7개다. 조각 끝이 뾰족해(셰브런) 따로 화살표 없이 도는 방향이 보인다.
 //   차례는 서버의 판정(services/llm/audit_trace.py)이 따지는 차례다 (맨 위 1 효과부터 시계 방향)
-// - 이 기록의 계층(행의 locus): 색이 아니라 가운데 원판에서 뻗은 바늘이 가리키고, 원판 위에 그 이름이 늘 보인다.
-//   열 때 바늘이 조금 뒤에서 돌아와 멈춘다
+// - 이 기록의 계층(행의 locus)은 따로 강조하지 않는다. 처음 고른 계층이고, 설명 칸에 이 기록의 근거가 붙을 뿐이다
 // - 조각의 색: 판정이 있으면 판정, 없으면 흔적이 있는 계층만 옅은 주황. 기록으로 남지 않는 계층(판단: 모델 안,
 //   매개: 앱 밖)은 점선 테두리. 색은 고르는 것과 상관없이 그대로다
-// - 고른 계층(처음에는 이 기록의 계층): 고리 바깥의 선택 표시(둥근 호)가 그 조각 위로 미끄러져 가고(가까운 쪽으로 돈다),
-//   조각은 그림자와 함께 살짝 떠오르며, 나머지 조각은 은은하게 옅어진다. 마우스를 올리거나 고른 조각은 바탕이 조금 짙어진다.
-//   오른쪽 설명 칸도 고른 계층을 보인다. 바늘(이 기록)과 선택 표시(고른 계층)를 나눠야 다른 계층을 골라도 헷갈리지 않는다
+// - 고른 계층(처음에는 이 기록의 계층): 조각이 그림자와 함께 살짝 떠오르고 바탕이 조금 짙어진다. 다른 계층을 고르면
+//   나머지 조각은 은은하게 옅어진다. 마우스를 올린 조각도 바탕이 조금 짙어진다. 가운데 원판과 오른쪽 설명 칸도 고른 계층을 보인다
 // - 조각을 누르면(키보드는 Enter·Space) 그 계층을 고르고, 고른 조각을 다시 누르면 이 기록의 계층으로 돌아온다
 // - 설명 칸: 계층의 설명 → 근거(이 기록이 그 계층에 있는 까닭을 값의 흐름으로, 파란 상자) → 그 계층의 흔적(주황 상자).
 //   이 기록의 계층을 고르고 있으면 다른 계층에 남긴 흔적도 모아 보인다. 제목 옆에는 영어 이름을 회색으로 (고리 안은 한글만)
@@ -254,25 +252,12 @@ const R_MID = (R_OUT + R_IN) / 2;
 const SPAN = 360 / LAYERS.length; // 조각 하나의 각 (도)
 const GAP = 2.2; // 조각 사이 틈 (도)
 const TIP = 5; // 셰브런의 뾰족한 끝이 나아가는 각 (도)
-const R_HUB = 50; // 가운데 원판의 반지름
-// 바늘: 원판 둘레에서 고리 안쪽 가장자리까지 뻗은 좁은 삼각형 (가운데가 원점, 위를 가리킨 모양. 돌려서 쓴다)
-const NEEDLE_PATH = `M -6 ${-(R_HUB - 2)} L 0 ${-(R_IN - 3)} L 6 ${-(R_HUB - 2)} Z`;
+const R_HUB = R_IN - 9; // 가운데 원판의 반지름
 const POP = 4; // 고른 조각을 바깥으로 띄우는 거리
 
 const rad = (deg: number) => (deg * Math.PI) / 180;
 const at = (r: number, deg: number) => `${(C + r * Math.cos(rad(deg))).toFixed(2)} ${(C + r * Math.sin(rad(deg))).toFixed(2)}`;
-const R_MARK = R_OUT + POP + 7; // 선택 표시(호)의 반지름
-const MARK_INSET = 5; // 선택 표시가 조각보다 양끝에서 짧은 각 (도)
-const PAD = R_MARK - R_OUT + 6; // 그림 둘레의 여백 (선택 표시와 그림자가 잘리지 않게)
-
-// 선택 표시: 맨 위 조각(0번) 자리의 호. 고른 조각으로 돌려서(rotate) 옮긴다 (가운데가 원점인 좌표)
-const MARK_PATH = (() => {
-    // 조각의 양끝에서 MARK_INSET만큼 줄이고, 셰브런 끝만큼(TIP / 2) 앞으로 치우친 조각의 가운데에 맞춘다
-    const a0 = -90 - SPAN / 2 + GAP / 2 + MARK_INSET + TIP / 2;
-    const a1 = -90 + SPAN / 2 - GAP / 2 - MARK_INSET + TIP / 2;
-    const p = (deg: number) => `${(R_MARK * Math.cos(rad(deg))).toFixed(2)} ${(R_MARK * Math.sin(rad(deg))).toFixed(2)}`;
-    return `M ${p(a0)} A ${R_MARK} ${R_MARK} 0 0 1 ${p(a1)}`;
-})();
+const PAD = POP + 8; // 그림 둘레의 여백 (떠오른 조각과 그림자가 잘리지 않게)
 
 // 조각 i의 가운데 각: 맨 위(-90°)에서 시계 방향
 const midOf = (index: number) => -90 + index * SPAN;
@@ -319,18 +304,9 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
               (count) => count.n,
           )
         : [];
-    // 조각의 색: 판정이 있으면 판정, 없으면 흔적(주황)만. 이 기록의 계층은 색이 아니라 가운데 바늘로 가리킨다.
-    // 판정이 있으면 흔적은 설명 칸에서만 보인다 (주황이 '주의'와 섞이지 않게)
+    // 조각의 색: 판정이 있으면 판정, 없으면 흔적(주황)만. 이 기록의 계층을 따로 강조하지 않는다
+    // (처음 고른 계층일 뿐이다). 판정이 있으면 흔적은 설명 칸에서만 보인다 (주황이 '주의'와 섞이지 않게)
     const toneOf = (index: number) => (index !== hereIndex && !trace && marks[LAYERS[index].id] ? 'is-marked' : '');
-    // 바늘의 각: 이 기록의 조각 가운데 (셰브런 끝만큼 앞으로 치우친 글자 자리). 열 때 조금 뒤에서 돌아와 멈춘다
-    const needleAngle = hereIndex * SPAN + TIP / 2;
-
-    // 선택 표시의 회전각. 고른 조각이 바뀌면 가까운 쪽으로 돈다 (7 → 1은 한 칸 앞으로, 거꾸로 여섯 칸 돌지 않게)
-    const [turn, setTurn] = useState(selectedIndex * SPAN);
-    useEffect(() => {
-        const target = selectedIndex * SPAN;
-        setTurn((previous) => previous + ((((target - previous) % 360) + 540) % 360) - 180);
-    }, [selectedIndex]);
 
     return (
         <section className="audit-layers" aria-labelledby="audit-layers-title">
@@ -387,7 +363,7 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                         return (
                             <g
                                 key={layer.id}
-                                className={`audit-cycle-seg ${tone}${index === hereIndex ? ' is-here' : ''}${offRecord ? ' is-off-record' : ''}${
+                                className={`audit-cycle-seg ${tone}${offRecord ? ' is-off-record' : ''}${
                                     step ? ` has-status is-${step.status}` : ''
                                 }${isSelected ? ' is-selected' : ''}`}
                                 // 고른 조각은 가운데에서 바깥으로 밀어낸다 (--dx·--dy: CSS가 transform으로)
@@ -419,36 +395,14 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                             </g>
                         );
                     })}
-                    {/* 선택 표시: 고리 바깥의 둥근 호. 가운데로 옮긴 뒤 돌린다 (CSS transition으로 미끄러진다) */}
-                    {selected ? (
-                        <g transform={`translate(${C} ${C})`} aria-hidden="true">
-                            <path
-                                className={`audit-cycle-mark ${toneOf(selectedIndex)}`}
-                                d={MARK_PATH}
-                                style={{ transform: `rotate(${turn}deg)` }}
-                            />
-                        </g>
-                    ) : null}
-                    {/* 가운데: 원판과 이 기록의 조각을 가리키는 바늘, 원판 위에 이 기록의 계층 이름 */}
-                    {here ? (
-                        <g transform={`translate(${C} ${C})`} aria-hidden="true">
-                            <path
-                                className="audit-cycle-needle"
-                                d={NEEDLE_PATH}
-                                style={
-                                    {
-                                        transform: `rotate(${needleAngle}deg)`,
-                                        '--needle-from': `${needleAngle - 150}deg`,
-                                    } as CSSProperties
-                                }
-                            />
-                        </g>
-                    ) : null}
+                    {/* 가운데: 옅은 원판 위에 고른 계층의 이름. 고르면 바뀌며 살짝 떠오른다 */}
                     <circle className="audit-cycle-hub" cx={C} cy={C} r={R_HUB} aria-hidden="true" />
-                    {here ? (
-                        <text x={C} y={C + 6.5} textAnchor="middle" className="audit-cycle-name" aria-hidden="true">
-                            {here.label}
-                        </text>
+                    {selected ? (
+                        <g key={selected.id} className="audit-cycle-center" aria-hidden="true">
+                            <text x={C} y={C + 6.5} textAnchor="middle" className="audit-cycle-name">
+                                {selected.label}
+                            </text>
+                        </g>
                     ) : null}
                 </svg>
                 </div>
