@@ -11,7 +11,7 @@ from common.utils import invoke_bedrock_nova, cors_headers, cors_response
 from slack_sdk import WebClient
 from llm_progress import REQUEST_ID, ProgressReporter, read_progress
 from redaction import Redactor
-from audit import AuditLog, AuditQueryError, CloudWatchSink, groups_of, query_audit
+from audit import AuditLog, AuditQueryError, CloudWatchSink, groups_of, query_answer, query_audit
 from audit_trace import query_trace
 from approvals import (APPROVED, DENIED, FINISHED, ApprovalError, ApprovalRequester, ApprovalStore, approval_mode,
                        can_view, check_decision, execute_approved, follow_up_prompt, public_view)
@@ -529,7 +529,8 @@ def handle_llm1_with_mcp(body, origin, caller_id=None, caller_email=None):
             # (서버가 만든 presigned URL이고, 모델이 쓴 주소가 아니다)
             "artifacts": artifacts.public(),
         })
-        audit.request_finished(True)
+        # 감사 로그에는 사용자가 받은 답변(가린 뒤의 글자) 그대로. Slack으로 보낼 때 바꾸는 주소는 곧 만료되므로 넣지 않는다
+        audit.request_finished(True, answer=response_text)
         emit_request_metrics(progress, redactor, approvals)
 
         # 응답 시간 기록 및 경과 시간 계산
@@ -595,10 +596,13 @@ def handle_progress(request_id, caller_id, origin):
 
 def handle_audit(params, caller_id, claims, origin):
     """GET /audit: 감사 로그. admins 그룹만 볼 수 있다 (audit.query_audit, 일반 사용자는 403).
-    trace=<actionId>가 있으면 그 변경 작업의 역추적 (audit_trace.query_trace)."""
+    trace=<actionId>가 있으면 그 변경 작업의 역추적 (audit_trace.query_trace),
+    answer=<질문 행의 at>&user=<요청자>가 있으면 그 질문의 답변 전체 (audit.query_answer)."""
     try:
         if (params or {}).get("trace"):
             return cors_response(200, query_trace(audit_table, caller_id, claims, params), origin)
+        if (params or {}).get("answer"):
+            return cors_response(200, query_answer(audit_table, caller_id, claims, params), origin)
         return cors_response(200, query_audit(audit_table, caller_id, claims, params), origin)
     except AuditQueryError as error:
         return cors_response(error.status, {"error": str(error)}, origin)
