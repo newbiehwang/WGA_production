@@ -1260,20 +1260,11 @@
   animation: audit-cycle-center-in 260ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
 
-.audit-cycle-step {
-  font-family: var(--font-label);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  font-variant-numeric: tabular-nums;
-  fill: #9aa4ae;
-}
-
 .audit-cycle-name {
-  font-family: var(--font-label);
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-family: var(--font-headline);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
   fill: #1f2933;
 }
 
@@ -1281,16 +1272,8 @@
   fill: var(--color-primary);
 }
 
-.audit-cycle-center.is-here .audit-cycle-step {
-  fill: #6f9fe0;
-}
-
 .audit-cycle-center.is-marked .audit-cycle-name {
   fill: #9a5b00;
-}
-
-.audit-cycle-center.is-marked .audit-cycle-step {
-  fill: #c9954a;
 }
 
 @keyframes audit-cycle-center-in {
@@ -1370,10 +1353,86 @@
   overflow-wrap: anywhere;
 }
 
-.audit-cycle-callout.is-here {
-  border-color: var(--color-primary);
-  background: #f1f6fd;
+/* 근거: 이 기록이 그 계층에 있는 까닭 (단계 › 단계 › 단계) */
+.audit-evidence {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border: 1px solid #dbe7f7;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f5f9ff 0%, #eef5fe 100%);
+}
+
+.audit-evidence-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #5b8fd6;
+}
+
+.audit-evidence-flow {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.audit-evidence-flow li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.audit-evidence-arrow {
+  flex: none;
+  color: #9db8dc;
+}
+
+.audit-evidence-step {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e1eaf5, 0 1px 2px rgba(31, 41, 51, 0.04);
+}
+
+.audit-evidence-label {
+  font-size: 11px;
+  color: #8a939e;
+}
+
+.audit-evidence-value {
+  font-family: var(--font-label);
+  font-size: 13.5px;
+  font-weight: 600;
   color: #1f2933;
+  overflow-wrap: anywhere;
+}
+
+.audit-evidence-sub {
+  font-size: 11px;
+  color: #6c757d;
+  overflow-wrap: anywhere;
+}
+
+/* 끝 단계의 뜻: 바뀌지 않음(초록) · 실패·미등록(빨강) · AWS가 바뀜(파랑) */
+.audit-evidence-flow li.is-good .audit-evidence-value {
+  color: #2f7d52;
+}
+
+.audit-evidence-flow li.is-bad .audit-evidence-value {
+  color: #b02a37;
+}
+
+.audit-evidence-flow li.is-change .audit-evidence-value {
+  color: var(--color-primary);
 }
 
 .audit-cycle-callout.is-marked {
@@ -1449,6 +1508,24 @@
 
   .audit-cycle-panel {
     min-height: 0;
+  }
+
+  /* 근거: 줄이 바뀌면 화살표가 줄 앞에 떨어지므로, 좁으면 위에서 아래로 쌓고 화살표를 아래로 */
+  .audit-evidence-flow {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+  }
+
+  .audit-evidence-flow li {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+  }
+
+  .audit-evidence-arrow {
+    align-self: center;
+    transform: rotate(90deg);
   }
 }
 

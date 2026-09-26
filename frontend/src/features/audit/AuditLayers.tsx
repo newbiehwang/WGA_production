@@ -14,39 +14,116 @@
 //   기록으로 남지 않는 계층(판단: 모델 안, 매개: 앱 밖)은 점선 테두리. 색은 고르는 것과 상관없이 그대로다
 // - 고른 계층(처음에는 이 기록의 계층): 고리 바깥의 선택 표시(둥근 호)가 그 조각 위로 미끄러져 가고(가까운 쪽으로 돈다),
 //   조각은 그림자와 함께 살짝 떠오르며, 나머지 조각은 은은하게 옅어진다. 선택 표시의 색은 그 계층의 성격을 따른다.
-//   마우스를 올리거나 고른 조각은 바탕이 조금 짙어진다. 고리 가운데(옅은 원판 위에 차례 '2 / 7'과 이름)와 오른쪽 설명 칸도 고른 계층을 보인다. 색(성격)과 고름(표시·떠오름)을 나눠야
+//   마우스를 올리거나 고른 조각은 바탕이 조금 짙어진다. 고리 가운데(옅은 원판 위에 이름)와 오른쪽 설명 칸도 고른 계층을 보인다. 색(성격)과 고름(표시·떠오름)을 나눠야
 //   다른 계층을 골랐을 때 이 기록의 계층과 헷갈리지 않는다
 // - 조각을 누르면(키보드는 Enter·Space) 그 계층을 고르고, 고른 조각을 다시 누르면 이 기록의 계층으로 돌아온다
-// - 설명 칸: 계층의 설명 → 이 기록이 그 계층에서 한 일(파란 상자) → 그 계층의 흔적(주황 상자).
+// - 설명 칸: 계층의 설명 → 근거(이 기록이 그 계층에 있는 까닭을 값의 흐름으로, 파란 상자) → 그 계층의 흔적(주황 상자).
 //   이 기록의 계층을 고르고 있으면 다른 계층에 남긴 흔적도 모아 보인다. 제목 옆에는 영어 이름을 회색으로 (고리 안은 한글만)
 // - 이 기록의 층: 도구 반복이 정한다 (등록부에 없으면 경계, 변경 도구면 유출, 나머지는 유입. 변경 작업은 요청이 유출, 결정·실행이 효과)
 // - 흔적: 체류(승인 요청 행의 taintedBy), 유입(도구 행의 의심 문구), 매개(실행한 AWS API의 요청 ID)
 import { useEffect, useState, type CSSProperties } from 'react';
 import type { AuditRecord, TraceLayer } from '@/types/audit';
-import { LAYERS, toolLabelOf } from './auditModel';
+import { LAYERS, requesterOf, toolLabelOf } from './auditModel';
 
-// 이 기록이 그 층에서 한 일
-function hereText(record: AuditRecord): string {
+// 근거: 이 기록이 그 계층에 있는 까닭을 기록의 값으로 보인다. 문장 대신 흐름(단계 → 단계 → 단계)으로
+//   유입  [도구 비용 조회] › [결과 3,449자] › [받는 곳 모델]
+//   유출  [모델이 부름 로그 보존 기간 변경] › [위험도 변경] › [처리 승인 요청]
+//   효과  [결정 승인] › [결정한 사람 kim@…] › [AWS 바뀌기 전]
+// tone: 끝 단계의 뜻 (good 바뀌지 않음·성공, bad 실패, change AWS가 바뀜)
+interface EvidenceStep {
+    label: string;
+    value: string;
+    sub?: string; // 작은 고정폭 글자 (도구 이름·이벤트 이름)
+    tone?: 'good' | 'bad' | 'change';
+}
+
+function evidenceOf(record: AuditRecord): EvidenceStep[] {
     const tool = toolLabelOf(record.tool);
     if (record.kind === 'tool') {
-        if (record.locus === 'interface') return `등록부에 없는 도구 ${tool}을(를) 불렀습니다. 변경 도구로 다뤄 승인을 요청합니다`;
-        if (record.locus === 'egress') return `변경 도구 ${tool}을(를) 불렀습니다. 실행하지 않고 승인을 요청합니다`;
-        return `${tool}의 결과가 모델에게 들어갔습니다`;
+        if (record.locus === 'interface')
+            return [
+                { label: '모델이 부름', value: tool, sub: record.tool },
+                { label: '위험도 등록부', value: '없음', tone: 'bad' },
+                { label: '처리', value: '변경 도구로 다룸 · 승인 요청' },
+            ];
+        if (record.locus === 'egress')
+            return [
+                { label: '모델이 부름', value: tool, sub: record.tool },
+                { label: '위험도', value: '변경' },
+                { label: '처리', value: '실행하지 않고 승인 요청', tone: 'good' },
+            ];
+        return [
+            { label: '도구', value: tool, sub: record.tool },
+            record.status === 'error'
+                ? { label: '결과', value: '오류', tone: 'bad' }
+                : {
+                      label: '결과',
+                      value: record.resultChars !== undefined ? `${record.resultChars.toLocaleString()}자` : '받음',
+                  },
+            { label: '받는 곳', value: '모델' },
+        ];
     }
+    const who = requesterOf(record);
     switch (record.event) {
         case 'requested':
-            return '승인 요청을 만들었습니다. 아직 AWS는 바뀌지 않았습니다';
+            return [
+                { label: '변경 도구', value: tool, sub: record.tool },
+                { label: '상태', value: '승인 대기' },
+                { label: 'AWS', value: '바뀌지 않음', tone: 'good' },
+            ];
         case 'approved':
-            return '사람이 승인했습니다';
+            return [
+                { label: '결정', value: '승인' },
+                { label: '결정한 사람', value: who },
+                { label: '다음', value: '실행' },
+            ];
         case 'denied':
-            return '사람이 거절했습니다. AWS는 바뀌지 않았습니다';
+            return [
+                { label: '결정', value: '거절' },
+                { label: '결정한 사람', value: who },
+                { label: 'AWS', value: '바뀌지 않음', tone: 'good' },
+            ];
         case 'executed':
-            return '실행했습니다. AWS가 바뀌었습니다';
+            return [
+                { label: '실행', value: tool, sub: record.tool },
+                { label: 'CloudTrail', value: record.cloudTrailEvent?.split(':').pop() ?? '—' },
+                { label: 'AWS', value: '바뀜', tone: 'change' },
+            ];
         case 'failed':
-            return '실행하다 실패했습니다';
+            return [
+                { label: '실행', value: tool, sub: record.tool },
+                { label: '결과', value: '실패', tone: 'bad' },
+                { label: 'AWS', value: '확인 필요' },
+            ];
         default:
-            return '';
+            return [];
     }
+}
+
+// 근거의 흐름 (단계 사이에 ›)
+function Evidence({ steps }: { steps: EvidenceStep[] }) {
+    if (!steps.length) return null;
+    return (
+        <div className="audit-evidence">
+            <span className="audit-evidence-title">근거</span>
+            <ol className="audit-evidence-flow">
+                {steps.map((step, index) => (
+                    <li key={step.label} className={step.tone ? `is-${step.tone}` : undefined}>
+                        {index > 0 ? (
+                            <svg className="audit-evidence-arrow" viewBox="0 0 8 12" width="8" height="12" aria-hidden="true">
+                                <path d="M1.5 1.5L6 6l-4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                        ) : null}
+                        <span className="audit-evidence-step">
+                            <span className="audit-evidence-label">{step.label}</span>
+                            <span className="audit-evidence-value">{step.value}</span>
+                            {step.sub ? <code className="audit-evidence-sub">{step.sub}</code> : null}
+                        </span>
+                    </li>
+                ))}
+            </ol>
+        </div>
+    );
 }
 
 // 이 기록이 다른 층에 남긴 흔적
@@ -199,14 +276,11 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                             />
                         </g>
                     ) : null}
-                    {/* 가운데: 옅은 원판 위에 고른 계층의 차례(작은 회색)와 이름(색은 그 계층의 성격). 고르면 바뀌며 살짝 떠오른다 */}
+                    {/* 가운데: 옅은 원판 위에 고른 계층의 이름(색은 그 계층의 성격). 고르면 바뀌며 살짝 떠오른다 */}
                     <circle className="audit-cycle-hub" cx={C} cy={C} r={R_IN - 9} aria-hidden="true" />
                     {selected ? (
                         <g key={selected.id} className={`audit-cycle-center ${toneOf(selectedIndex)}`} aria-hidden="true">
-                            <text x={C} y={C - 9} textAnchor="middle" className="audit-cycle-step">
-                                {selectedIndex + 1} / {LAYERS.length}
-                            </text>
-                            <text x={C} y={C + 15} textAnchor="middle" className="audit-cycle-name">
+                            <text x={C} y={C + 6.5} textAnchor="middle" className="audit-cycle-name">
                                 {selected.label}
                             </text>
                         </g>
@@ -222,7 +296,7 @@ export function AuditLayers({ record }: { record: AuditRecord }) {
                             <span className="audit-cycle-en">{selected.en}</span>
                         </div>
                         <p className="audit-cycle-panel-text">{selected.description}</p>
-                        {selectedIsHere ? <p className="audit-cycle-callout is-here">{hereText(record)}</p> : null}
+                        {selectedIsHere ? <Evidence steps={evidenceOf(record)} /> : null}
                         {marks[selected.id] ? <p className="audit-cycle-callout is-marked">{marks[selected.id]}</p> : null}
                         {selectedIsHere && otherMarks.length ? (
                             <div className="audit-cycle-traces">
