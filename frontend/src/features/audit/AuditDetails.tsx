@@ -1,0 +1,191 @@
+// 감사 기록 한 건을 자세히 보이는 조각들: 항목 표(Details), 역추적 열기(TraceSection), 결과 배지, 종류 이름, 표시 배지.
+// 목록 행(AuditPage)과 옆 패널(AuditSidePanel)이 같이 쓴다
+import { Fragment, useState, type ReactNode } from 'react';
+import type { AuditRecord } from '@/types/audit';
+import { labelOf } from '@/utils/toolTrace';
+import { AuditTrace } from './AuditTrace';
+import {
+    ACTION_EVENTS,
+    ADMIN_EVENTS,
+    GROUP_NAMES,
+    REDACTED_LABELS,
+    locusOf,
+    redactedTotal,
+    roleText,
+    secondsOf,
+    suspiciousOf,
+    toolLabelOf,
+} from './auditModel';
+
+export function Details({ record }: { record: AuditRecord }) {
+    const rows: [string, ReactNode][] = [];
+    const locus = locusOf(record.locus);
+    if (locus)
+        rows.push([
+            '층',
+            <span key="locus">
+                {locus.label} <span className="audit-muted">({locus.description})</span>
+            </span>,
+        ]);
+    if (record.kind === 'tool') {
+        rows.push(['도구 이름', <code key="tool">{record.tool}</code>]);
+        rows.push([
+            '입력',
+            <pre key="input" className="audit-code">
+                {typeof record.input === 'string' ? record.input : JSON.stringify(record.input ?? {}, null, 2)}
+            </pre>,
+        ]);
+        if (record.resultChars !== undefined) rows.push(['결과 크기', `${record.resultChars.toLocaleString()}자`]);
+        if (Array.isArray(record.injectionSuspected) && record.injectionSuspected.length)
+            rows.push(['의심 문구', `지시문처럼 보이는 문구 (${record.injectionSuspected.join(', ')}). 데이터로만 다뤘습니다`]);
+    } else if (record.kind === 'action') {
+        rows.push(['사건', ACTION_EVENTS[record.event ?? '']?.label ?? record.event ?? '']);
+        rows.push(['변경 내용', record.summary ?? '']);
+        rows.push(['도구 이름', <code key="tool">{record.tool}</code>]);
+        rows.push([
+            '실행될 값',
+            <pre key="input" className="audit-code">
+                {typeof record.input === 'string' ? record.input : JSON.stringify(record.input ?? {}, null, 2)}
+            </pre>,
+        ]);
+        if (record.taintedBy?.length)
+            rows.push([
+                '먼저 읽은 의심 결과',
+                <ul key="tainted" className="audit-tainted">
+                    {record.taintedBy.map((seen) => (
+                        <li key={seen.toolUseId}>
+                            {labelOf(seen.tool)} 결과 ·{' '}
+                            {seen.callsAgo <= 1 ? '바로 다음 호출' : `${seen.callsAgo}번째 뒤 호출`}에서 요청 ·{' '}
+                            <span className="audit-muted">{seen.kinds.join(', ')}</span> ·{' '}
+                            <code>{seen.toolUseId}</code>
+                        </li>
+                    ))}
+                </ul>,
+            ]);
+        if (record.decidedBy) rows.push(['결정한 사람', <code key="by">{record.decidedBy}</code>]);
+        if (record.result) rows.push(['실행 결과', record.result]);
+        if (record.awsRequestId)
+            rows.push([
+                'CloudTrail',
+                <span key="trail">
+                    {record.cloudTrailEvent} · 요청 ID <code>{record.awsRequestId}</code>
+                    <span className="audit-muted"> (CloudTrail 이벤트의 requestID와 같습니다)</span>
+                </span>,
+            ]);
+        if (record.actionId) rows.push(['작업 ID', <code key="action">{record.actionId}</code>]);
+    } else if (record.kind === 'admin') {
+        rows.push(['사건', ADMIN_EVENTS[record.event ?? ''] ?? record.event ?? '']);
+        rows.push(['대상', record.targetEmail ?? '']);
+        if (record.targetUser) rows.push(['대상 사용자 이름', <code key="target">{record.targetUser}</code>]);
+        if (record.toRole) rows.push(['권한', `${roleText(record.fromRole)} → ${roleText(record.toRole)}`]);
+        if (record.group) rows.push(['그룹', `${GROUP_NAMES[record.group] ?? record.group} (${record.group})`]);
+        if (record.decidedBy) rows.push(['바꾼 사람', <code key="by">{record.decidedBy}</code>]);
+        if (record.status === 'error')
+            rows.push(['결과', '바꾸지 못했습니다 (바로 앞의 같은 사건 행은 시도를 기록한 것입니다)']);
+    } else {
+        rows.push(['질문', record.question ?? '']);
+        if (record.model) rows.push(['모델', <code key="model">{record.model}</code>]);
+        rows.push(['도구 호출', `${record.toolCount ?? 0}번`]);
+        if (record.injectionSuspected) rows.push(['의심 문구가 든 도구 결과', `${record.injectionSuspected}건`]);
+        const redacted = Object.entries(record.redacted ?? {});
+        rows.push([
+            'Claude로 보내기 전에 가린 값',
+            redacted.length
+                ? redacted.map(([kind, count]) => `${REDACTED_LABELS[kind] ?? kind} ${count}개`).join(', ')
+                : '없음',
+        ]);
+    }
+    if (record.error) rows.push(['오류', <span key="error" className="audit-error-text">{record.error}</span>]);
+    if (record.ms !== undefined) rows.push(['걸린 시간', secondsOf(record.ms)]);
+    rows.push(['요청자 ID', <code key="user">{record.userId}</code>]);
+    if (record.requestId) rows.push(['질문 ID', <code key="request">{record.requestId}</code>]);
+    if (record.sessionId) rows.push(['대화 ID', <code key="session">{record.sessionId}</code>]);
+    if (record.toolUseId) rows.push(['도구 호출 ID', <code key="use">{record.toolUseId}</code>]);
+
+    return (
+        <>
+            <dl className="audit-details">
+                {rows.map(([name, value]) => (
+                    <Fragment key={name}>
+                        <dt>{name}</dt>
+                        <dd>{value}</dd>
+                    </Fragment>
+                ))}
+            </dl>
+            {record.kind === 'action' && record.actionId ? (
+                <TraceSection actionId={record.actionId} day={record.day} />
+            ) : null}
+        </>
+    );
+}
+
+// 변경 작업 행: 누르면 역추적을 연다 (누를 때만 서버에 묻는다)
+function TraceSection({ actionId, day }: { actionId: string; day: string }) {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="audit-trace-section">
+            <button
+                type="button"
+                className="plan-reload-button"
+                aria-expanded={open}
+                onClick={() => setOpen((prev) => !prev)}
+            >
+                {open ? '역추적 닫기' : '층별로 따져 보기'}
+            </button>
+            {open ? <AuditTrace actionId={actionId} day={day} /> : null}
+        </div>
+    );
+}
+
+// 결과 열: 변경 작업은 사건(승인 요청·승인·거절·실행·실패), 나머지는 성공·실패
+export function ResultBadge({ record }: { record: AuditRecord }) {
+    const event = record.kind === 'action' ? ACTION_EVENTS[record.event ?? ''] : undefined;
+    if (event) return <span className={`plan-status-badge ${event.className}`}>{event.label}</span>;
+    const failed = record.status === 'error';
+    return (
+        <span className={`plan-status-badge ${failed ? 'audit-status-error' : 'plan-status-complete'}`}>
+            {failed ? '실패' : '성공'}
+        </span>
+    );
+}
+
+// 도구 칸: 질문·변경 작업·사용자 관리는 종류를, 도구 호출은 도구 이름을 보인다 (목록 행과 옆 패널 제목이 같이 쓴다)
+export function KindLabel({ record }: { record: AuditRecord }) {
+    if (record.kind === 'request') return <span className="audit-kind-request">질문</span>;
+    if (record.kind === 'action') return <span className="audit-kind-action">{toolLabelOf(record.tool)}</span>;
+    if (record.kind === 'admin') return <span className="audit-kind-admin">사용자 관리</span>;
+    return <>{labelOf(record.tool ?? '')}</>;
+}
+
+// 표시 칸: Slack · 의심 문구 · 의심 뒤 요청 · 미등록 도구 · 가림 (목록 행과 옆 패널 머리가 같이 쓴다)
+export function Flags({ record }: { record: AuditRecord }) {
+    const redacted = redactedTotal(record);
+    return (
+        <>
+            {record.source === 'slack' ? <span className="audit-flag">Slack</span> : null}
+            {suspiciousOf(record) ? (
+                <span className="audit-flag is-suspicious" title="도구 결과에 지시문처럼 보이는 문구가 있었습니다">
+                    의심 문구
+                </span>
+            ) : null}
+            {record.taintedBy?.length ? (
+                <span
+                    className="audit-flag is-suspicious"
+                    title="의심 문구가 든 도구 결과를 읽은 뒤 같은 질문에서 요청한 변경입니다 (체류)"
+                >
+                    의심 뒤 요청
+                </span>
+            ) : null}
+            {record.locus === 'interface' ? (
+                <span className="audit-flag is-suspicious" title="위험도 등록부에 없는 도구입니다 (경계)">
+                    미등록 도구
+                </span>
+            ) : null}
+            {redacted ? (
+                <span className="audit-flag is-redacted" title="Claude로 보내기 전에 가린 값의 수">
+                    가림 {redacted}
+                </span>
+            ) : null}
+        </>
+    );
+}

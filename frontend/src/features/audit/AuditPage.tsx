@@ -1,22 +1,22 @@
 // 감사 로그 화면: 누가 언제 어떤 질문으로 어떤 도구를 불렀고 결과가 어땠는지 (GET /audit, services/llm/audit.py).
-// AXPI 패널·목록 행을 그대로 쓴다.
+// 관리자만 여는 화면이다. 구성은 Datadog Audit Trail을 따랐다 (패널·배지·버튼 모양은 이 앱의 것을 그대로 쓴다).
 //   머리: 제목 · 새로 고침(아이콘)
-//   거르기: 기간 · 대상 · 결과 · 종류 · 층 · 도구 (관리자만 여는 화면이다)
-//   목록: 시각 · 요청자 · 도구 · 요약 · 결과 · 표시. 행을 누르면 입력값·오류·질문 ID 등이 펼쳐진다
-//         변경 작업 행은 '층별로 따져 보기'로 역추적을 연다 (AuditTrace)
-//   아래: 더 보기 (cursor로 이어 읽는다)
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { fetchAudit } from '@/api/audit';
-import { ROLE_LABELS, type Role } from '@/auth/authClient';
+//   왼쪽: 거르기 목록(FacetSidebar) — 종류·결과·층·요청자·도구·출처·표시. 값마다 건수, 여러 값을 함께 고른다
+//   오른쪽: 기간 · 건수 · 목록(시각 · 요청자 · 도구 · 요약 · 결과 · 표시). 내려가면 이어서 더 그린다
+//   행을 누르면 오른쪽에서 옆 패널(AuditSidePanel)이 나와 자세히 보인다. ↑/↓로 앞뒤 기록, 변경 작업은 '층별로 따져 보기'
+//
+// 기간 안의 기록을 모두 받아(useAuditRecords, 2,000건까지) 거르기·건수는 브라우저에서 계산한다
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LoadingCard, useMinimumVisible } from '@/components/LoadingCard';
 import { RefreshButton } from '@/components/RefreshButton';
-import type { AuditKind, AuditLocus, AuditRecord, AuditStatus } from '@/types/audit';
+import type { AuditRecord } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
-import { AuditTrace } from './AuditTrace';
-import { labelOf, summarize } from '@/utils/toolTrace';
+import { Flags, KindLabel, ResultBadge } from './AuditDetails';
+import { AuditSidePanel } from './AuditSidePanel';
+import { activeCount, keyOf, matches, requesterOf, secondsOf, summaryOf, timeOf, type Selection } from './auditModel';
+import { FacetSidebar } from './FacetSidebar';
+import { MAX_RECORDS, useAuditRecords } from './useAuditRecords';
 import './audit.css';
-
-const PAGE_SIZE = 50;
 
 const PERIODS = [
     { days: 1, label: '1일' },
@@ -24,89 +24,7 @@ const PERIODS = [
     { days: 30, label: '30일' },
 ];
 
-const STATUSES: { value: '' | AuditStatus; label: string }[] = [
-    { value: '', label: '전체' },
-    { value: 'ok', label: '성공' },
-    { value: 'error', label: '실패' },
-];
-
-const KINDS: { value: '' | AuditKind; label: string }[] = [
-    { value: '', label: '전체' },
-    { value: 'tool', label: '도구 호출' },
-    { value: 'request', label: '질문' },
-    { value: 'action', label: '변경 작업' },
-    { value: 'admin', label: '사용자 관리' },
-];
-
-// 사용자 관리의 사건 (services/llm/user_admin.py)
-const ADMIN_EVENTS: Record<string, string> = {
-    invited: '초대',
-    role_changed: '권한 변경',
-    group_added: '그룹 추가',
-    group_removed: '그룹 제외',
-    disabled: '정지',
-    enabled: '정지 해제',
-};
-const GROUP_NAMES: Record<string, string> = { admins: '관리자', approvers: '결정자' };
-const roleText = (role?: string) => (role ? ROLE_LABELS[role as Role] ?? role : '');
-const adminSummaryOf = (record: AuditRecord) =>
-    [
-        record.targetEmail ?? record.targetUser,
-        ADMIN_EVENTS[record.event ?? ''] ?? record.event,
-        record.toRole ? `${roleText(record.fromRole)} → ${roleText(record.toRole)}` : null,
-        record.group ? GROUP_NAMES[record.group] ?? record.group : null,
-    ]
-        .filter(Boolean)
-        .join(' · ');
-
-// 층 (services/llm/audit.py 모듈 설명, fingate-x의 '원인의 계층'을 참고). 사고가 나면 어느 층이 뚫렸는지 좁혀 본다.
-// 판단층(모델 안)은 기록할 수 없어 없다: 유입·체류·유출이 함께 보이면 그 층이 뚫린 것으로 본다
-const LOCI: { value: AuditLocus; label: string; description: string }[] = [
-    { value: 'interface', label: '경계', description: '위험도 등록부에 없는 도구를 불렀습니다. 변경 도구로 다룹니다' },
-    { value: 'ingress', label: '유입', description: '조회·결과물 도구의 결과가 들어왔습니다' },
-    { value: 'residence', label: '체류', description: '의심 문구가 든 결과를 읽은 뒤 같은 질문에서 변경을 요청했습니다' },
-    { value: 'egress', label: '유출', description: '변경 도구를 부르려 했습니다. 실행하지 않고 승인을 요청합니다' },
-    { value: 'effect', label: '효과', description: '승인·거절·실행·실패' },
-];
-const LOCUS_OPTIONS: { value: '' | AuditLocus; label: string }[] = [
-    { value: '', label: '전체' },
-    ...LOCI.map(({ value, label }) => ({ value, label })),
-];
-const locusOf = (value?: string) => LOCI.find((locus) => locus.value === value);
-
-// 변경 작업의 사건 → 결과 열에 보일 이름과 모양
-const ACTION_EVENTS: Record<string, { label: string; className: string }> = {
-    requested: { label: '승인 요청', className: 'audit-event-requested' },
-    approved: { label: '승인', className: 'plan-status-active' },
-    denied: { label: '거절', className: 'plan-status-pending' },
-    executed: { label: '실행', className: 'plan-status-complete' },
-    failed: { label: '실패', className: 'audit-status-error' },
-};
-
-// 가린 값의 종류 → 화면에 보일 이름 (services/llm/redaction.py)
-const REDACTED_LABELS: Record<string, string> = {
-    aws_access_key: 'AWS 액세스 키',
-    aws_secret_key: 'AWS 비밀 키',
-    aws_session_token: 'AWS 세션 토큰',
-    anthropic_api_key: 'Anthropic 키',
-    slack_token: 'Slack 토큰',
-    slack_webhook: 'Slack 웹훅',
-    github_token: 'GitHub 토큰',
-    jwt: '로그인 토큰(JWT)',
-    private_key: '개인 키',
-    url_password: '접속 주소 비밀번호',
-    account_id: '계정 ID',
-    email: '이메일',
-};
-
-interface Filters {
-    days: number;
-    scope: 'mine' | 'all';
-    status: '' | AuditStatus;
-    kind: '' | AuditKind;
-    locus: '' | AuditLocus;
-    tool: string;
-}
+const RENDER_STEP = 100; // 목록은 이만큼씩 그린다 (2,000행을 한 번에 그리지 않게). 끝에 닿으면 다음 묶음
 
 // 서버는 날짜를 UTC로 나눠 저장한다. 오늘(UTC)부터 거꾸로 days일
 const rangeOf = (days: number) => {
@@ -115,228 +33,29 @@ const rangeOf = (days: number) => {
     return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
 };
 
-const timeOf = (record: AuditRecord) => record.at.split('#')[0];
-const keyOf = (record: AuditRecord) => `${record.userId}|${record.at}`;
-const secondsOf = (ms?: number) => (typeof ms === 'number' ? `${(ms / 1000).toFixed(1)}초` : '');
-const suspiciousOf = (record: AuditRecord) =>
-    Array.isArray(record.injectionSuspected) ? record.injectionSuspected.length > 0 : !!record.injectionSuspected;
-const redactedTotal = (record: AuditRecord) =>
-    Object.values(record.redacted ?? {}).reduce((sum, count) => sum + count, 0);
+// 목록의 행 버튼 (옆 패널을 닫으면 여기로 포커스를 돌려준다). data-key로 찾는다
+const rowButtonOf = (key: string) =>
+    document.querySelector<HTMLButtonElement>(`.audit-row-button[data-key="${CSS.escape(key)}"]`);
 
-const requesterOf = (record: AuditRecord) => {
-    if (record.email) return record.email;
-    if (record.userId.startsWith('slack:')) return `Slack ${record.userId.slice('slack:'.length)}`;
-    return record.userId;
-};
-
-const summaryOf = (record: AuditRecord) => {
-    if (record.kind === 'request') return record.question ?? '';
-    if (record.kind === 'action') return record.summary ?? '';
-    if (record.kind === 'admin') return adminSummaryOf(record);
-    if (typeof record.input === 'string') return record.input;
-    return summarize(record.input);
-};
-
-const errorText = (error: unknown) => {
-    const response = (error as { response?: { status?: number; data?: { error?: string } } })?.response;
-    if (response?.data?.error) return response.data.error;
-    if (response?.status === 403) return '이 기록을 볼 권한이 없습니다.';
-    return '감사 로그를 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
-};
-
-// 세그먼트 버튼 묶음 (기간·결과·종류·대상)
-function Segment<T extends string | number>({
-    label,
-    options,
-    value,
-    onChange,
-}: {
-    label: string;
-    options: { value: T; label: string }[];
-    value: T;
-    onChange: (value: T) => void;
-}) {
-    return (
-        <div className="audit-filter" role="group" aria-label={label}>
-            <span className="audit-filter-label" aria-hidden="true">
-                {label}
-            </span>
-            <div className="audit-segment">
-                {options.map((option) => (
-                    <button
-                        key={String(option.value)}
-                        type="button"
-                        className={`audit-segment-btn${option.value === value ? ' is-active' : ''}`}
-                        aria-pressed={option.value === value}
-                        onClick={() => onChange(option.value)}
-                    >
-                        {option.label}
-                    </button>
-                ))}
-            </div>
-        </div>
-    );
-}
-
-function Details({ record }: { record: AuditRecord }) {
-    const rows: [string, ReactNode][] = [];
-    const locus = locusOf(record.locus);
-    if (locus)
-        rows.push([
-            '층',
-            <span key="locus">
-                {locus.label} <span className="audit-muted">({locus.description})</span>
-            </span>,
-        ]);
-    if (record.kind === 'tool') {
-        rows.push(['도구 이름', <code key="tool">{record.tool}</code>]);
-        rows.push([
-            '입력',
-            <pre key="input" className="audit-code">
-                {typeof record.input === 'string' ? record.input : JSON.stringify(record.input ?? {}, null, 2)}
-            </pre>,
-        ]);
-        if (record.resultChars !== undefined) rows.push(['결과 크기', `${record.resultChars.toLocaleString()}자`]);
-        if (Array.isArray(record.injectionSuspected) && record.injectionSuspected.length)
-            rows.push(['의심 문구', `지시문처럼 보이는 문구 (${record.injectionSuspected.join(', ')}). 데이터로만 다뤘습니다`]);
-    } else if (record.kind === 'action') {
-        rows.push(['사건', ACTION_EVENTS[record.event ?? '']?.label ?? record.event ?? '']);
-        rows.push(['변경 내용', record.summary ?? '']);
-        rows.push(['도구 이름', <code key="tool">{record.tool}</code>]);
-        rows.push([
-            '실행될 값',
-            <pre key="input" className="audit-code">
-                {typeof record.input === 'string' ? record.input : JSON.stringify(record.input ?? {}, null, 2)}
-            </pre>,
-        ]);
-        if (record.taintedBy?.length)
-            rows.push([
-                '먼저 읽은 의심 결과',
-                <ul key="tainted" className="audit-tainted">
-                    {record.taintedBy.map((seen) => (
-                        <li key={seen.toolUseId}>
-                            {labelOf(seen.tool)} 결과 ·{' '}
-                            {seen.callsAgo <= 1 ? '바로 다음 호출' : `${seen.callsAgo}번째 뒤 호출`}에서 요청 ·{' '}
-                            <span className="audit-muted">{seen.kinds.join(', ')}</span> ·{' '}
-                            <code>{seen.toolUseId}</code>
-                        </li>
-                    ))}
-                </ul>,
-            ]);
-        if (record.decidedBy) rows.push(['결정한 사람', <code key="by">{record.decidedBy}</code>]);
-        if (record.result) rows.push(['실행 결과', record.result]);
-        if (record.awsRequestId)
-            rows.push([
-                'CloudTrail',
-                <span key="trail">
-                    {record.cloudTrailEvent} · 요청 ID <code>{record.awsRequestId}</code>
-                    <span className="audit-muted"> (CloudTrail 이벤트의 requestID와 같습니다)</span>
-                </span>,
-            ]);
-        if (record.actionId) rows.push(['작업 ID', <code key="action">{record.actionId}</code>]);
-    } else if (record.kind === 'admin') {
-        rows.push(['사건', ADMIN_EVENTS[record.event ?? ''] ?? record.event ?? '']);
-        rows.push(['대상', record.targetEmail ?? '']);
-        if (record.targetUser) rows.push(['대상 사용자 이름', <code key="target">{record.targetUser}</code>]);
-        if (record.toRole) rows.push(['권한', `${roleText(record.fromRole)} → ${roleText(record.toRole)}`]);
-        if (record.group) rows.push(['그룹', `${GROUP_NAMES[record.group] ?? record.group} (${record.group})`]);
-        if (record.decidedBy) rows.push(['바꾼 사람', <code key="by">{record.decidedBy}</code>]);
-        if (record.status === 'error')
-            rows.push(['결과', '바꾸지 못했습니다 (바로 앞의 같은 사건 행은 시도를 기록한 것입니다)']);
-    } else {
-        rows.push(['질문', record.question ?? '']);
-        if (record.model) rows.push(['모델', <code key="model">{record.model}</code>]);
-        rows.push(['도구 호출', `${record.toolCount ?? 0}번`]);
-        if (record.injectionSuspected) rows.push(['의심 문구가 든 도구 결과', `${record.injectionSuspected}건`]);
-        const redacted = Object.entries(record.redacted ?? {});
-        rows.push([
-            'Claude로 보내기 전에 가린 값',
-            redacted.length
-                ? redacted.map(([kind, count]) => `${REDACTED_LABELS[kind] ?? kind} ${count}개`).join(', ')
-                : '없음',
-        ]);
-    }
-    if (record.error) rows.push(['오류', <span key="error" className="audit-error-text">{record.error}</span>]);
-    if (record.ms !== undefined) rows.push(['걸린 시간', secondsOf(record.ms)]);
-    rows.push(['요청자 ID', <code key="user">{record.userId}</code>]);
-    if (record.requestId) rows.push(['질문 ID', <code key="request">{record.requestId}</code>]);
-    if (record.sessionId) rows.push(['대화 ID', <code key="session">{record.sessionId}</code>]);
-    if (record.toolUseId) rows.push(['도구 호출 ID', <code key="use">{record.toolUseId}</code>]);
-
-    return (
-        <>
-            <dl className="audit-details">
-                {rows.map(([name, value]) => (
-                    <Fragment key={name}>
-                        <dt>{name}</dt>
-                        <dd>{value}</dd>
-                    </Fragment>
-                ))}
-            </dl>
-            {record.kind === 'action' && record.actionId ? (
-                <TraceSection actionId={record.actionId} day={record.day} />
-            ) : null}
-        </>
-    );
-}
-
-// 변경 작업 행: 누르면 역추적을 연다 (누를 때만 서버에 묻는다)
-function TraceSection({ actionId, day }: { actionId: string; day: string }) {
-    const [open, setOpen] = useState(false);
-    return (
-        <div className="audit-trace-section">
-            <button
-                type="button"
-                className="plan-reload-button"
-                aria-expanded={open}
-                onClick={() => setOpen((prev) => !prev)}
-            >
-                {open ? '역추적 닫기' : '층별로 따져 보기'}
-            </button>
-            {open ? <AuditTrace actionId={actionId} day={day} /> : null}
-        </div>
-    );
-}
-
-// 결과 열: 변경 작업은 사건(승인 요청·승인·거절·실행·실패), 나머지는 성공·실패
-function ResultBadge({ record }: { record: AuditRecord }) {
-    const event = record.kind === 'action' ? ACTION_EVENTS[record.event ?? ''] : undefined;
-    if (event) return <span className={`plan-status-badge ${event.className}`}>{event.label}</span>;
-    const failed = record.status === 'error';
-    return (
-        <span className={`plan-status-badge ${failed ? 'audit-status-error' : 'plan-status-complete'}`}>
-            {failed ? '실패' : '성공'}
-        </span>
-    );
-}
-
-function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boolean; onToggle: () => void }) {
-    const redacted = redactedTotal(record);
+// 목록 한 행. 누르면 옆 패널로 자세히 본다
+function AuditRow({ record, selected, onOpen }: { record: AuditRecord; selected: boolean; onOpen: () => void }) {
     const summary = summaryOf(record);
-    const detailsId = `audit-details-${keyOf(record).replace(/[^a-zA-Z0-9_-]/g, '')}`;
     return (
-        <li className={`plan-table-row audit-row${open ? ' is-open' : ''}`}>
+        <li className={`audit-row${selected ? ' is-selected' : ''}`}>
             <button
                 type="button"
                 className="audit-row-button"
-                aria-expanded={open}
-                aria-controls={detailsId}
-                onClick={onToggle}
+                data-key={keyOf(record)}
+                aria-haspopup="dialog"
+                aria-current={selected ? 'true' : undefined}
+                onClick={onOpen}
             >
                 <span className="audit-col-time">{formatKoreanDateTimeSeconds(timeOf(record))}</span>
                 <span className="audit-col-user" title={record.userId}>
                     {requesterOf(record)}
                 </span>
                 <span className="audit-col-tool" title={record.tool}>
-                    {record.kind === 'request' ? (
-                        <span className="audit-kind-request">질문</span>
-                    ) : record.kind === 'action' ? (
-                        <span className="audit-kind-action">{labelOf(record.tool ?? '').replace(/ 요청$/, '')}</span>
-                    ) : record.kind === 'admin' ? (
-                        <span className="audit-kind-admin">사용자 관리</span>
-                    ) : (
-                        labelOf(record.tool ?? '')
-                    )}
+                    <KindLabel record={record} />
                 </span>
                 <span className="audit-col-summary" title={summary}>
                     {summary || <span className="audit-muted">-</span>}
@@ -346,150 +65,75 @@ function AuditRow({ record, open, onToggle }: { record: AuditRecord; open: boole
                     <span className="audit-ms">{secondsOf(record.ms)}</span>
                 </span>
                 <span className="audit-col-flags">
-                    {record.source === 'slack' ? <span className="audit-flag">Slack</span> : null}
-                    {suspiciousOf(record) ? (
-                        <span className="audit-flag is-suspicious" title="도구 결과에 지시문처럼 보이는 문구가 있었습니다">
-                            의심 문구
-                        </span>
-                    ) : null}
-                    {record.taintedBy?.length ? (
-                        <span
-                            className="audit-flag is-suspicious"
-                            title="의심 문구가 든 도구 결과를 읽은 뒤 같은 질문에서 요청한 변경입니다 (체류)"
-                        >
-                            의심 뒤 요청
-                        </span>
-                    ) : null}
-                    {record.locus === 'interface' ? (
-                        <span className="audit-flag is-suspicious" title="위험도 등록부에 없는 도구입니다 (경계)">
-                            미등록 도구
-                        </span>
-                    ) : null}
-                    {redacted ? (
-                        <span className="audit-flag is-redacted" title="Claude로 보내기 전에 가린 값의 수">
-                            가림 {redacted}
-                        </span>
-                    ) : null}
+                    <Flags record={record} />
                 </span>
             </button>
-            {open ? (
-                <div id={detailsId} className="audit-row-details">
-                    <Details record={record} />
-                </div>
-            ) : null}
         </li>
     );
 }
 
-export function AuditPage() {
-    // 관리자만 여는 화면이므로 처음부터 모든 사용자의 기록을 보인다
-    const [filters, setFilters] = useState<Filters>({
-        days: 7,
-        scope: 'all',
-        status: '',
-        kind: '',
-        locus: '',
-        tool: '',
-    });
-    const [items, setItems] = useState<AuditRecord[]>([]);
-    const [cursor, setCursor] = useState<string | null>(null);
-    const [loading, setLoading] = useState<'list' | 'more' | null>('list');
-    const listLoading = useMinimumVisible(loading === 'list'); // 목록 자리의 기다림 카드 (최소 1초)
-    const [error, setError] = useState<string | null>(null);
-    const [openKey, setOpenKey] = useState<string | null>(null);
-    // 거르기용 도구 목록: 지금까지 받은 기록에 나온 도구 (서버는 정확한 도구 이름으로만 거른다)
-    const [toolNames, setToolNames] = useState<string[]>([]);
-    // 조건을 빠르게 바꾸면 앞 요청의 응답이 늦게 올 수 있다. 마지막 요청의 응답만 쓴다
-    const requestNo = useRef(0);
-
-    const load = useCallback(
-        async (next?: string) => {
-            const no = ++requestNo.current;
-            setLoading(next ? 'more' : 'list');
-            setError(null);
-            try {
-                const page = await fetchAudit({
-                    ...rangeOf(filters.days),
-                    scope: filters.scope,
-                    status: filters.status || undefined,
-                    kind: filters.kind || undefined,
-                    locus: filters.locus || undefined,
-                    tool: filters.tool || undefined,
-                    limit: PAGE_SIZE,
-                    cursor: next,
-                });
-                if (no !== requestNo.current) return;
-                setItems((prev) => (next ? [...prev, ...page.items] : page.items));
-                setCursor(page.cursor);
-                setToolNames((prev) => {
-                    const found = page.items.map((item) => item.tool).filter((name): name is string => !!name);
-                    return [...new Set([...prev, ...found])].sort((a, b) => labelOf(a).localeCompare(labelOf(b)));
-                });
-            } catch (err) {
-                if (no !== requestNo.current) return;
-                setError(errorText(err));
-                if (!next) setItems([]);
-            } finally {
-                if (no === requestNo.current) setLoading(null);
-            }
-        },
-        [filters],
-    );
-
-    // 조건이 바뀌면 처음부터 다시 읽는다
+// 목록 끝에 닿으면 onReach를 부른다 (다음 묶음을 그린다)
+function EndSentinel({ onReach }: { onReach: () => void }) {
+    const ref = useRef<HTMLLIElement>(null);
     useEffect(() => {
-        setOpenKey(null);
-        load();
-    }, [load]);
+        const node = ref.current;
+        if (!node) return;
+        const observer = new IntersectionObserver((entries) => entries[0]?.isIntersecting && onReach(), {
+            root: node.parentElement,
+            rootMargin: '200px',
+        });
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, [onReach]);
+    return <li ref={ref} className="audit-sentinel" aria-hidden="true" />;
+}
 
-    const update = (change: Partial<Filters>) => setFilters((prev) => ({ ...prev, ...change }));
+export function AuditPage() {
+    const [days, setDays] = useState(7);
+    const range = useMemo(() => rangeOf(days), [days]);
+    const { records, loading, received, truncated, error, reload } = useAuditRecords(range);
+    const listLoading = useMinimumVisible(loading); // 흰 박스 가운데의 기다림 카드 (최소 1초)
+
+    const [selection, setSelection] = useState<Selection>({});
+    const [showFacets, setShowFacets] = useState(false); // 좁은 화면: 거르기 목록을 펼쳤는가
+    const [openKey, setOpenKey] = useState<string | null>(null); // 옆 패널로 보고 있는 기록
+    const [limit, setLimit] = useState(RENDER_STEP);
+
+    const filtered = useMemo(() => records.filter((record) => matches(record, selection)), [records, selection]);
+    const conditions = activeCount(selection);
+
+    // 조건이나 기록이 바뀌면 목록을 처음 묶음부터 그린다
+    useEffect(() => setLimit(RENDER_STEP), [filtered]);
+
+    const openIndex = openKey ? filtered.findIndex((record) => keyOf(record) === openKey) : -1;
+    // 보고 있던 기록이 거르기로 목록에서 빠지면 패널을 닫는다
+    useEffect(() => {
+        if (openKey && openIndex < 0) setOpenKey(null);
+    }, [openKey, openIndex]);
+
+    const closePanel = () => {
+        const key = openKey;
+        setOpenKey(null);
+        if (key) rowButtonOf(key)?.focus(); // 보던 기록의 행으로 포커스를 돌려준다 (키보드로 이어서 읽는다)
+    };
+
+    // 옆 패널에서 ↑/↓: 거른 목록의 앞뒤 기록으로 옮기고, 그 행이 목록에서 보이게 스크롤한다
+    const move = (step: -1 | 1) => {
+        const next = filtered[openIndex + step];
+        if (!next) return;
+        const key = keyOf(next);
+        setLimit((prev) => Math.max(prev, openIndex + step + 1 + RENDER_STEP / 2));
+        setOpenKey(key);
+        window.requestAnimationFrame(() => rowButtonOf(key)?.scrollIntoView({ block: 'nearest' }));
+    };
+
+    const showMore = useCallback(() => setLimit((prev) => prev + RENDER_STEP), []);
 
     return (
         <section className="plan-panel audit-panel" aria-label="감사 로그">
             <div className="plan-panel-header">
                 <h1 className="plan-panel-eyebrow">감사 로그</h1>
-                <RefreshButton onClick={() => load()} loading={loading !== null || listLoading} />
-            </div>
-
-            <div className="audit-filters">
-                <Segment
-                    label="기간"
-                    options={PERIODS.map((p) => ({ value: p.days, label: p.label }))}
-                    value={filters.days}
-                    onChange={(days) => update({ days })}
-                />
-                <Segment
-                    label="대상"
-                    options={[
-                        { value: 'all' as const, label: '모든 사용자' },
-                        { value: 'mine' as const, label: '내 기록' },
-                    ]}
-                    value={filters.scope}
-                    onChange={(scope) => update({ scope })}
-                />
-                <Segment label="결과" options={STATUSES} value={filters.status} onChange={(status) => update({ status })} />
-                <Segment label="종류" options={KINDS} value={filters.kind} onChange={(kind) => update({ kind })} />
-                <Segment
-                    label="층"
-                    options={LOCUS_OPTIONS}
-                    value={filters.locus}
-                    onChange={(locus) => update({ locus })}
-                />
-                <label className="audit-filter">
-                    <span className="audit-filter-label">도구</span>
-                    <select
-                        className="audit-select"
-                        value={filters.tool}
-                        onChange={(event) => update({ tool: event.target.value })}
-                    >
-                        <option value="">모든 도구</option>
-                        {toolNames.map((name) => (
-                            <option key={name} value={name}>
-                                {labelOf(name)}
-                            </option>
-                        ))}
-                    </select>
-                </label>
+                <RefreshButton onClick={reload} loading={loading || listLoading} />
             </div>
 
             {error ? (
@@ -498,58 +142,107 @@ export function AuditPage() {
                 </div>
             ) : null}
 
-            <div className="plan-panel-body">
-                <div className="plan-table audit-table">
-                    <div className="plan-table-header audit-table-header" aria-hidden="true">
-                        <span className="audit-col-time">시각</span>
-                        <span className="audit-col-user">요청자</span>
-                        <span className="audit-col-tool">도구</span>
-                        <span className="audit-col-summary">요약</span>
-                        <span className="audit-col-status">결과</span>
-                        <span className="audit-col-flags">표시</span>
+            <div className={`audit-explorer${showFacets ? ' is-facets-open' : ''}`}>
+                <FacetSidebar records={records} selection={selection} onChange={setSelection} />
+
+                <div className="audit-results">
+                    <div className="audit-toolbar">
+                        <div className="audit-segment" role="group" aria-label="기간">
+                            {PERIODS.map((period) => (
+                                <button
+                                    key={period.days}
+                                    type="button"
+                                    className={`audit-segment-btn${period.days === days ? ' is-active' : ''}`}
+                                    aria-pressed={period.days === days}
+                                    onClick={() => setDays(period.days)}
+                                >
+                                    {period.label}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            type="button"
+                            className="audit-facets-button"
+                            aria-expanded={showFacets}
+                            onClick={() => setShowFacets((prev) => !prev)}
+                        >
+                            거르기{conditions ? ` ${conditions}` : ''}
+                        </button>
+                        <p className="audit-count" role="status">
+                            {listLoading ? null : (
+                                <>
+                                    <strong>{filtered.length.toLocaleString()}건</strong>
+                                    {conditions ? <span className="audit-muted"> / {records.length.toLocaleString()}건 중</span> : null}
+                                    {truncated ? (
+                                        <span className="audit-truncated">
+                                            최근 {MAX_RECORDS.toLocaleString()}건까지만 불러왔습니다. 기간을 줄이면 모두 봅니다
+                                        </span>
+                                    ) : null}
+                                </>
+                            )}
+                        </p>
+                        {conditions ? (
+                            <button type="button" className="audit-clear-all" onClick={() => setSelection({})}>
+                                조건 모두 지우기
+                            </button>
+                        ) : null}
                     </div>
 
-                    {/* 불러오는 동안 목록은 비워 두고, 카드는 흰 박스 전체의 가운데에 띄운다 (아래 plan-panel-loading) */}
-                    {listLoading ? null : items.length === 0 ? (
-                        error ? null : (
+                    <div className="plan-table audit-table">
+                        <div className="plan-table-header audit-table-header" aria-hidden="true">
+                            <span className="audit-col-time">시각</span>
+                            <span className="audit-col-user">요청자</span>
+                            <span className="audit-col-tool">도구</span>
+                            <span className="audit-col-summary">요약</span>
+                            <span className="audit-col-status">결과</span>
+                            <span className="audit-col-flags">표시</span>
+                        </div>
+
+                        {/* 불러오는 동안 목록은 비워 두고, 카드는 흰 박스 전체의 가운데에 띄운다 (아래 plan-panel-loading) */}
+                        {listLoading || error ? null : filtered.length === 0 ? (
                             <div className="plan-panel-empty">
-                                <p>이 조건에 맞는 기록이 없습니다. 질문을 보내면 도구 호출마다 기록이 남습니다.</p>
+                                {records.length === 0 ? (
+                                    <p>이 기간에 기록이 없습니다. 질문을 보내면 도구 호출마다 기록이 남습니다.</p>
+                                ) : (
+                                    <p>이 조건에 맞는 기록이 없습니다.</p>
+                                )}
                             </div>
-                        )
-                    ) : (
-                        <ul className="plan-table-body audit-table-body" aria-label="감사 기록">
-                            {items.map((record) => {
-                                const key = keyOf(record);
-                                return (
-                                    <AuditRow
-                                        key={key}
-                                        record={record}
-                                        open={openKey === key}
-                                        onToggle={() => setOpenKey((prev) => (prev === key ? null : key))}
-                                    />
-                                );
-                            })}
-                            {cursor ? (
-                                <li className="audit-more">
-                                    <button
-                                        type="button"
-                                        className="plan-reload-button"
-                                        onClick={() => load(cursor)}
-                                        disabled={loading !== null}
-                                    >
-                                        {loading === 'more' ? '불러오는 중…' : '더 보기'}
-                                    </button>
-                                </li>
-                            ) : null}
-                        </ul>
-                    )}
+                        ) : (
+                            <ul className="audit-table-body" aria-label="감사 기록">
+                                {filtered.slice(0, limit).map((record) => {
+                                    const key = keyOf(record);
+                                    return (
+                                        <AuditRow
+                                            key={key}
+                                            record={record}
+                                            selected={openKey === key}
+                                            onOpen={() => setOpenKey(key)}
+                                        />
+                                    );
+                                })}
+                                {limit < filtered.length ? <EndSentinel onReach={showMore} /> : null}
+                            </ul>
+                        )}
+                    </div>
                 </div>
             </div>
 
             {listLoading ? (
                 <div className="plan-panel-loading">
-                    <LoadingCard text="감사 로그를 불러오는 중…" />
+                    <LoadingCard
+                        text={received ? `감사 로그를 불러오는 중… ${received.toLocaleString()}건` : '감사 로그를 불러오는 중…'}
+                    />
                 </div>
+            ) : null}
+
+            {openKey && openIndex >= 0 ? (
+                <AuditSidePanel
+                    record={filtered[openIndex]}
+                    index={openIndex}
+                    total={filtered.length}
+                    onMove={move}
+                    onClose={closePanel}
+                />
             ) : null}
         </section>
     );
