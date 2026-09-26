@@ -25,7 +25,7 @@
 
 .plan-panel-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
   margin-bottom: 18px;
@@ -75,14 +75,15 @@
   box-shadow: none;
 }
 
+/* 탭의 제목 (감사 로그, 사용자 관리, 대화 제목). 설명 문단 없이 제목만 두므로 읽히는 크기로 */
 .plan-panel-eyebrow {
   margin: 0;
   font-family: var(--font-label);
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  color: #3d7cc9;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  line-height: 1.3;
+  color: #1f2933;
 }
 
 .plan-panel-title {
@@ -92,18 +93,6 @@
   font-weight: 800;
   letter-spacing: -0.015em;
   color: #1f2933;
-}
-
-.plan-panel-subtitle {
-  margin: 8px 0 0;
-  font-family: var(--font-body);
-  font-size: 0.86rem;
-  color: #6b7785;
-}
-
-.plan-panel-subtitle strong {
-  color: #3c4650;
-  font-weight: 700;
 }
 
 .plan-reload-button:disabled {
@@ -843,6 +832,52 @@
 .plan-reload-button:hover {
   border-color: rgba(0, 123, 255, 0.3);
   background: #f1f6fd;
+}
+
+/* 아이콘만 있는 버튼 (새로 고침, components/RefreshButton.tsx) */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: #fff;
+  color: #3c4650;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.icon-button:hover:not(:disabled) {
+  border-color: rgba(0, 123, 255, 0.3);
+  background: #f1f6fd;
+  color: var(--color-primary);
+}
+
+.icon-button:focus-visible {
+  outline: 2px solid rgba(0, 123, 255, 0.32);
+  outline-offset: 2px;
+}
+
+.icon-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.refresh-button.is-loading svg {
+  animation: refresh-spin 0.9s linear infinite;
+}
+
+@keyframes refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .refresh-button.is-loading svg {
+    animation: none;
+  }
 }
 
 .plan-panel-error-inline {
