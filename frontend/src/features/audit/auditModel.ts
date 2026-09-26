@@ -1,7 +1,7 @@
 // 감사 기록을 화면에 보이기 위한 이름표·요약과, 왼쪽 거르기 목록(facet)의 계산.
 // 화면(React)과 떨어진 순수 함수만 둔다. AuditPage·AuditDetails·FacetSidebar·AuditDetailModal이 같이 쓴다.
 import { ROLE_LABELS, type Role } from '@/auth/authClient';
-import type { AuditKind, AuditLocus, AuditRecord } from '@/types/audit';
+import type { AuditKind, AuditLocus, AuditRecord, TokenCounts } from '@/types/audit';
 import { labelOf, summarize } from '@/utils/toolTrace';
 
 // ---------------------------------------------------------------- 이름표
@@ -75,6 +75,28 @@ export const REDACTED_LABELS: Record<string, string> = {
 export const timeOf = (record: AuditRecord) => record.at.split('#')[0];
 export const keyOf = (record: AuditRecord) => `${record.userId}|${record.at}`;
 export const secondsOf = (ms?: number) => (typeof ms === 'number' ? `${(ms / 1000).toFixed(1)}초` : '');
+
+// 토큰 네 종류: 입력 1,000 · 출력 500 · 캐시 쓰기 2,000 · 캐시 읽기 10,000 (0인 캐시는 뺀다)
+export const TOKEN_LABELS: [keyof TokenCounts, string][] = [
+    ['input', '입력'],
+    ['output', '출력'],
+    ['cacheWrite', '캐시 쓰기'],
+    ['cacheRead', '캐시 읽기'],
+];
+export const tokensText = (tokens: TokenCounts) =>
+    TOKEN_LABELS.filter(([kind]) => kind === 'input' || kind === 'output' || tokens[kind])
+        .map(([kind, label]) => `${label} ${(tokens[kind] ?? 0).toLocaleString()}`)
+        .join(' · ');
+export const tokenTotal = (tokens: TokenCounts) => TOKEN_LABELS.reduce((sum, [kind]) => sum + (tokens[kind] ?? 0), 0);
+
+// 예상 비용 (마이크로달러 → USD 글자). 1달러 미만은 센트 아래까지 보이게 소수 넷째 자리까지.
+// 반올림은 정수로 먼저 한다: 0.01695.toFixed(4)는 부동소수점 때문에 0.0169가 된다
+export const usdText = (micro: number) => {
+    if (micro > 0 && micro < 50) return '$0.0001 미만';
+    return micro >= 999_950 // 넷째 자리에서 반올림하면 1달러가 되는 값부터
+        ? `$${(Math.round(micro / 10_000) / 100).toFixed(2)}`
+        : `$${(Math.round(micro / 100) / 10_000).toFixed(4)}`;
+};
 export const suspiciousOf = (record: AuditRecord) =>
     Array.isArray(record.injectionSuspected) ? record.injectionSuspected.length > 0 : !!record.injectionSuspected;
 export const redactedTotal = (record: AuditRecord) =>

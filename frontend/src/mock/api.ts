@@ -652,6 +652,29 @@ const AUDIT_FAILED_ANSWER =
 const auditAnswers = new Map<string, string>();
 const ANSWER_PREVIEW = 200; // 질문 행에 두는 답변 앞부분 (services/llm/audit.py ANSWER_PREVIEW)
 
+// 질문 하나에 쓴 토큰과 예상 비용 (services/llm/llm_cost.py, Sonnet 5 단가). 난수를 쓰지 않고 도구 수·답변 길이로 정한다
+// (예시 기록의 난수 순서를 바꾸지 않게). 모델 호출은 도구마다 한 번 + 마지막 답변 한 번:
+//   첫 호출은 시스템 프롬프트·도구 설명을 캐시에 쓰고, 다음 호출부터는 캐시에서 읽으며 도구 결과만큼 입력이 는다
+const MOCK_PRICE = { input: "2", output: "10", cacheWrite: "2.50", cacheRead: "0.20" };
+const mockUsage = (toolCount: number, answerChars: number) => {
+  const calls = Array.from({ length: toolCount + 1 }, (_, i) => ({
+    input: 180 + i * 640,
+    output: i === toolCount ? 120 + Math.round(answerChars * 1.1) : 95,
+    cacheWrite: i === 0 ? 4200 : 0,
+    cacheRead: i === 0 ? 0 : 4200,
+  }));
+  const tokens = {
+    input: calls.reduce((sum, c) => sum + c.input, 0),
+    output: calls.reduce((sum, c) => sum + c.output, 0),
+    cacheWrite: calls.reduce((sum, c) => sum + c.cacheWrite, 0),
+    cacheRead: calls.reduce((sum, c) => sum + c.cacheRead, 0),
+  };
+  const costMicroUsd = Math.round(
+    tokens.input * 2 + tokens.output * 10 + tokens.cacheWrite * 2.5 + tokens.cacheRead * 0.2,
+  );
+  return { tokens, modelCalls: calls, costMicroUsd, price: MOCK_PRICE };
+};
+
 // 감사 로그의 정렬 키와 같은 모양: 시각(UTC, 밀리초까지) + '#' + 도구 호출 ID 또는 'request#<질문 ID>'
 const auditAt = (time: Date, suffix: string) =>
   `${time.toISOString()}#${suffix}`;
@@ -715,6 +738,7 @@ const auditRecordsOf = (
     request.answerPreview =
       answer.length > ANSWER_PREVIEW ? `${answer.slice(0, ANSWER_PREVIEW - 1)}…` : answer;
     request.answerChars = answer.length;
+    Object.assign(request, mockUsage(tools.length, answer.length));
     auditAnswers.set(request.at.replace("#request#", "#answer#"), answer);
   }
   return [...toolRecords, request];
