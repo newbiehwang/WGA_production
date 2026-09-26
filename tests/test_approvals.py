@@ -6,7 +6,7 @@ LLM Lambda 코드가 실제 MCP 서버 코드(mcp/app.py의 lambda_handler)를 �
 - 위험도: tools/list의 모든 도구에 위험도가 있고, 목록에 없는 도구는 변경 도구로 본다
 - 승인 없이 실행되지 않는다: 모델이 변경 도구를 부르면 미리 보기만 하고 승인 요청을 만든다
 - MCP 재확인: 작업 ID가 없거나, 승인 전이거나, 인자가 다르거나, 만료됐거나, 이미 실행했으면 거절한다
-- 승인 규칙: 어느 환경이든 approvers 그룹만. dev는 그룹이면 본인 요청도, prod는 다른 사람만. 거절은 본인도 된다
+- 승인 규칙: 어느 환경이든 결정자(approvers)와 관리자(admins)만. dev는 그룹이면 본인 요청도, prod는 다른 사람만. 거절은 본인도 된다
 - 감사 로그를 남기지 못하면 승인·실행하지 않는다. Slack 경로는 변경 작업을 요청할 수 없다
 """
 import copy
@@ -353,6 +353,13 @@ def test_approver_can_approve_own_request_in_dev_and_it_runs(env):
     assert env["mcp"].calls[-1][2] == {"wga/actionId": action["actionId"]}
 
 
+def test_admins_can_decide_too(env):
+    # 권한은 세 단계이고 관리자는 결정자의 일도 한다 (admins만 넣은 예전 계정도)
+    action = make_action(env)
+    status, body = decide(env, action["actionId"], "approve", "alice", groups="admins")
+    assert status == 200 and body["status"] == "executed"
+
+
 def test_prod_requires_another_approver(env, monkeypatch):
     monkeypatch.setenv("ENV", "prod")
     action = make_action(env)
@@ -369,7 +376,7 @@ def test_dev_requester_without_the_group_cannot_approve(env):
     # 예전에는 dev에서 로그인만 하면 본인 요청을 승인할 수 있었다 (docs/threat-model.md R2)
     action = make_action(env)
     status, body = decide(env, action["actionId"], "approve", "alice")
-    assert status == 403 and "approvers" in body["error"]
+    assert status == 403 and "결정자" in body["error"]
     assert retention() == 30 and audit_events("alice") == []
     # 거절은 본인이 할 수 있다
     assert decide(env, action["actionId"], "deny", "alice")[0] == 200
@@ -378,7 +385,8 @@ def test_dev_requester_without_the_group_cannot_approve(env):
 def test_dev_non_approver_cannot_approve_someone_elses_request(env):
     action = make_action(env)
     assert decide(env, action["actionId"], "approve", "mallory")[0] == 404
-    assert decide(env, action["actionId"], "approve", "carol", groups="admins")[0] == 403  # 볼 수는 있어도 승인은 못 함
+    # 결정자·관리자가 아닌 그룹은 남의 요청을 볼 수도 없다 (관리자는 결정자의 일도 한다: test_admins_can_decide_too)
+    assert decide(env, action["actionId"], "approve", "carol", groups="readers")[0] == 404
 
 
 def test_deny_does_not_run_and_cannot_be_approved_later(env):

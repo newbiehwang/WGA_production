@@ -1,4 +1,4 @@
-import type { AuthUser } from '@/auth/authClient';
+import { type AuthUser, ROLE_LABELS, roleOf } from '@/auth/authClient';
 
 // AXPI의 프로필 메뉴에서 쓰지 않는 항목(프로필·설정)은 뺐다. 예전 '대시보드' 화면의 사용자 정보가 여기로 왔다
 export function ProfileDropdown({
@@ -21,6 +21,8 @@ export function ProfileDropdown({
                 <div className="summary-meta">
                     <p className="summary-name">{user.displayName}</p>
                     <p className="summary-email">{user.email}</p>
+                    {/* 권한은 로그인한 때의 토큰 기준이다 (바뀌면 다시 로그인한 뒤 보인다) */}
+                    <p className={`summary-role is-${roleOf(user.groups)}`}>{ROLE_LABELS[roleOf(user.groups)]}</p>
                 </div>
             </div>
 

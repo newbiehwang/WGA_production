@@ -1,6 +1,6 @@
 // 사용자 관리 (GET·POST /users, /users/{username}/..., services/llm/user_admin.py). 관리자만 부를 수 있다
 import axios from 'axios';
-import type { ManagedGroup, ManagedUser, UsersPage } from '@/types/users';
+import type { ManagedUser, UserRole, UsersPage } from '@/types/users';
 
 const userPath = (username: string) => `/users/${encodeURIComponent(username)}`;
 
@@ -12,15 +12,15 @@ export async function listUsers(q = '', cursor?: string | null): Promise<UsersPa
     return data;
 }
 
-// 초대: 임시 비밀번호가 든 메일이 간다 (7일). 초대만으로는 어느 그룹에도 들어가지 않는다
+// 초대: 임시 비밀번호가 든 메일이 간다 (7일). 일반 사용자로 시작한다
 export async function inviteUser(email: string): Promise<ManagedUser> {
     const { data } = await axios.post<ManagedUser>('/users', { email });
     return data;
 }
 
-export async function setGroup(username: string, group: ManagedGroup, add: boolean): Promise<ManagedUser> {
-    const url = `${userPath(username)}/groups/${group}`;
-    const { data } = add ? await axios.post<ManagedUser>(url) : await axios.delete<ManagedUser>(url);
+// 권한 바꾸기: 일반 사용자 · 결정자 · 관리자 중 하나 (서버가 Cognito 그룹을 맞춘다)
+export async function setRole(username: string, role: UserRole): Promise<ManagedUser> {
+    const { data } = await axios.put<ManagedUser>(`${userPath(username)}/role`, { role });
     return data;
 }
 

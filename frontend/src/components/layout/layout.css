@@ -412,6 +412,25 @@
   color: #8a94a0;
 }
 
+/* 권한 (일반 사용자 · 결정자 · 관리자) */
+.summary-role {
+  display: inline-flex;
+  margin: 6px 0 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(120, 120, 120, 0.12);
+  color: #5f6670;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.summary-role.is-decider,
+.summary-role.is-admin {
+  background: rgba(0, 123, 255, 0.1);
+  color: #007bff;
+}
+
 .profile-dropdown-divider {
   height: 1px;
   margin: 6px 16px;

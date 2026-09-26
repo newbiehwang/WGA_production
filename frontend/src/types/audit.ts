@@ -3,7 +3,8 @@ import type { TaintedBy } from './actions';
 
 export type AuditKind = 'tool' | 'request' | 'action' | 'admin';
 export type AuditStatus = 'ok' | 'error';
-export type AdminEvent = 'invited' | 'group_added' | 'group_removed' | 'disabled' | 'enabled';
+// group_added·group_removed는 권한 세 단계 전의 기록이다 (지금은 role_changed)
+export type AdminEvent = 'invited' | 'role_changed' | 'group_added' | 'group_removed' | 'disabled' | 'enabled';
 export type AuditScope = 'mine' | 'all' | 'user';
 // 층: 도구 반복 위의 자리 (services/llm/audit.py 모듈 설명). residence는 조회 조건으로만 쓴다 (taintedBy가 있는 승인 요청)
 export type AuditLocus = 'interface' | 'ingress' | 'residence' | 'egress' | 'effect';
@@ -45,7 +46,9 @@ export interface AuditRecord {
     // 사용자 관리의 사건 (kind: 'admin', services/llm/user_admin.py). event: invited·group_added·group_removed·disabled·enabled
     targetUser?: string; // 바꾼 사용자의 Cognito 사용자 이름
     targetEmail?: string;
-    group?: string; // admins, approvers
+    group?: string; // admins, approvers (예전 기록)
+    fromRole?: string; // 권한 변경: 전 (member, decider, admin)
+    toRole?: string; // 권한 변경: 후
 }
 
 export interface AuditPage {

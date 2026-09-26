@@ -39,7 +39,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | 행위자 | 할 수 있는 것 |
 |:--|:--|
 | A1 인증하지 않은 외부인 | API 주소로 요청 보내기 |
-| A2 가입한 사용자 | 웹에서 질문하고 계정 정보를 조회한다. 자기 변경 요청은 거절할 수 있고, `approvers` 그룹이면 승인도 한다 (prod는 남의 요청만) |
+| A2 가입한 사용자 | 웹에서 질문하고 계정 정보를 조회한다. 자기 변경 요청은 거절할 수 있고, 결정자(`approvers`)·관리자(`admins`)면 승인도 한다 (prod는 남의 요청만) |
 | A3 로그·리소스에 글을 남길 수 있는 사람 | 애플리케이션 로그, 알람 설명, 태그에 모델을 노린 지시문 심기 (간접 인젝션) |
 | A4 모델 자체 | 지시를 잘못 이해하거나, 인젝션에 넘어가 엉뚱한 도구·값을 고름 |
 | A5 Slack 워크스페이스 구성원 | Slack 봇에 질문 |
@@ -69,7 +69,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | T11 | 승인한 것과 다른 값이 실행된다 | 저장한 인자의 해시를 LLM·MCP 양쪽에서 같은 방식으로 계산해 비교한다 | `tests/test_approvals.py::test_args_hash_is_the_same_on_both_sides`, `tests/test_approvals.py::test_tampered_request_is_not_run` |
 | T12 | 승인 카드가 사용자를 속인다 (모델이 요약을 꾸밈) | 카드의 요약·전후 값은 모델 글이 아니라 MCP 미리 보기에서 온다. 실행될 인자를 그대로 보여 준다 | `tests/test_approvals.py::test_preview_shows_the_change_without_running_it`, `tests/test_ec2_s3_write_tools.py::test_preview_checks_state_and_action` |
 | T13 | 승인 결과 설명을 위조한다 (화면이 보낸 글을 믿음) | 설명 질문은 서버가 저장된 기록으로 만든다 | `tests/test_approvals.py::test_follow_up_explains_the_stored_result` |
-| T14 | 승인 권한이 없는 사용자가 승인하거나, 한 사람이 요청하고 스스로 승인한다 (A2) | 어느 환경이든 `approvers` 그룹만 승인한다. prod는 그 그룹의 다른 사람만 (직무 분리) | `tests/test_approvals.py::test_dev_requester_without_the_group_cannot_approve`, `tests/test_approvals.py::test_prod_requires_another_approver`, `tests/test_approvals.py::test_dev_non_approver_cannot_approve_someone_elses_request` |
+| T14 | 승인 권한이 없는 사용자가 승인하거나, 한 사람이 요청하고 스스로 승인한다 (A2) | 어느 환경이든 결정자(`approvers`)와 관리자(`admins`, 결정자의 일도 한다)만 승인한다. prod는 다른 결정자만 (직무 분리) | `tests/test_approvals.py::test_dev_requester_without_the_group_cannot_approve`, `tests/test_approvals.py::test_prod_requires_another_approver`, `tests/test_approvals.py::test_dev_non_approver_cannot_approve_someone_elses_request`, `tests/test_approvals.py::test_admins_can_decide_too` |
 | T15 | 오래된 승인·거절된 요청이 나중에 실행된다 | 10분 만료, 거절은 되돌릴 수 없고, 두 번 승인되지 않는다 | `tests/test_approvals.py::test_expired_and_repeated_approvals_are_rejected`, `tests/test_approvals.py::test_deny_does_not_run_and_cannot_be_approved_later` |
 | T16 | 승인 화면이 없는 경로(Slack)로 변경을 요청한다 (A5) | Slack 경로에는 승인 요청 기능을 주지 않는다 | `tests/test_approvals.py::test_slack_path_cannot_request_changes` |
 | T17 | 변경 도구가 이 환경 밖의 리소스를 바꾼다 | 로그 보존·알람 도구는 코드와 IAM 모두 `wga-*`로 한정. S3는 차단을 켜기만 한다. IAM 변경 도구는 붙이지 않았다 | `tests/test_approvals.py::test_tool_rejects_resources_outside_this_environment`, `tests/test_approvals.py::test_only_the_mcp_role_can_change_resources_and_only_wga_ones`, `tests/test_ec2_s3_write_tools.py::test_iam_allows_stop_start_and_only_turning_the_block_on`, `tests/test_iam_server.py::test_mcp_role_has_no_iam_write_permissions` |
@@ -105,17 +105,17 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 |:--|:--|:--|:--|
 | T33 | 감사 기록을 고치거나 지운다 | 쓰기는 `attribute_not_exists`로 덧붙이기만 하고, LLM 역할에는 PutItem·Query만 준다. CloudWatch Logs(365일)에도 같은 기록을 남긴다. 테이블은 PITR | `tests/test_audit.py::test_records_are_append_only`, `tests/test_audit.py::test_llm_role_can_only_append_and_read_audit_records`, `tests/test_audit.py::test_audit_records_are_also_written_to_cloudwatch_logs` |
 | T34 | 도구 호출이 기록되지 않는다 | 도구마다 실제로 받은 값(비밀 값만 가림)으로 기록한다 | `tests/test_audit.py::test_each_tool_call_is_recorded_with_the_value_the_tool_received`, `tests/test_audit.py::test_slack_requests_are_recorded_by_slack_user` |
-| T35 | 승인자가 로그에 심긴 지시에서 나온 변경 요청을 평소 요청처럼 승인한다 (승인 피로) | 같은 질문에서 의심 문구가 든 결과를 읽은 뒤의 변경 요청이면, 그 결과와 거리(몇 번째 뒤 호출)를 승인 요청에 적어 승인 카드·감사 로그에 보인다(체류 신호). 모델이 아직 보지 못한 결과(같은 응답에서 함께 부른 도구)는 세지 않는다. 판단은 바꾸지 않는다 | `tests/test_audit_locus.py::test_change_requested_after_reading_an_injected_log_is_flagged`, `tests/test_audit_locus.py::test_results_from_the_same_response_are_not_counted`, `tests/test_audit_locus.py::test_clean_log_leaves_no_residence_signal` |
+| T35 | 결정자가 로그에 심긴 지시에서 나온 변경 요청을 평소 요청처럼 승인한다 (승인 피로) | 같은 질문에서 의심 문구가 든 결과를 읽은 뒤의 변경 요청이면, 그 결과와 거리(몇 번째 뒤 호출)를 승인 요청에 적어 승인 카드·감사 로그에 보인다(체류 신호). 모델이 아직 보지 못한 결과(같은 응답에서 함께 부른 도구)는 세지 않는다. 판단은 바꾸지 않는다 | `tests/test_audit_locus.py::test_change_requested_after_reading_an_injected_log_is_flagged`, `tests/test_audit_locus.py::test_results_from_the_same_response_are_not_counted`, `tests/test_audit_locus.py::test_clean_log_leaves_no_residence_signal` |
 | T36 | 사고가 났을 때 어디가 뚫렸는지 좁히지 못한다 | 감사 행마다 층(경계·유입·유출·효과)을 적고, 관리자는 층과 체류(의심 뒤 요청)로 거른다. 등록부에 없는 도구 호출은 경계층으로 따로 남는다 | `tests/test_audit_locus.py::test_unregistered_tool_is_recorded_at_the_interface`, `tests/test_audit_locus.py::test_change_requested_after_reading_an_injected_log_is_flagged`, `tests/test_audit_trace.py::test_trace_of_a_change_that_followed_an_injected_log` |
-| T37 | 기록이 서로 어긋나도(승인 없이 실행, 요청 없이 결정) 아무도 모른다 | 관리자가 변경 작업 하나를 역추적하면 요청자·승인자의 기록과 같은 질문의 도구 기록을 모아 층마다 예·아니오로 답하고, 어긋난 층은 실패로 보인다. 앱 밖(CloudTrail)과는 대조할 요청 ID를 준다 | `tests/test_audit_trace.py::test_records_that_do_not_add_up_fail`, `tests/test_audit_trace.py::test_trace_finds_events_across_midnight`, `tests/test_audit_trace.py::test_trace_errors` |
+| T37 | 기록이 서로 어긋나도(승인 없이 실행, 요청 없이 결정) 아무도 모른다 | 관리자가 변경 작업 하나를 역추적하면 요청자·결정자의 기록과 같은 질문의 도구 기록을 모아 층마다 예·아니오로 답하고, 어긋난 층은 실패로 보인다. 앱 밖(CloudTrail)과는 대조할 요청 ID를 준다 | `tests/test_audit_trace.py::test_records_that_do_not_add_up_fail`, `tests/test_audit_trace.py::test_trace_finds_events_across_midnight`, `tests/test_audit_trace.py::test_trace_errors` |
 
 ### 사용자 관리
 
 | # | 위협 | 방어 | 테스트 |
 |:--|:--|:--|:--|
 | T38 | 관리자 권한을 잃은 사람(그룹에서 빠졌거나 정지됨)이 남은 토큰으로 사용자를 바꾼다 | 사용자 관리 API는 토큰의 그룹에 더해 Cognito에 지금 그룹과 정지 여부를 다시 묻는다. 정지하면 갱신 토큰도 무효로 한다 | `tests/test_user_admin.py::test_token_is_not_trusted_alone`, `tests/test_user_admin.py::test_only_admins_can_manage_users` |
-| T39 | 관리자가 실수로 모두를 잠근다 (자기 권한 빼기, 마지막 관리자 정지) | 자기 admins 빼기·자기 정지를 막고, 정지되지 않은 마지막 관리자는 빼거나 정지할 수 없다. 삭제는 기능도 권한도 없다 | `tests/test_user_admin.py::test_admins_cannot_lock_themselves_out`, `tests/test_user_admin.py::test_last_admin_cannot_be_removed_or_disabled` |
-| T40 | 모델을 돌리는 역할이 사용자 권한까지 바꾼다 (LLM Lambda가 뚫렸을 때 피해 확대) | 사용자 관리는 따로 된 Lambda·역할에서 돈다. Cognito 쓰기 권한은 그 역할에만, 이 환경의 User Pool로만 주고, 감사 로그는 추가만 한다. 바꾸기 전에 감사 로그에 남기지 못하면 바꾸지 않는다 | `tests/test_user_admin.py::test_only_the_user_admin_role_can_change_users`, `tests/test_user_admin.py::test_nothing_changes_without_an_audit_record`, `tests/test_user_admin.py::test_add_and_remove_groups_are_audited` |
+| T39 | 관리자가 실수로 모두를 잠근다 (자기 권한 내리기, 마지막 관리자 정지) | 자기 권한 바꾸기·자기 정지를 막고, 정지되지 않은 마지막 관리자는 내리거나 정지할 수 없다. 삭제는 기능도 권한도 없다 | `tests/test_user_admin.py::test_admins_cannot_lock_themselves_out`, `tests/test_user_admin.py::test_last_admin_cannot_be_removed_or_disabled` |
+| T40 | 모델을 돌리는 역할이 사용자 권한까지 바꾼다 (LLM Lambda가 뚫렸을 때 피해 확대) | 사용자 관리는 따로 된 Lambda·역할에서 돈다. Cognito 쓰기 권한은 그 역할에만, 이 환경의 User Pool로만 주고, 감사 로그는 추가만 한다. 바꾸기 전에 감사 로그에 남기지 못하면 바꾸지 않는다 | `tests/test_user_admin.py::test_only_the_user_admin_role_can_change_users`, `tests/test_user_admin.py::test_nothing_changes_without_an_audit_record`, `tests/test_user_admin.py::test_role_changes_are_audited` |
 
 ## 5. 남은 위험
 
@@ -124,7 +124,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | # | 위험 | 심각도 | 지금 상태 | 다음에 할 수 있는 것 |
 |:--|:--|:--|:--|:--|
 | R1 | ~~차트 데이터가 계정 밖의 제3자 서버로 나간다~~ | **해결** | 차트 도구 15개가 데이터를 외부 차트 서버(`antv-studio.alipay.com`)로 보내 이미지를 만들었다. 가명도 원래 값으로 되돌려 보냈다. 이제 Lambda 안에서 그리고, 결과물 도구에는 가명 그대로 넘긴다 (T30) | - |
-| R2 | 누구나 가입해 계정 정보를 조회할 수 있다 | 중간 (공개 배포 시) | 자체 가입은 연다 (가입해 바로 쓸 수 있게). 가입한 사람은 IAM 정책·버킷 목록·비용을 조회할 수 있다. 변경은 막았다: 예전에는 dev·test에서 그룹 없이 자기 요청(EC2 중지 포함)을 승인할 수 있었지만, 이제 어느 환경이든 `approvers` 그룹만 승인한다 (T14). 관리자는 사용자 관리 탭에서 원치 않는 가입자를 정지할 수 있다 (T38~T40) | 권한 없는 사용자가 '관리자에게 요청'하면 AI가 요청을 정리해 승인자에게 보내고, 승인자가 확인해 승인하면 실행하는 흐름(계획). 조회 범위는 R8(그룹별 도구 제한)로 좁힌다 |
+| R2 | 누구나 가입해 계정 정보를 조회할 수 있다 | 중간 (공개 배포 시) | 자체 가입은 연다 (가입해 바로 쓸 수 있게). 가입한 사람은 IAM 정책·버킷 목록·비용을 조회할 수 있다. 변경은 막았다: 예전에는 dev·test에서 그룹 없이 자기 요청(EC2 중지 포함)을 승인할 수 있었지만, 이제 어느 환경이든 `approvers` 그룹만 승인한다 (T14). 관리자는 사용자 관리 탭에서 원치 않는 가입자를 정지할 수 있다 (T38~T40) | 권한 없는 사용자가 '관리자에게 요청'하면 AI가 요청을 정리해 결정자에게 보내고, 결정자가 확인해 승인하면 실행하는 흐름(계획). 조회 범위는 R8(그룹별 도구 제한)로 좁힌다 |
 | R3 | EC2 중지·시작은 IAM이 대상을 좁히지 않는다 | 중간 | PR #58에서 태그 조건(ABAC)을 없앴다. 이 리전의 모든 인스턴스가 대상이고, 사람의 승인과 MCP 재확인만으로 통제한다 | 필요해지면 태그 조건 또는 인스턴스 ID 허용 목록을 IAM에 다시 두기 |
 | R4 | 공식 MCP 서버가 MCP 역할의 권한으로 같은 프로세스에서 돈다 | 중간 | 승인 재확인은 우리 코드에 있다. 패키지가 오염되면 우리 코드를 거치지 않고 MCP 역할로 AWS를 부를 수 있다. 버전은 고정했지만 해시 고정은 아니다 | 해시 고정(`--require-hashes`), 변경 권한을 가진 도구만 다른 Lambda·역할로 분리 |
 | R5 | 인젝션 탐지는 패턴이다 | 중간 | 다른 말로 바꾸면 빠져나간다. 변경은 승인으로 막고 계정 밖으로 나가는 통로는 Claude API뿐이지만, 답변을 왜곡해 사용자를 속이는 것(무결성)은 막지 못한다 | 답변에 근거 도구 결과 표시 |
@@ -133,7 +133,7 @@ WGA는 사용자가 자연어로 AWS 계정을 조회하고 일부를 바꾸는 
 | R8 | 조회 권한이 사용자별로 나뉘지 않는다 | 낮음 | 모든 사용자가 같은 MCP 역할로 조회한다. 감사 기록은 `admins` 그룹만 조회한다 | Cognito 그룹별로 쓸 수 있는 도구 제한 |
 | R9 | 계정 관리자는 감사 기록을 지울 수 있다 | 낮음 | LLM 역할은 덧붙이기만 하지만 계정 관리자 권한은 이 앱 밖의 일이다 | 로그를 다른 계정·S3 Object Lock으로 복제 |
 | R10 | 체류 신호는 질문 하나 안에서만 센다 | 낮음 | 대화 기록에는 도구 결과가 아니라 글만 남는다. 앞 질문에서 읽은 의심 결과를 모델이 답변에 옮겼고, 다음 질문에서 그 답변을 보고 변경을 요청하면 신호가 없다 (승인은 여전히 필요하다) | 대화 단위로 의심 결과를 서버에 남겨 다음 질문의 변경 요청에도 적기 |
-| R11 | 관리자 토큰을 빼앗기면 승인자를 늘릴 수 있다 | 중간 | 관리자는 사용자 관리 탭에서 누구든 approvers에 넣을 수 있다. 바꾼 내용은 감사 로그에 남고 prod의 승인은 요청자 본인이 할 수 없지만, 관리자 계정 하나로 승인자를 만들고 그 사람으로 승인할 수 있다 | 관리자 MFA 필수, 그룹 변경에도 다른 관리자의 승인(두 사람 규칙) |
+| R11 | 관리자 토큰을 빼앗기면 결정자를 늘릴 수 있다 | 중간 | 관리자는 사용자 관리 탭에서 누구든 결정자로 만들 수 있다. 바꾼 내용은 감사 로그에 남고 prod의 승인은 요청자 본인이 할 수 없지만, 관리자 계정 하나로 결정자를 만들고 그 사람으로 승인할 수 있다 | 관리자 MFA 필수, 그룹 변경에도 다른 관리자의 승인(두 사람 규칙) |
 | R12 | 정지해도 이미 받은 토큰은 최대 1시간 쓸 수 있다 | 낮음 | 정지하면 갱신 토큰은 바로 무효가 되지만, API Gateway의 Cognito 권한 부여자는 ID 토큰의 서명과 만료만 본다. 사용자 관리 API만 Cognito에 다시 묻는다 | ID 토큰 유효 시간 줄이기, 변경 작업 승인에도 Cognito 재확인 |
 
 ## 6. 설계 판단

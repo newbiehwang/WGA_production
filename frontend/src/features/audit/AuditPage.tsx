@@ -7,6 +7,7 @@
 //   아래: 더 보기 (cursor로 이어 읽는다)
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { fetchAudit } from '@/api/audit';
+import { ROLE_LABELS, type Role } from '@/auth/authClient';
 import { RefreshButton } from '@/components/RefreshButton';
 import type { AuditKind, AuditLocus, AuditRecord, AuditStatus } from '@/types/audit';
 import { formatKoreanDateTimeSeconds } from '@/utils/formatters';
@@ -39,15 +40,21 @@ const KINDS: { value: '' | AuditKind; label: string }[] = [
 // 사용자 관리의 사건 (services/llm/user_admin.py)
 const ADMIN_EVENTS: Record<string, string> = {
     invited: '초대',
+    role_changed: '권한 변경',
     group_added: '그룹 추가',
     group_removed: '그룹 제외',
     disabled: '정지',
     enabled: '정지 해제',
 };
-const GROUP_NAMES: Record<string, string> = { admins: '관리자', approvers: '승인자' };
+const GROUP_NAMES: Record<string, string> = { admins: '관리자', approvers: '결정자' };
+const roleText = (role?: string) => (role ? ROLE_LABELS[role as Role] ?? role : '');
 const adminSummaryOf = (record: AuditRecord) =>
-    [record.targetEmail ?? record.targetUser, ADMIN_EVENTS[record.event ?? ''] ?? record.event,
-        record.group ? GROUP_NAMES[record.group] ?? record.group : null]
+    [
+        record.targetEmail ?? record.targetUser,
+        ADMIN_EVENTS[record.event ?? ''] ?? record.event,
+        record.toRole ? `${roleText(record.fromRole)} → ${roleText(record.toRole)}` : null,
+        record.group ? GROUP_NAMES[record.group] ?? record.group : null,
+    ]
         .filter(Boolean)
         .join(' · ');
 
@@ -230,6 +237,7 @@ function Details({ record }: { record: AuditRecord }) {
         rows.push(['사건', ADMIN_EVENTS[record.event ?? ''] ?? record.event ?? '']);
         rows.push(['대상', record.targetEmail ?? '']);
         if (record.targetUser) rows.push(['대상 사용자 이름', <code key="target">{record.targetUser}</code>]);
+        if (record.toRole) rows.push(['권한', `${roleText(record.fromRole)} → ${roleText(record.toRole)}`]);
         if (record.group) rows.push(['그룹', `${GROUP_NAMES[record.group] ?? record.group} (${record.group})`]);
         if (record.decidedBy) rows.push(['바꾼 사람', <code key="by">{record.decidedBy}</code>]);
         if (record.status === 'error')
